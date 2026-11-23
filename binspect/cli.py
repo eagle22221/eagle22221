@@ -211,8 +211,25 @@ def _render_hexdump(d: dict, st: Style) -> List[str]:
             f"{r['hex']:<47}  |{r['ascii']}|" for r in d["rows"]]
 
 
+_CONFIDENCE_COLOUR = {"high": "red", "medium": "yellow"}
+
+
+def _render_techniques(rows: List[dict], st: Style) -> List[str]:
+    if not rows:
+        return [st("No notable protection or evasion techniques found.", "green")]
+    out = [st("binspect identifies these techniques; it does not defeat them.", "dim")]
+    for r in rows:
+        out += ["", st(f"{r['title']}  [{r['confidence']}]",
+                       "bold", _CONFIDENCE_COLOUR.get(r["confidence"], "cyan"))]
+        out += [f"  - {e}" for e in r["evidence"]]
+        out.append(st("  " + r["explanation"], "dim"))
+    return out
+
+
 def _render_report(d: dict, st: Style) -> List[str]:
     out = _render_info(d["info"], st)
+    if d.get("techniques"):
+        out += _heading("Techniques", st) + _render_techniques(d["techniques"], st)
     out += _heading("Sections", st) + _render_sections(d["sections"], st)
     out += _heading("Imports", st) + _render_imports(d["imports"], st)
     if d["exports"]:
@@ -255,6 +272,10 @@ def _cmd_exports(args, st):
 
 def _cmd_symbols(args, st):
     return views.symbols(load(args.file), args.grep), _render_symbols
+
+
+def _cmd_techniques(args, st):
+    return views.techniques(load(args.file)), _render_techniques
 
 
 def _cmd_strings(args, st):
@@ -556,6 +577,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="0x address or name (default: entry point)")
     sp.add_argument("--offset", type=_int, metavar="N", help="file offset instead of address")
     sp.add_argument("-n", "--length", type=_int, default=256, metavar="BYTES")
+    add("techniques", _cmd_techniques,
+        "protection and evasion techniques: packing, anti-debug, anti-VM, "
+        "injection, hooking, drivers")
     add("report", _cmd_report, "everything at a glance")
     _add_modding(sub)
     return p

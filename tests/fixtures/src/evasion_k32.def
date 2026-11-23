@@ -1,0 +1,11 @@
+LIBRARY KERNEL32.dll
+EXPORTS
+IsDebuggerPresent
+CheckRemoteDebuggerPresent
+OutputDebugStringA
+GetTickCount
+VirtualAllocEx
+WriteProcessMemory
+CreateRemoteThread
+GetModuleHandleA
+ExitProcess

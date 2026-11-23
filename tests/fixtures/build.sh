@@ -68,3 +68,16 @@ lld-link /nologo /entry:entry /subsystem:console /nodefaultlib \
     "$TMP/netprobe.obj" "$TMP/kernel32_x64.lib" "$TMP/ws2_32.lib" "$TMP/user32.lib"
 
 ls -l "$OUT"
+
+# --- Technique-detection fixtures (anti-debug, injection, hooking, anti-VM) ----
+python3 "$SRC/make_evasion_section.py" 2>/dev/null || true
+llvm-dlltool -m i386:x86-64 -d "$SRC/evasion_k32.def"    -l "$TMP/ev_k32.lib"
+llvm-dlltool -m i386:x86-64 -d "$SRC/evasion_ntdll.def"  -l "$TMP/ev_ntdll.lib"
+llvm-dlltool -m i386:x86-64 -d "$SRC/evasion_user32.def" -l "$TMP/ev_user32.lib"
+clang --target=x86_64-pc-windows-msvc -O1 -ffreestanding -fno-stack-protector \
+    -c "$SRC/evasion.c" -o "$TMP/evasion.obj" -I "$SRC"
+lld-link /nologo /entry:entry /subsystem:console /nodefaultlib /timestamp:1700000000 \
+    /section:UPX1,ER /out:"$OUT/evasion_pe64.exe" \
+    "$TMP/evasion.obj" "$TMP/ev_k32.lib" "$TMP/ev_ntdll.lib" "$TMP/ev_user32.lib"
+gcc -O1 -no-pie -fno-stack-protector -o "$TMP/evasion_elf64" "$SRC/evasion_linux.c"
+strip -o "$OUT/evasion_elf64" "$TMP/evasion_elf64"

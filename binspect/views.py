@@ -236,6 +236,14 @@ def layout(b: Binary) -> dict:
     return {"size": b.size, "regions": regions}
 
 
+def techniques(b: Binary) -> List[dict]:
+    """Protection and evasion techniques the binary uses (identified, not defeated)."""
+    from . import techniques as techniques_mod
+    return [{"category": t.category, "title": t.title, "confidence": t.confidence,
+             "evidence": t.evidence, "explanation": t.explanation}
+            for t in techniques_mod.analyze(b)]
+
+
 def report(b: Binary, a: Optional[Analysis]) -> Dict[str, object]:
     return {
         "info": info(b),
@@ -244,6 +252,7 @@ def report(b: Binary, a: Optional[Analysis]) -> Dict[str, object]:
         "exports": exports(b),
         "strings": strings(b, tagged=True),
         "functions": functions(a) if a is not None else None,
+        "techniques": techniques(b),
     }
 
 

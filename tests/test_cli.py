@@ -234,3 +234,24 @@ def test_session_link_carries_the_token_in_the_fragment():
     finally:
         httpd.server_close()
         ws.close()
+
+
+def test_techniques_json_lists_categories_with_evidence(capsys):
+    rows = run_json(capsys, "techniques", str(fixture_path("evasion_pe64.exe")))
+    cats = {r["category"]: r for r in rows}
+    assert set(cats) == {"packing", "anti-debug", "anti-vm", "injection", "hooking"}
+    assert cats["injection"]["confidence"] == "high"
+    assert "imports VirtualAllocEx" in cats["injection"]["evidence"]
+    assert cats["packing"]["title"] and cats["packing"]["explanation"]
+
+
+def test_techniques_text_is_quiet_for_an_ordinary_program(capsys):
+    code, out, _ = run(capsys, "techniques", ELF)
+    assert code == 0 and "No notable" in out
+
+
+def test_report_includes_techniques_when_present(capsys):
+    code, out, _ = run(capsys, "report", str(fixture_path("evasion_pe64.exe")))
+    assert code == 0 and "Techniques" in out and "Anti-debugging" in out
+    data = run_json(capsys, "report", str(fixture_path("evasion_pe64.exe")))
+    assert any(t["category"] == "injection" for t in data["techniques"])
