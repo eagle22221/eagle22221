@@ -115,6 +115,10 @@ Rules the modding features follow:
 - **No circumvention.** Encrypted packs and protected content are detected and reported, not
   decrypted. There is nothing here for removing DRM, licence checks or anti-cheat.
 - **Signed programs.** Changing a signed Windows program invalidates its signature.
+- **Pack format limits.** Godot packs from Godot 4.5 and later (pack format 3) can be read and
+  extracted but not rebuilt. Godot pack support was written from the engine's source and has not
+  been tried against a running game; ZIP, PAK, WAD, ASAR and RPA were checked against other tools.
+  Engine detection has not been tried on commercial games.
 - For formats binspect does not rebuild (Unity bundles, Unreal `.pak`, .NET and IL2CPP code),
   `binspect engine` names the community tool that does.
 
