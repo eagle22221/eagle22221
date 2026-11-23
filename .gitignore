@@ -7,3 +7,4 @@ dist/
 .venv/
 c/build/
 c/third_party/
+dist/

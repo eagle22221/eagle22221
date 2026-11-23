@@ -93,7 +93,11 @@ Good to know
   "Run anyway" if you trust where you got it.
 - practice\sample.dll and practice\libsample.so (a Linux library) are there
   to try "exports" on.
-- The graphical version with the browser interface, game asset packs and
-  the illustrated PDF guide is the Python edition of binspect.
+- This binspect.exe does the analysis and patching commands above, all built
+  into one native file. The Python edition of binspect adds more: a browser
+  interface, opening and repacking game asset packs, editing icons and other
+  resources inside Windows programs, a "techniques" scan that flags anti-debug,
+  anti-VM, injection, hooking and packing in a program (useful for looking at
+  cheats and anti-cheat), and an illustrated PDF guide.
 - The disassembler inside binspect is Capstone (BSD licence); its licence
   text is in the licences folder.

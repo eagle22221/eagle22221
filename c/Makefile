@@ -25,7 +25,7 @@ CORE      = util hash model elf pe strings json views render platform patch cli 
 HEADERS   = $(wildcard src/*.h)
 
 # --- Capstone (third-party) -----------------------------------------------------
-CS_VERSION = 5.0.7
+CS_VERSION = 5.0.9
 CS_DIR     = third_party/capstone-$(CS_VERSION)/src
 CAPSTONE  ?= $(if $(wildcard $(CS_DIR)/cs.c),1,0)
 # Only the CPUs binspect can analyse; AT&T syntax is never used.
@@ -36,7 +36,7 @@ CS_INCLUDE = -I$(CS_DIR)/include -I$(CS_DIR)
 # Third-party code: built with its own (quiet) flags, not with -Werror.
 CS_CFLAGS  = -O2 -std=gnu99 -w $(CS_DEFINES) $(CS_INCLUDE)
 CS_SOURCES = $(wildcard $(CS_DIR)/*.c) $(foreach arch,$(CS_ARCHS),$(wildcard $(CS_DIR)/arch/$(arch)/*.c))
-cs_objects = $(patsubst $(CS_DIR)/%.c,$(BUILD)/$(1)/capstone/%.o,$(CS_SOURCES))
+cs_objects = $(patsubst $(CS_DIR)/%.c,$(BUILD)/$(1)/capstone-$(CS_VERSION)/%.o,$(CS_SOURCES))
 
 ifeq ($(CAPSTONE),1)
 SOURCES     = $(CORE) disasm analysis
@@ -79,15 +79,15 @@ $(BUILD)/windows/%.o: src/%.c $(HEADERS)
 # Capstone objects and one static library per target. The sanitizer build
 # checks Capstone's memory accesses too (AddressSanitizer only: undefined-
 # behaviour reports from third-party code are not ours to fix).
-$(BUILD)/native/capstone/%.o: $(CS_DIR)/%.c
+$(BUILD)/native/capstone-$(CS_VERSION)/%.o: $(CS_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CS_CFLAGS) -c -o $@ $<
 
-$(BUILD)/asan/capstone/%.o: $(CS_DIR)/%.c
+$(BUILD)/asan/capstone-$(CS_VERSION)/%.o: $(CS_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CS_CFLAGS) -O1 -g -fsanitize=address -fno-omit-frame-pointer -c -o $@ $<
 
-$(BUILD)/windows/capstone/%.o: $(CS_DIR)/%.c
+$(BUILD)/windows/capstone-$(CS_VERSION)/%.o: $(CS_DIR)/%.c
 	@mkdir -p $(@D)
 	$(MINGW) $(CS_CFLAGS) -c -o $@ $<
 

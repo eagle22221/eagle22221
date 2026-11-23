@@ -4,8 +4,8 @@
 #define _WIN32_WINNT 0x0600
 #endif
 #else
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200809L
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700       /* POSIX.1-2008 with realpath() and mkstemp() */
 #endif
 #endif
 
@@ -124,6 +124,11 @@ void platform_pause_if_own_console(void) {
      * window was created for it and closes when it exits. A program run
      * from cmd.exe or PowerShell shares the console with that shell. */
     if (GetConsoleProcessList(processes, 2) != 1)
+        return;
+    /* Only when a person is looking at that window: not when another
+     * program started us with redirected input or output. */
+    DWORD mode;
+    if (!platform_stdout_is_terminal() || !GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode))
         return;
     fflush(stdout);
     fputs("\nPress Enter to close this window...", stderr);
