@@ -562,6 +562,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        try:        # never die on a character the Windows console cannot show
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = build_parser()
     args = parser.parse_args(argv)
     st = Style(_use_colour(args.color) and not args.json)
