@@ -704,8 +704,9 @@ def _electron(tree: _Tree) -> _Case:
             "files under resources/app/ and can be edited directly.")
     else:
         case.advice.append(
-            "No resources/app.asar was found next to this executable; if it exists "
-            "elsewhere, binspect.archives.open_archive can list, extract and repack it.")
+            "No resources/app.asar was found next to this executable; if the app keeps "
+            "one elsewhere, binspect can browse, extract and repack it (Assets view, or "
+            "`binspect assets list PACK`).")
     return case
 
 
@@ -926,7 +927,7 @@ def _java(tree: _Tree) -> _Case:
     else:
         case.advice.append(
             "The executable looks like a Java launcher but no JAR was found next to "
-            "it; JAR files are ZIP archives that binspect can list, extract and repack.")
+            "it; JAR files are ZIP archives that binspect can browse, extract and repack.")
     return case
 
 

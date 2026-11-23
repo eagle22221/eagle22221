@@ -7,7 +7,7 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
 
 (async () => {
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1120, height: 740 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ viewport: { width: 1120, height: 640 }, deviceScaleFactor: 2 });
   await page.emulateMedia({ colorScheme: 'light' });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -44,6 +44,7 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
   await page.screenshot({ path: out('imports') });
 
   if (game) {
+    await page.setViewportSize({ width: 1120, height: 700 });
     await page.goto(`${base}/#token=${token}&open=${encodeURIComponent(game)}`);
     await page.reload();
     await page.waitForSelector('.view-head');
@@ -56,6 +57,7 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
       const heading = Array.from(document.querySelectorAll('h2')).find((h) => h.textContent.startsWith('Asset packs here'));
       if (heading) heading.scrollIntoView({ block: 'start' });
     });
+    await page.mouse.move(4, 4);
     await page.waitForTimeout(300);
     await page.screenshot({ path: out('assets') });
   }

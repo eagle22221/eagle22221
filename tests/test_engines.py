@@ -201,7 +201,7 @@ def test_godot_pack_next_to_the_executable(tmp_path):
     assert match.asset_files == ["platformer.pck"]
     assert any("platformer.pck" in e for e in match.evidence)
     text = advice_text(match)
-    assert "binspect can list, extract and repack" in text
+    assert "binspect can browse, extract and repack" in text
     assert "gdsdecomp" in text
 
 
@@ -230,7 +230,7 @@ def test_godot_encrypted_pack_is_reported_not_decrypted(tmp_path):
     assert match.details["encrypted"] == "yes"
     text = advice_text(match)
     assert "encrypted" in text and "does not decrypt" in text
-    assert "binspect can list" not in text
+    assert "binspect can browse" not in text
 
 
 # --- GameMaker ---------------------------------------------------------------------
@@ -273,7 +273,7 @@ def test_renpy_game(tmp_path):
     assert match.details["version"] == "8.1.3.23091805"
     assert match.asset_files == ["game/archive.rpa"]
     text = advice_text(match)
-    assert "binspect can list, extract and repack" in text and "RPA" in text
+    assert "binspect can browse, extract and repack" in text and "RPA" in text
     assert "unrpyc" in text
 
 
@@ -346,7 +346,7 @@ def test_electron_app(tmp_path):
     assert match.asset_files == ["resources/app.asar"]
     assert "resources/app.asar" in " ".join(match.evidence)
     text = advice_text(match)
-    assert "binspect can list, extract and repack" in text
+    assert "binspect can browse, extract and repack" in text
     assert "integrity" in text
 
 
@@ -368,7 +368,7 @@ def test_love_game_fused_to_its_executable(tmp_path):
     assert match.asset_files == ["game.exe"]
     assert any("main.lua" in e for e in match.evidence)
     text = advice_text(match)
-    assert "binspect can list, extract and repack" in text
+    assert "binspect can browse, extract and repack" in text
 
 
 def test_love_file_next_to_the_runtime(tmp_path):
@@ -405,7 +405,7 @@ def test_goldsrc_game_distinguishes_quake_paks_from_texture_wads(tmp_path):
     assert (match.engine, match.confidence) == ("GoldSrc", "high")
     assert match.asset_files == ["valve/halflife.wad", "valve/pak0.pak"]
     text = advice_text(match)
-    assert "binspect can list, extract and repack" in text and "PAK" in text
+    assert "binspect can browse, extract and repack" in text and "PAK" in text
     assert "WAD3" in text and "cannot open" in text
 
 
@@ -419,7 +419,7 @@ def test_quake_directory(tmp_path):
     assert (match.engine, match.confidence) == ("id Tech", "high")
     assert match.asset_files == ["id1/pak0.pak", "id1/pak1.pak"]
     text = advice_text(match)
-    assert "binspect can list, extract and repack" in text
+    assert "binspect can browse, extract and repack" in text
 
 
 def test_doom_iwad(tmp_path):
@@ -452,7 +452,7 @@ def test_java_game_with_a_jar_and_a_bundled_runtime(tmp_path):
     assert match.details == {"main_class": "com.example.Game"}
     assert match.asset_files == ["game.jar"]
     text = advice_text(match)
-    assert "binspect can list, extract and repack" in text and "JAR" in text
+    assert "binspect can browse, extract and repack" in text and "JAR" in text
     assert "decompile" in text
 
 

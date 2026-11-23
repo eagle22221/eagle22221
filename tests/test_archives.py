@@ -601,6 +601,19 @@ def test_is_archive_never_raises(tmp_path):
     assert archives.is_archive(None) is False
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_named_pipes_and_directories_are_refused_without_blocking(tmp_path):
+    pipe = tmp_path / "game.pck"
+    os.mkfifo(pipe)                                 # open() would wait for a writer
+    assert archives.is_archive(pipe) is False
+    with pytest.raises(UnknownFormatError):
+        archives.open_archive(pipe)
+    with pytest.raises(UnknownFormatError):
+        archives.open_archive(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        archives.open_archive(tmp_path / "missing.pck")
+
+
 def test_detect_format_names_the_container(tmp_path):
     assert archives.detect_format(write(tmp_path, "a.pak", build_pak())) == "quake-pak"
     assert archives.detect_format(write(tmp_path, "a.wad", build_wad(b"IWAD"))) == "doom-wad"
@@ -911,6 +924,51 @@ def test_embedded_pck_repack_rewrites_executable_pack_and_footer(
     assert b.read("icon.png") == new_icon
     assert b.read("z.txt") == b"zz"
     assert "embedded in executable at offset 0x%x" % len(exe) in b.notes
+
+
+def build_pck3(stub: bytes = b"") -> bytes:
+    """Pack format 3 (Godot 4.5+), laid out from the 4.5 reader: the header
+    gains a u64 directory offset, the directory follows the file data, the
+    file base and directory offset always count from the pack start, and
+    paths are stored without "res://".
+         0  'GDPC', u32 3, u32 4, 5, 0        20  u32 pack flags = 2
+        24  u64 file base = 112                32  u64 directory offset = 144
+        40  16 reserved u32                   104  padding to 112
+       112  icon.png (9 bytes, padded to 16)  128  data/level.txt (10, padded)
+       144  u32 file count, then entries as in format 2"""
+    out = bytearray(b"GDPC" + struct.pack("<IIII", 3, 4, 5, 0))
+    out += struct.pack("<IQQ", 2, 112, 144) + bytes(64) + bytes(8)
+    out += PCK_ICON + bytes(7) + PCK_LEVEL + bytes(6)
+    assert len(out) == 144
+    out += struct.pack("<I", 2)
+    for path, ofs, data in ((b"icon.png", 0, PCK_ICON), (b"data/level.txt\0\0", 16, PCK_LEVEL)):
+        out += struct.pack("<I", len(path)) + path + struct.pack("<QQ", ofs, len(data))
+        out += hashlib.md5(data).digest() + struct.pack("<I", 0)
+    return stub + bytes(out)
+
+
+def test_pck_format_3_is_listed_and_read_but_not_repacked(tmp_path):
+    a = archives.open_archive(write(tmp_path, "game.pck", build_pck3()))
+    assert a.entries == [
+        ArchiveEntry("icon.png", 9, 112, False, False),
+        ArchiveEntry("data/level.txt", 10, 128, False, False),
+    ]
+    assert a.read("icon.png") == PCK_ICON
+    assert a.read("data/level.txt") == PCK_LEVEL
+    assert any("4.5.0" in note for note in a.notes)
+    assert a.writable is False
+    with pytest.raises(UnsupportedError):
+        a.repack(tmp_path / "new.pck", replacements={"icon.png": b"x"})
+    assert not (tmp_path / "new.pck").exists()
+
+
+def test_pck_format_3_embedded_counts_everything_from_the_pack_start(tmp_path):
+    pck = build_pck3()
+    data = fixture_bytes("hello_pe64.exe") + pck + struct.pack("<Q", len(pck)) + b"GDPC"
+    a = archives.open_archive(write(tmp_path, "game.exe", data))
+    assert [(e.name, e.offset) for e in a.entries] == [
+        ("icon.png", 3072 + 112), ("data/level.txt", 3072 + 128)]
+    assert a.read("data/level.txt") == PCK_LEVEL
 
 
 def test_pck_with_encrypted_directory_is_reported_not_decrypted(tmp_path):
@@ -1711,6 +1769,18 @@ def test_extract_does_not_write_through_a_symlinked_directory(tmp_path):
     assert list(outside.iterdir()) == []
 
 
+def test_extract_does_not_create_directories_through_a_symlink(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    os.symlink(outside, dest / "link")
+    path = write(tmp_path, "a.rpa", build_rpa_named(["link/sub/deeper/pwned.txt"]))
+    with pytest.raises(archives.UnsafeEntryError):
+        archives.open_archive(path).extract(dest)
+    assert list(outside.iterdir()) == []            # not even an empty directory
+
+
 def test_extract_does_not_write_through_a_symlinked_file(tmp_path):
     victim = tmp_path / "victim.txt"
     victim.write_bytes(b"precious")
@@ -1776,6 +1846,7 @@ def fuzz_samples(tmp_path):
         "wad": build_wad(),
         "pck1": build_pck(fmt=1, engine=(3, 5, 2)),
         "pck2": build_pck(fmt=2),
+        "pck3": build_pck3(),
         "asar": build_asar(),
         "rpa3": build_rpa3(),
         "rpa3-py2": build_rpa3(zlib.compress(RPA_PY2_INDEX)),
@@ -1785,8 +1856,8 @@ def fuzz_samples(tmp_path):
 
 
 @pytest.mark.filterwarnings("ignore:Overlapped entries")
-@pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "asar", "rpa3", "rpa3-py2",
-                                  "rpa2", "zip"])
+@pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "pck3", "asar", "rpa3",
+                                  "rpa3-py2", "rpa2", "zip"])
 def test_every_truncation_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
     data = fuzz_samples(tmp_path)[kind]
     path = tmp_path / "fuzz.bin"
@@ -1797,8 +1868,8 @@ def test_every_truncation_is_a_binspect_error_or_a_valid_archive(tmp_path, kind)
 
 
 @pytest.mark.filterwarnings("ignore:Overlapped entries")
-@pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "asar", "rpa3", "rpa3-py2",
-                                  "rpa2", "zip"])
+@pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "pck3", "asar", "rpa3",
+                                  "rpa3-py2", "rpa2", "zip"])
 def test_every_single_byte_corruption_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
     data = fuzz_samples(tmp_path)[kind]
     path = tmp_path / "fuzz.bin"
@@ -1813,7 +1884,8 @@ def test_every_single_byte_corruption_is_a_binspect_error_or_a_valid_archive(tmp
 
 
 @pytest.mark.filterwarnings("ignore:Overlapped entries")
-@pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "asar", "rpa3", "rpa2", "zip"])
+@pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "pck3", "asar", "rpa3", "rpa2",
+                                  "zip"])
 def test_every_overwritten_32_bit_field_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
     data = fuzz_samples(tmp_path)[kind]
     path = tmp_path / "fuzz.bin"

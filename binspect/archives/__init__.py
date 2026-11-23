@@ -29,6 +29,7 @@ LocationError (no such entry). Only failures of the operating system itself
 from __future__ import annotations
 
 import os
+import stat
 import struct
 import zlib
 from typing import BinaryIO, List, Optional, Type
@@ -74,6 +75,20 @@ def _detect(fh: BinaryIO, size: int, head: bytes) -> Optional[Type[Archive]]:
     return None
 
 
+def _open_regular(path: str) -> BinaryIO:
+    """Open a regular file for reading. A named pipe or a device would block
+    or never end, so anything that is not a regular file is refused: it is
+    opened without blocking and checked through its descriptor."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise UnknownFormatError("not a regular file")
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def detect_format(path) -> Optional[str]:
     """The format name ("zip", "quake-pak", ...) if `path` looks like a
     supported container, else None. A cheap signature check (it reads the
@@ -81,7 +96,7 @@ def detect_format(path) -> Optional[str]:
     never raises. open_archive() may still reject the file as corrupt,
     encrypted or of an unsupported version."""
     try:
-        with open(os.fspath(path), "rb") as fh:
+        with _open_regular(os.fspath(path)) as fh:
             size = os.fstat(fh.fileno()).st_size
             cls = _detect(fh, size, fh.read(_HEAD))
         return cls.format if cls else None
@@ -98,7 +113,7 @@ def open_archive(path) -> Archive:
     """Open a container and list its entries (entry data is read on demand).
     UnknownFormatError if `path` is not a supported container."""
     path = os.fspath(path)
-    with open(path, "rb") as fh:
+    with _open_regular(path) as fh:
         size = os.fstat(fh.fileno()).st_size
         head = fh.read(_HEAD)
         cls = _detect(fh, size, head)

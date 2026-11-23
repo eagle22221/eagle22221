@@ -58,6 +58,8 @@ b { font-weight: 600; }
 .goal { font-size: 12pt; color: var(--ink-2); margin-bottom: 10pt; max-width: 150mm; }
 figure { margin: 9pt 0 10pt; break-inside: avoid; }
 figure img { width: 100%; border: .8pt solid var(--ink); display: block; }
+figure.crop img { height: 72mm; object-fit: cover; object-position: top left; }
+figure.crop-tall img { height: 70mm; object-fit: cover; object-position: 0 88%; }
 figcaption { font-size: 9pt; color: var(--ink-2); margin-top: 3.5pt; }
 .box { border: .8pt solid var(--ink); padding: 8pt 10pt; margin: 8pt 0 10pt; break-inside: avoid; background: var(--paper); }
 .box h3 { margin-top: 0; }
@@ -211,7 +213,7 @@ td code { white-space: nowrap; }
     <li>Click the address on the <code>text_length</code> line to go to that function. <b>Back</b> returns you.</li>
     <li>Look at <b>Used by</b>: it shows that <code>print</code> is called twice from <code>entry</code>.</li>
   </ol>
-  <figure><img src="img/code.png" alt="The Code view"><figcaption>The Code view. Left: functions. Middle: instructions with notes. Right: who uses this function.</figcaption></figure>
+  <figure class="crop"><img src="img/code.png" alt="The Code view"><figcaption>The Code view. Left: functions. Middle: instructions with notes. Right: who uses this function.</figcaption></figure>
   <div class="keep">
   <h3>A small vocabulary</h3>
   <table>
@@ -260,7 +262,7 @@ td code { white-space: nowrap; }
     <li>To take everything out, choose <b>Extract everything to a folder</b>.</li>
     <li>To change a file, select it, choose <b>Replace with my file</b>, pick your file, and give a name for the new pack. binspect writes a complete new pack with your file in place of the old one.</li>
   </ol>
-  <figure><img src="img/assets.png" alt="The Assets view with a pack open"><figcaption>The Assets view: engine at the top, packs below, and the contents of the pack you opened with a preview.</figcaption></figure>
+  <figure class="crop-tall"><img src="img/assets.png" alt="The Assets view with a pack open"><figcaption>The Assets view: engine at the top, packs below, and the contents of the pack you opened with a preview.</figcaption></figure>
   <div class="box">
     <h3>Good to know</h3>
     <ul>
@@ -268,7 +270,6 @@ td code { white-space: nowrap; }
       <li>Encrypted packs are shown as encrypted and are not opened.</li>
       <li>Some engines use formats binspect does not rebuild. In that case the Assets view names the community tool made for that engine.</li>
       <li>Windows programs can also carry icons and version details inside them. They appear in the same view under <b>Built-in resources</b>.</li>
-      <li>The <b>Modify</b> view is for advanced changes to a program itself. It always saves a copy. The README describes it.</li>
     </ul>
   </div>
   <p class="learned"><b>You learned:</b> how to go from a game folder to the files inside its packs, and how to make a new pack with one file changed.</p>

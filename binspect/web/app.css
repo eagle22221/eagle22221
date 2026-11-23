@@ -65,7 +65,7 @@ html, body { height: 100%; }
 body {
   margin: 0; background: var(--paper); color: var(--ink);
   font: 400 15px/1.45 var(--ui);
-  display: flex; flex-direction: column; min-height: 100vh;
+  display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 }
 h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; letter-spacing: .005em; }
 h1 { font-size: 2.1rem; line-height: 1.1; }
@@ -204,6 +204,8 @@ td.num, th.num { text-align: right; }
 td.mono, td .mono { font-family: var(--mono); font-size: 13px; }
 td.wrap { overflow-wrap: anywhere; }
 tbody tr:hover { background: var(--accent-wash); }
+tbody tr[tabindex] { cursor: pointer; }
+tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0 var(--accent); }
 .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
 .link:hover { text-decoration: underline; }
 .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 6px; border: 1px solid currentColor; border-radius: 2px; margin-right: 4px; color: var(--data); }
@@ -303,6 +305,7 @@ tbody tr:hover { background: var(--accent-wash); }
   .code-grid > .pane:last-child { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
+  body { height: auto; min-height: 100vh; overflow: visible; }
   .bar { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
   .goto { order: 3; flex-basis: 100%; max-width: none; }
   .shell { flex-direction: column; }
