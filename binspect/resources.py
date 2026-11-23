@@ -582,8 +582,9 @@ def replace_resource(src_path: PathLike, dst_path: PathLike, resource: Resource,
       the resource's data entry is updated and the rest of the old space is
       zeroed. (Not used when another resource shares those bytes.)
     * Otherwise the data moves and the data entry's RVA is pointed at it; the
-      old bytes are zeroed. Preferred home: the unused zero padding at the end
-      of the resource section's raw data (its VirtualSize is raised).
+      old bytes are zeroed unless another resource shares them. Preferred
+      home: the unused zero padding at the end of the resource section's raw
+      data (its VirtualSize is raised).
     * No room there: a new read-only section named ".rsrc2" is appended to
       the image (section header, NumberOfSections, SizeOfImage and
       SizeOfInitializedData updated, file and section alignment respected).
@@ -602,9 +603,11 @@ def replace_resource(src_path: PathLike, dst_path: PathLike, resource: Resource,
 
     The copy is written atomically. With `dst_path == src_path` the original
     is first saved as `<src>.bak` unless that file exists (see
-    binspect.patch.save_copy). Errors: LocationError when the file has no
-    such resource, UnsupportedError for non-PE files or images that cannot be
-    grown, ParseError for corrupt ones. Nothing is written on error.
+    binspect.patch.save_copy). Before anything is written the result is
+    parsed again and the resource read back. Errors: LocationError when the
+    file has no such resource, UnsupportedError for non-PE files or images
+    that cannot be grown, ParseError for corrupt ones. Nothing is written on
+    error.
     """
     from . import load_bytes
 
