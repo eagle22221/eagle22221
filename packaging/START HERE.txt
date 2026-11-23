@@ -1,0 +1,99 @@
+binspect for Windows
+====================
+
+binspect.exe takes a program apart and shows what is inside it, without
+running it. It reads Windows programs (.exe, .dll) and Linux programs.
+It is one file: nothing to install, and it does not need Python.
+
+
+The quickest start
+------------------
+
+Drag any .exe or .dll onto binspect.exe.
+
+A window opens with a report: what kind of program it is, how it is
+protected, its sections, the system functions it uses, and the links,
+addresses and file paths found inside it. Press Enter to close it.
+
+Try it with practice\hello_pe64.exe.
+
+
+Using commands
+--------------
+
+For more control, open a terminal in this folder: hold Shift, right-click
+an empty part of the folder and choose "Open PowerShell window here" (or
+"Open in Terminal"). Then type a command:
+
+    .\binspect.exe info practice\hello_pe64.exe
+
+    Command                              Shows
+    -----------------------------------  ---------------------------------------
+    info FILE                            what the file is, hashes, protections
+    report FILE                          everything at a glance
+    sections FILE                        the parts of the file, with entropy
+    imports FILE                         system functions the program uses
+    exports FILE                         functions a library offers
+    symbols FILE                         names kept in the file
+    strings FILE                         readable text in the file
+    strings FILE --grep TEXT             only strings containing TEXT
+    strings FILE --tagged                only links, addresses and paths
+    hexdump FILE 0x140002000             raw bytes at an address
+    functions FILE                       the functions found in the code
+    disasm FILE NAME                     the instructions of one function
+    xrefs FILE NAME                      where a function or import is used
+    xrefs FILE --string TEXT             where a piece of text is used
+
+Add --json right after binspect.exe to get output other tools can read:
+
+    .\binspect.exe --json imports practice\hello_pe64.exe
+
+For the options of any command:  .\binspect.exe COMMAND --help
+
+
+Five short lessons
+------------------
+
+Use practice\hello_pe64.exe, a tiny program that prints two lines of text.
+
+1. What is it?
+       .\binspect.exe info practice\hello_pe64.exe
+   Read the first lines: Windows or Linux, 32 or 64 bit, where the code
+   starts ("entry point"), and which protections it was built with.
+
+2. Where is everything?
+       .\binspect.exe sections practice\hello_pe64.exe
+   ".text" is the code, ".rdata" holds text and constants. Entropy near 8
+   means compressed contents.
+
+3. What text does it carry?
+       .\binspect.exe strings practice\hello_pe64.exe --grep fixture
+   Programs keep their messages and web addresses as plain text. They are
+   the quickest way to see what a program is about.
+
+4. Which code uses that text?
+       .\binspect.exe xrefs practice\hello_pe64.exe --string "Hello from"
+   The answer names the function that reads the text. Then read it:
+       .\binspect.exe disasm practice\hello_pe64.exe entry
+   Lines starting with "call" run another function; the note after the
+   semicolon says which one.
+
+5. What does it ask Windows to do?
+       .\binspect.exe imports practice\hello_pe64.exe
+   Functions such as WriteFile or CreateFile mean it works with files;
+   socket or connect mean it uses the network.
+
+
+Good to know
+------------
+
+- binspect never runs the file you give it. It only reads it.
+- Windows may warn about binspect.exe the first time ("unknown publisher"),
+  because the file is not digitally signed. Choose "More info", then
+  "Run anyway" if you trust where you got it.
+- practice\sample.dll and practice\libsample.so (a Linux library) are there
+  to try "exports" on.
+- The graphical version with the browser interface, game asset packs and
+  the illustrated PDF guide is the Python edition of binspect.
+- The disassembler inside binspect is Capstone (BSD licence); its licence
+  text is in the licences folder.
