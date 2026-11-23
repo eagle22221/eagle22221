@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>binspect</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand" aria-label="binspect">
+    <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M1.5 9.5h25M9.5 9.5v17M9.5 17.5h17" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M12 26.5l14.5-9M16.5 26.5l10-6.2M21.5 26.5l5-3.1" fill="none" stroke="currentColor" stroke-width="1"/>
+    </svg>
+    <span class="brand-name">binspect</span>
+  </div>
+  <div class="bar-file" id="bar-file" hidden>
+    <span class="bar-file-name" id="file-name"></span>
+    <span class="bar-file-path" id="file-path"></span>
+  </div>
+  <form class="goto" id="goto" hidden>
+    <label class="sr-only" for="goto-input">Go to an address or name</label>
+    <input id="goto-input" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Go to address or name, e.g. main or 0x401000">
+  </form>
+  <div class="bar-actions">
+    <button type="button" class="btn" id="theme-toggle" aria-pressed="false">Dark</button>
+    <button type="button" class="btn btn-primary" id="open-button">Open file or folder</button>
+  </div>
+</header>
+
+<section class="map" id="map" hidden aria-label="File layout, drawn to scale">
+  <div class="map-strip" id="map-strip"></div>
+  <div class="map-scale" id="map-scale"></div>
+  <div class="map-legend" id="map-legend"></div>
+</section>
+
+<div class="shell">
+  <nav class="nav" id="nav" hidden aria-label="Views"></nav>
+  <main class="main" id="main" tabindex="-1"></main>
+</div>
+
+<dialog class="dialog" id="open-dialog" aria-labelledby="open-title">
+  <form method="dialog" class="dialog-head">
+    <h2 id="open-title">Open a program, game folder or asset pack</h2>
+    <button class="btn" value="cancel">Close</button>
+  </form>
+  <form class="path-row" id="path-form">
+    <label class="sr-only" for="path-input">Path</label>
+    <input id="path-input" type="text" spellcheck="false" autocomplete="off" placeholder="Type or paste a path">
+    <button class="btn btn-primary">Open</button>
+  </form>
+  <div class="places" id="places"></div>
+  <div class="browser" id="browser" role="listbox" aria-label="Files in this folder"></div>
+  <p class="dialog-hint">Files are read from this computer and stay on it. Nothing is uploaded anywhere and nothing is run.</p>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

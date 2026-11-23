@@ -208,6 +208,34 @@ def hexdump(b: Binary, address: Optional[int] = None, offset: Optional[int] = No
     return {"offset": offset, "length": len(data), "rows": rows}
 
 
+def layout(b: Binary) -> dict:
+    """The file as consecutive, non-overlapping regions, for drawing it to scale."""
+    items = [(off, size, name, kind) for name, off, size, kind in b.regions]
+    for s in b.sections:
+        if s.size:
+            kind = "code" if "x" in s.perms else "data" if s.perms != "---" else "meta"
+            items.append((s.offset, s.size, s.name or "(unnamed)", kind))
+    overlay = b.metadata.get("overlay")
+    if overlay:
+        items.append((overlay["offset"], overlay["size"], "overlay", "overlay"))
+    regions = []
+    cursor = 0
+    for off, size, name, kind in sorted(items, key=lambda i: (i[0], -i[1])):
+        end = min(off + size, b.size)
+        if end <= cursor:
+            continue                # fully inside something already drawn
+        if off > cursor:
+            regions.append({"name": "padding", "offset": cursor, "size": off - cursor,
+                            "kind": "padding"})
+        start = max(off, cursor)
+        regions.append({"name": name, "offset": start, "size": end - start, "kind": kind})
+        cursor = end
+    if cursor < b.size:
+        regions.append({"name": "padding", "offset": cursor, "size": b.size - cursor,
+                        "kind": "padding"})
+    return {"size": b.size, "regions": regions}
+
+
 def report(b: Binary, a: Optional[Analysis]) -> Dict[str, object]:
     return {
         "info": info(b),

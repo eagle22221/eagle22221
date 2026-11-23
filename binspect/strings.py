@@ -14,7 +14,7 @@ _PRINTABLE = rb"[\x20-\x7e\t]"
 
 _URL = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]{1,9}://[^\s\"'<>]{3,}")
 _IPV4 = re.compile(r"(?<![\d.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\d.])")
-_EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+(\.[\w-]+)+\b")
+_EMAIL = re.compile(r"\b[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
 _REGISTRY = re.compile(r"\b(HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU)\\", re.IGNORECASE)
 _WIN_PATH = re.compile(r"(?<![A-Za-z])[A-Za-z]:\\[^\s:*?\"<>|]+|\\\\[\w.$-]+\\[\w.$-]+")
 _UNIX_PATH = re.compile(r"(?<![\w/.:])/(?:[\w.+-]+/)+[\w.+-]*|(?<![\w/.:])/(?:etc|bin|tmp|usr|var|dev|proc|home|lib|opt|root|sys)/?[\w.+-]*")

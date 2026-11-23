@@ -76,3 +76,8 @@ def test_strings_in_binary_are_tagged(load_fixture):
 )
 def test_classify(text, tags):
     assert strings.classify(text) == tags
+
+
+@pytest.mark.parametrize("text", ["puts@GLIBC_2.2.5", "__cxa_finalize@GLIBC_2.2.5", "name@plt", "a@b"])
+def test_versioned_symbol_names_are_not_email_addresses(text):
+    assert "email" not in strings.classify(text)

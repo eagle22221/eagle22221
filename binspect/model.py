@@ -96,6 +96,8 @@ class Binary:
         # Exact (start, end) function bounds when the format records them
         # (Windows x64 exception table).
         self.function_ranges: List[Tuple[int, int]] = []
+        # Parts of the file that are not sections: (name, offset, size, kind).
+        self.regions: List[Tuple[str, int, int, str]] = []
         # File-backed address ranges: (vaddr, file offset, size in file).
         self.maps: List[Tuple[int, int, int]] = []
 

@@ -105,8 +105,11 @@ class _ElfParser:
 
     def _overlay(self) -> None:
         end = self.e_phoff + self.e_phnum * self.e_phentsize if self.phdrs else 0
+        self.b.regions.append(("headers", 0, max(end, 64 if self.is64 else 52), "headers"))
         if self.shdrs:
-            end = max(end, self.e_shoff + self.e_shnum * self.e_shentsize)
+            table = self.e_shnum * self.e_shentsize
+            self.b.regions.append(("section headers", self.e_shoff, table, "meta"))
+            end = max(end, self.e_shoff + table)
         for p in self.phdrs:
             end = max(end, p["offset"] + p["filesz"])
         for sh in self.shdrs:

@@ -75,16 +75,22 @@ class _PeParser:
 
     def _overlay(self) -> None:
         end = self.headers_size
+        regions = self.b.regions
+        regions.append(("headers", 0, min(self.headers_size, self.r.size), "headers"))
         for s in self.b.sections:
             end = max(end, s.offset + s.size)
         if self.symtab_off and self.nsymbols:
             strings = self.symtab_off + self.nsymbols * 18
             try:
-                end = max(end, strings + max(self.r.u32(strings), 4))
+                table_end = strings + max(self.r.u32(strings), 4)
             except ParseError:
-                end = max(end, strings)
+                table_end = strings
+            regions.append(("symbol table", self.symtab_off,
+                            table_end - self.symtab_off, "meta"))
+            end = max(end, table_end)
         cert_off, cert_size = self._dir(DIR_SECURITY)      # a file offset, not an RVA
         if cert_off and cert_size:
+            regions.append(("certificates", cert_off, cert_size, "meta"))
             end = max(end, cert_off + cert_size)
         # Linkers pad the file to the file alignment; zero padding is not data.
         align = self.file_align if self.file_align >= 0x200 else 1
