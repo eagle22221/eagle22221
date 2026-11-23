@@ -152,6 +152,22 @@ class Binary:
         available = m[2] - (vaddr - m[0])
         return self.data[start:start + min(size, available)]
 
+    def executable_ranges(self) -> List[Tuple[int, int]]:
+        """(vaddr, size) of every file-backed range holding code."""
+        ranges = [(s.vaddr, s.size) for s in self.sections
+                  if "x" in s.perms and s.size and s.vaddr]
+        if not ranges:      # no section headers: fall back to executable segments
+            ranges = [(s.vaddr, s.size) for s in self.segments
+                      if s.type == "LOAD" and "x" in s.perms and s.size]
+        return sorted(ranges)
+
+    def is_address(self, vaddr: int) -> bool:
+        """True when vaddr lies in the loaded image (file-backed or not)."""
+        if self._map_for(vaddr) is not None or self.section_at(vaddr) is not None:
+            return True
+        return any(s.type == "LOAD" and s.vaddr <= vaddr < s.vaddr + s.vsize
+                   for s in self.segments)
+
     def section_at(self, vaddr: int) -> Optional[Section]:
         for s in self.sections:
             if s.vaddr and s.vaddr <= vaddr < s.vaddr + max(s.vsize, 1):

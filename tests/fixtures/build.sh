@@ -17,6 +17,10 @@ gcc -O1 -fPIE -pie -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
     -Wl,-z,relro,-z,now -o "$OUT/hello_elf64" "$SRC/hello.c"
 strip -o "$OUT/hello_elf64_stripped" "$OUT/hello_elf64"
 
+# Non-PIE variant: _start loads main with "mov rdi, imm" instead of "lea".
+gcc -O1 -no-pie -fno-stack-protector -Wl,-z,norelro -o "$TMP/hello_nopie" "$SRC/hello.c"
+strip -o "$OUT/hello_elf64_nopie_stripped" "$TMP/hello_nopie"
+
 gcc -O1 -shared -fPIC -Wl,-soname,libsample.so.1 \
     -o "$OUT/libsample.so" "$SRC/libsample.c"
 
