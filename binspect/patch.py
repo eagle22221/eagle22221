@@ -149,7 +149,7 @@ def _try_load(data: bytes, path: str) -> Optional[Binary]:
 def _locate(data: bytes, path: str, size: int, offset: Optional[int],
             vaddr: Optional[int]) -> PatchResult:
     """Validate a patch location; returns it with `old` filled in."""
-    if offset is None and vaddr is None:
+    if (offset is None) == (vaddr is None):
         raise LocationError("give exactly one of offset= (file offset) or "
                             "vaddr= (virtual address)")
     if size <= 0:
