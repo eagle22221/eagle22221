@@ -58,10 +58,13 @@ _HEAD = 64
 def _formats() -> List[Type[Archive]]:
     """Format classes in detection order: signatures at the start of the
     file first, then the ones found from the end of the file."""
+    from ._asar import AsarArchive
     from ._pak import PakArchive
+    from ._pck import PckArchive
+    from ._rpa import RpaArchive
     from ._wad import WadArchive
     from ._zip import ZipArchive
-    return [PakArchive, WadArchive, ZipArchive]
+    return [PakArchive, WadArchive, RpaArchive, PckArchive, AsarArchive, ZipArchive]
 
 
 def _detect(fh: BinaryIO, size: int, head: bytes) -> Optional[Type[Archive]]:

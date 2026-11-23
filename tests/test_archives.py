@@ -1120,13 +1120,21 @@ def test_asar_header_larger_than_the_file_is_a_parse_error(tmp_path):
     '{"files":{"a":17}}',
     '{"files":[]}',
     '{"nofiles":{}}',
-    '[1,2,3]',
     '{"files":{"a":{"size":1e400,"offset":"0"}}}',
     '{"files":{"a":{"size":true,"offset":"0"}}}',
 ])
 def test_asar_malformed_header_is_a_parse_error(tmp_path, header):
     with pytest.raises(ParseError):
         archives.open_archive(write(tmp_path, "app.asar", build_asar(header, b"abc")))
+
+
+def test_pickle_pair_without_a_json_object_is_not_an_asar(tmp_path):
+    # ASAR has no magic number: the two pickle headers followed by '{' are
+    # its signature, so anything else is simply not a known container.
+    path = write(tmp_path, "app.asar", build_asar("[1,2,3]", b"abc"))
+    assert archives.is_archive(path) is False
+    with pytest.raises(UnknownFormatError):
+        archives.open_archive(path)
 
 
 def test_asar_deeply_nested_header_is_a_parse_error_not_a_recursion_error(tmp_path):
@@ -1396,21 +1404,48 @@ def test_zip_additions_to_an_all_stored_archive_are_stored(tmp_path):
         assert zf.getinfo("b.txt").compress_type == zipfile.ZIP_STORED
 
 
+def raw_zip(members, flags=0) -> bytes:
+    """A stored-only ZIP assembled from APPNOTE.TXT, names written as the
+    bytes given: local headers (30 bytes + name + data), central directory
+    headers (46 bytes + name), end-of-central-directory record (22 bytes).
+    DOS date 0x21 is 1980-01-01."""
+    out, central = bytearray(), bytearray()
+    for name, data in members:
+        crc, offset = zlib.crc32(data), len(out)
+        out += struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, flags, 0, 0, 0x21, crc,
+                           len(data), len(data), len(name), 0) + name + data
+        central += struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 20, 20, flags, 0, 0,
+                               0x21, crc, len(data), len(data), len(name), 0, 0, 0, 0, 0,
+                               offset) + name
+    eocd = struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, len(members), len(members),
+                       len(central), len(out), 0)
+    return bytes(out + central + eocd)
+
+
 def test_zip_legacy_encoded_names_keep_their_exact_bytes(tmp_path):
     # A Shift-JIS file name without the UTF-8 flag (how Japanese tools on
-    # Windows write them). A game looks the name up by these bytes.
+    # Windows write them). A game looks the name up by these bytes, so a
+    # repack must not re-encode it as UTF-8.
     raw_name = "\u30c7\u30fc\u30bf.txt".encode("shift_jis")
     assert raw_name == b"\x83f\x81[\x83^.txt"
-    path = tmp_path / "sjis.zip"
-    with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr(raw_name.decode("cp437"), b"payload")
-        zf.writestr("plain.txt", b"x")
-    data = bytearray(path.read_bytes())
-    # clear the UTF-8 flag (bit 11) and put the raw bytes back in both headers
-    utf8_name = raw_name.decode("cp437").encode("utf-8")
-    assert data.count(utf8_name) == 2
-    pytest.skip("builder cannot change name length in place") if len(utf8_name) != len(
-        raw_name) else None
+    shown = raw_name.decode("cp437")                        # how zipfile presents it
+    path = write(tmp_path, "sjis.zip", raw_zip([(raw_name, b"payload"), (b"plain.txt", b"x")]))
+    a = archives.open_archive(path)
+    assert [e.name for e in a.entries] == [shown, "plain.txt"]
+    assert a.read(shown) == b"payload"
+
+    for step, changes in enumerate([{"plain.txt": b"y"}, {shown: b"replaced"}]):
+        out = tmp_path / ("out%d.zip" % step)
+        a.repack(out, replacements=changes, additions={"new.txt": b"n"})
+        data = out.read_bytes()
+        assert data.count(raw_name) == 2                    # local + central header
+        assert shown.encode("utf-8") not in data
+        central = data.index(b"PK\x01\x02")
+        assert data[central + 46:central + 46 + len(raw_name)] == raw_name
+        assert struct.unpack_from("<H", data, central + 8) == (0,)      # UTF-8 flag clear
+        with zipfile.ZipFile(out) as zf:
+            assert zf.testzip() is None
+            assert zf.read(shown) == changes.get(shown, b"payload")
 
 
 def test_zip_appended_to_an_executable_is_found_and_repacked_in_place(tmp_path):
@@ -1749,6 +1784,7 @@ def fuzz_samples(tmp_path):
     }
 
 
+@pytest.mark.filterwarnings("ignore:Overlapped entries")
 @pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "asar", "rpa3", "rpa3-py2",
                                   "rpa2", "zip"])
 def test_every_truncation_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
@@ -1760,6 +1796,7 @@ def test_every_truncation_is_a_binspect_error_or_a_valid_archive(tmp_path, kind)
         assert archives.is_archive(path) in (True, False)
 
 
+@pytest.mark.filterwarnings("ignore:Overlapped entries")
 @pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "asar", "rpa3", "rpa3-py2",
                                   "rpa2", "zip"])
 def test_every_single_byte_corruption_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
@@ -1775,6 +1812,7 @@ def test_every_single_byte_corruption_is_a_binspect_error_or_a_valid_archive(tmp
             exercise(path)
 
 
+@pytest.mark.filterwarnings("ignore:Overlapped entries")
 @pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "asar", "rpa3", "rpa2", "zip"])
 def test_every_overwritten_32_bit_field_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
     data = fuzz_samples(tmp_path)[kind]
@@ -1836,7 +1874,7 @@ def big_pak(path):
 def big_pck(path):
     with open(path, "wb") as f:
         f.write(build_pck(fmt=1, engine=(3, 5, 2), files=[(b"res://far/away.txt", b"")]))
-        f.seek(108)                                         # 88 + 4 + 16: offset, size
+        f.seek(112)                                         # 88 + 4 + 20: offset, size
         f.write(struct.pack("<QQ", HOLE, 5))
         f.seek(HOLE)
         f.write(b"small")

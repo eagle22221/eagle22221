@@ -80,7 +80,9 @@ class _RawNameInfo(zipfile.ZipInfo):
     a game looks up byte for byte."""
 
     def _encodeFilenameFlags(self):          # noqa: N802 (zipfile's internal name)
-        return self._raw_name, self.flag_bits
+        # Newer zipfile versions preset the UTF-8 name flag (bit 11) and let
+        # this method clear it; these bytes are by definition not UTF-8.
+        return self._raw_name, self.flag_bits & ~0x800
 
 
 def _strip_zip64_extra(extra: bytes) -> bytes:

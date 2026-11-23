@@ -52,7 +52,12 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
     if (await pack.count()) { await pack.click(); await page.waitForTimeout(900); }
     const image = page.locator('tr:has-text(".png")').first();
     if (await image.count()) { await image.click(); await page.waitForTimeout(900); }
-    await page.screenshot({ path: out('assets'), fullPage: true });
+    await page.evaluate(() => {
+      const heading = Array.from(document.querySelectorAll('h2')).find((h) => h.textContent.startsWith('Asset packs here'));
+      if (heading) heading.scrollIntoView({ block: 'start' });
+    });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: out('assets') });
   }
   console.log('page errors:', JSON.stringify(errors));
   await browser.close();

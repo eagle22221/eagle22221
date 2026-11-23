@@ -103,6 +103,9 @@ binspect patch bytes game.exe 0x401234 "eb 05" -o game.patched.exe
 binspect patch string game.exe "Old text" "New" -o game.patched.exe
 ```
 
+To try these without a real game, `examples/demo_game` is a pretend game with one asset pack
+(`python examples/make_demo_game.py` rebuilds it).
+
 Rules the modding features follow:
 
 - **The original is never changed unless you ask.** Packs and resources are always written to a
@@ -146,7 +149,7 @@ binspect/
   strings.py           string extraction and tagging
   disasm.py            Capstone wrapper with annotations
   analysis.py          functions, name resolution, cross-references
-  archives.py          asset pack formats
+  archives/            asset pack formats (ZIP family, PAK, WAD, PCK, ASAR, RPA)
   engines.py           game engine detection
   resources.py         Windows resources
   patch.py             byte, instruction and text patches
