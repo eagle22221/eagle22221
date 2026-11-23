@@ -225,6 +225,12 @@ def _file_kind(path: str) -> str:
         return "unknown"
     if magic == b"\x7fELF" or magic[:2] == b"MZ":
         return "binary"
+    try:
+        from . import archives
+        if archives.is_archive(path):
+            return "archive"
+    except Exception:
+        pass
     return "unknown"
 
 
@@ -266,14 +272,169 @@ def _api_upload(ws, p, body):
     return {"path": path, "name": os.path.basename(path)}
 
 
+# --- modding API: engines, asset packs, resources, patches -----------------------
+
+MAX_PREVIEW = 64 << 20
+
+
+def _api_engine(ws, p, body):
+    return views.engine(p.need("path"))
+
+
+def _archive(ws, p):
+    from . import archives
+    path = os.path.abspath(p.need("path"))
+    if not os.path.isfile(path):
+        raise FileNotFoundError(path)
+    return path, archives.open_archive(path)
+
+
+def _api_archive_list(ws, p, body):
+    _path, archive = _archive(ws, p)
+    listing = views.archive_listing(archive)
+    match = _contains(p.get("q"))
+    page = _page([e for e in listing.pop("items") if match(e["name"])], p, 400)
+    page.update(listing)
+    return page
+
+
+def _api_archive_file(ws, p, body):
+    _path, archive = _archive(ws, p)
+    name = p.need("name")
+    entry = next((e for e in archive.entries if e.name == name), None)
+    if entry is None:
+        raise ApiError(404, f"no file named {name!r} in this pack")
+    if entry.size > MAX_PREVIEW:
+        raise ApiError(413, "this file is too large to preview; extract the pack instead")
+    return Raw(archive.read(name), "application/octet-stream", os.path.basename(name))
+
+
+def _api_archive_extract(ws, p, body):
+    _path, archive = _archive(ws, p)
+    dest = os.path.abspath(p.need("dest"))
+    names = [p.get("name")] if p.get("name") else None
+    written = archive.extract(dest, names)
+    return {"dest": dest, "count": len(written)}
+
+
+def _output_path(p: Params, source: str) -> str:
+    out = os.path.abspath(p.need("out"))
+    if os.path.isdir(out):
+        raise ApiError(400, f"{out} is a folder; give a file name to save to")
+    if not os.path.isdir(os.path.dirname(out)):
+        raise ApiError(400, f"the folder {os.path.dirname(out)} does not exist")
+    return out
+
+
+def _api_archive_replace(ws, p, body):
+    path, archive = _archive(ws, p)
+    name = p.need("name")
+    out = _output_path(p, path)
+    if out == path:
+        raise ApiError(400, "save the modified pack under a new name; "
+                            "the original is left untouched")
+    data = body.read()
+    if any(e.name == name for e in archive.entries):
+        archive.repack(out, replacements={name: data})
+    else:
+        archive.repack(out, additions={name: data})
+    return {"out": out, "name": name, "size": len(data)}
+
+
+def _resource(ws, p):
+    from . import resources
+    binary = ws.binary(p.need("path"))
+    items = resources.list_resources(binary)
+    index = p.number("index")
+    if index is None or not 0 <= index < len(items):
+        raise ApiError(404, "no such resource")
+    return resources, binary, items[index]
+
+
+def _api_resources(ws, p, body):
+    return views.resources(ws.binary(p.need("path")))
+
+
+def _api_resource_data(ws, p, body):
+    resources, binary, res = _resource(ws, p)
+    return Raw(resources.read_resource(binary, res), "application/octet-stream")
+
+
+def _api_resource_icon(ws, p, body):
+    resources, binary, res = _resource(ws, p)
+    return Raw(resources.icon_file(binary, res), "application/octet-stream")
+
+
+def _api_resource_replace(ws, p, body):
+    resources, binary, res = _resource(ws, p)
+    path = os.path.abspath(p.need("path"))
+    out = _output_path(p, path)
+    updated = resources.replace_resource(path, out, res, body.read())
+    return {"out": out, "size": updated.size}
+
+
+def _patch_target(ws, p) -> dict:
+    """Where to write: a raw file offset, or an address / name in the program."""
+    offset = p.number("offset")
+    if offset is not None:
+        return {"offset": offset}
+    text = p.need("address")
+    try:
+        return {"vaddr": int(text, 0)}
+    except ValueError:
+        return {"vaddr": ws.analysis(p.need("path")).resolve(text)[0]}
+
+
+def _api_patch_bytes(ws, p, body):
+    from . import patch
+    path = os.path.abspath(p.need("path"))
+    text = re.sub(r"[\s,]|0x", "", p.need("hex"))
+    try:
+        data = bytes.fromhex(text)
+    except ValueError:
+        raise ApiError(400, "bytes must be written in hex, for example: 90 90 eb 05") from None
+    if not data:
+        raise ApiError(400, "no bytes given")
+    out = _output_path(p, path)
+    return views.patch_result(out, patch.apply_patch(path, out, data, **_patch_target(ws, p)))
+
+
+def _api_patch_nop(ws, p, body):
+    from . import patch
+    path = os.path.abspath(p.need("path"))
+    length = p.number("length")
+    if not length or length < 1 or length > 1 << 20:
+        raise ApiError(400, "the number of bytes must be at least 1")
+    out = _output_path(p, path)
+    filler = patch.nop_bytes(ws.binary(path), length)
+    return views.patch_result(out, patch.apply_patch(path, out, filler, **_patch_target(ws, p)))
+
+
+def _api_patch_string(ws, p, body):
+    from . import patch
+    path = os.path.abspath(p.need("path"))
+    out = _output_path(p, path)
+    results = patch.replace_string(path, out, p.need("old"), p.get("new") or "",
+                                   p.get("encoding") or "ascii")
+    return {"out": out, "patches": [views.patch_result(out, r) for r in results]}
+
+
 GET_ROUTES: Dict[str, Callable] = {
     "info": _api_info, "layout": _api_layout, "sections": _api_sections,
     "segments": _api_segments, "imports": _api_imports, "exports": _api_exports,
     "symbols": _api_symbols, "strings": _api_strings, "functions": _api_functions,
     "disasm": _api_disasm, "xrefs": _api_xrefs, "hexdump": _api_hexdump,
     "open": _api_open, "browse": _api_browse,
+    "engine": _api_engine, "archive/list": _api_archive_list,
+    "archive/file": _api_archive_file, "resources": _api_resources,
+    "resource/data": _api_resource_data, "resource/icon": _api_resource_icon,
 }
-POST_ROUTES: Dict[str, Callable] = {"upload": _api_upload}
+POST_ROUTES: Dict[str, Callable] = {
+    "upload": _api_upload, "archive/extract": _api_archive_extract,
+    "archive/replace": _api_archive_replace, "resource/replace": _api_resource_replace,
+    "patch/bytes": _api_patch_bytes, "patch/nop": _api_patch_nop,
+    "patch/string": _api_patch_string,
+}
 
 
 class _Body:

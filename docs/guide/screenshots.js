@@ -1,0 +1,59 @@
+// Captures the screenshots used in the guide from a running binspect server.
+// Usage: node screenshots.js BASE_URL TOKEN PRACTICE_EXE [GAME_FOLDER]
+const { chromium } = require('playwright');
+const path = require('path');
+const [, , base, token, exe, game] = process.argv;
+const out = (name) => path.join(__dirname, 'img', name + '.png');
+
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1120, height: 740 }, deviceScaleFactor: 2 });
+  await page.emulateMedia({ colorScheme: 'light' });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const nav = async (label) => { await page.click(`nav button:text-is("${label}")`); await page.waitForTimeout(900); };
+
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector('.welcome');
+  await page.screenshot({ path: out('welcome') });
+
+  await page.goto(`${base}/#token=${token}&open=${encodeURIComponent(exe)}`);
+  await page.reload();
+  await page.waitForSelector('.titleblock');
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: out('overview') });
+
+  await nav('Sections');
+  await page.screenshot({ path: out('sections') });
+
+  await nav('Strings');
+  await page.fill('input[placeholder="Search text"]', 'fixture');
+  await page.waitForTimeout(700);
+  await page.click('tr:has-text("Hello from") button:text-is("Find uses")');
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: out('strings') });
+
+  await nav('Code');
+  await page.click('.fn-list button:has-text("print")');
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: out('code') });
+
+  await nav('Imports');
+  await page.click('tr:has-text("WriteFile") button:text-is("Find uses")');
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: out('imports') });
+
+  if (game) {
+    await page.goto(`${base}/#token=${token}&open=${encodeURIComponent(game)}`);
+    await page.reload();
+    await page.waitForSelector('.view-head');
+    await page.waitForTimeout(900);
+    const pack = page.locator('.table-wrap button.link').first();
+    if (await pack.count()) { await pack.click(); await page.waitForTimeout(900); }
+    const image = page.locator('tr:has-text(".png")').first();
+    if (await image.count()) { await image.click(); await page.waitForTimeout(900); }
+    await page.screenshot({ path: out('assets'), fullPage: true });
+  }
+  console.log('page errors:', JSON.stringify(errors));
+  await browser.close();
+})();

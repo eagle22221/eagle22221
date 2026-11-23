@@ -1,0 +1,60 @@
+// Resources of the resdemo.exe fixture. Numeric constants are spelled out
+// because the fixture is built without the Windows SDK headers.
+//   resource types: 10 = RCDATA, 24 = MANIFEST
+//   languages:      LANGUAGE 9, 1 = English (US), 1033
+//                   LANGUAGE 7, 1 = German (Germany), 1031
+
+LANGUAGE 9, 1
+
+// One icon group with the two images of resdemo.ico (ICON #1 and #2).
+1 ICON "resdemo.ico"
+
+// Raw data: by number, by name, and under a named (custom) type.
+101 RCDATA { "binspect-rcdata-fixture-payload-0123456789\0" }
+SETTINGS RCDATA { "volume=7\r\nfullscreen=0\r\n" }
+1 LEVELDATA { "LVL1", 0x0102, 0x0304, 0x05060708L }
+
+STRINGTABLE
+{
+    1  "Hello from the string table"
+    2  "Second string"
+    17 "A string in the second block"
+}
+
+1 VERSIONINFO
+FILEVERSION 1, 2, 3, 4
+PRODUCTVERSION 1, 2, 0, 0
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0
+FILEOS 0x40004
+FILETYPE 1
+FILESUBTYPE 0
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "040904B0"
+        {
+            VALUE "CompanyName", "Binspect Fixtures"
+            VALUE "FileDescription", "Resource demo fixture"
+            VALUE "FileVersion", "1.2.3.4"
+            VALUE "InternalName", "resdemo"
+            VALUE "LegalCopyright", "Public domain"
+            VALUE "OriginalFilename", "resdemo.exe"
+            VALUE "ProductName", "Binspect Resource Demo"
+            VALUE "ProductVersion", "1.2"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x409, 1200
+    }
+}
+
+1 24 "resdemo.manifest"
+
+LANGUAGE 7, 1
+
+STRINGTABLE
+{
+    1  "Hallo aus der Zeichenfolgentabelle"
+}

@@ -100,6 +100,32 @@ function suggestOutput(path, word) {
   return dot > slash ? `${path.slice(0, dot)}.${word}${path.slice(dot)}` : `${path}.${word}`;
 }
 
+// A small in-page dialog that asks for a path: resolves to the text, or null.
+function ask(title, note, value, okLabel) {
+  const dialog = $('ask-dialog');
+  $('ask-title').textContent = title;
+  $('ask-note').textContent = note;
+  $('ask-input').value = value;
+  $('ask-ok').textContent = okLabel || 'Save';
+  return new Promise((resolve) => {
+    const form = $('ask-form');
+    const finish = (result) => {
+      form.removeEventListener('submit', onSubmit);
+      $('ask-cancel').removeEventListener('click', onCancel);
+      dialog.removeEventListener('cancel', onCancel);
+      if (dialog.open) dialog.close();
+      resolve(result);
+    };
+    const onSubmit = (e) => { e.preventDefault(); finish($('ask-input').value.trim() || null); };
+    const onCancel = () => finish(null);
+    form.addEventListener('submit', onSubmit);
+    $('ask-cancel').addEventListener('click', onCancel);
+    dialog.addEventListener('cancel', onCancel);
+    dialog.showModal();
+    $('ask-input').focus();
+  });
+}
+
 // --- views registry ---------------------------------------------------------
 
 const VIEWS = {
@@ -773,7 +799,7 @@ function renderArchive(box, path) {
     const picker = h('input', { type: 'file', hidden: true, onchange: async () => {
       const file = picker.files[0];
       if (!file) return;
-      const out = window.prompt(`Save the modified pack as (the original is not changed):`, suggestOutput(path, 'modded'));
+      const out = await ask('Save the modified pack', 'A complete new pack is written here. The original is not changed.', suggestOutput(path, 'modded'));
       if (!out) return;
       try {
         const done = await api('archive/replace', { path, name: entry.name, out }, { method: 'POST', body: file });
@@ -816,7 +842,7 @@ function renderArchive(box, path) {
     h('div', { class: 'toolbar' },
       h('input', { type: 'text', placeholder: 'Filter by name', 'aria-label': 'Filter by name', oninput: debounce((e) => { options.q = e.target.value; options.shown = 400; load(); }, 200) }),
       h('button', { type: 'button', class: 'btn', text: 'Extract everything to a folder…', onclick: async () => {
-        const dest = window.prompt('Folder to extract into (created if missing):', path + '_extracted');
+        const dest = await ask('Extract everything', 'Folder to extract into. It is created if it does not exist.', path + '_extracted', 'Extract');
         if (!dest) return;
         try {
           const done = await api('archive/extract', { path, dest }, { method: 'POST' });
@@ -852,7 +878,7 @@ async function renderResources(box) {
       const picker = h('input', { type: 'file', hidden: true, onchange: async () => {
         const file = picker.files[0];
         if (!file) return;
-        const out = window.prompt('Save the modified program as (the original is not changed):', suggestOutput(state.path, 'modded'));
+        const out = await ask('Save the modified program', 'A modified copy is written here. The original is not changed.', suggestOutput(state.path, 'modded'));
         if (!out) return;
         try {
           const done = await api('resource/replace', { path: state.path, index: res.index, out }, { method: 'POST', body: file });

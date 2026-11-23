@@ -19,5 +19,8 @@ binspect = "binspect.cli:main"
 [tool.setuptools.packages.find]
 include = ["binspect*"]
 
+[tool.setuptools.package-data]
+binspect = ["web/*.html", "web/*.css", "web/*.js", "web/fonts/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

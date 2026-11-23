@@ -296,11 +296,224 @@ def _cmd_report(args, st):
     return data, _render_report
 
 
+# --- modding commands -----------------------------------------------------------
+
+def _render_engine(d: dict, st: Style) -> List[str]:
+    out = [st(f"Looked in {d['root']}", "dim")]
+    if not d["matches"]:
+        out.append("No known game engine recognised.")
+    for m in d["matches"]:
+        details = ", ".join(f"{k}: {v}" for k, v in m["details"].items())
+        out += ["", st(m["engine"], "bold", "cyan") +
+                f"  ({m['confidence']} confidence{'; ' + details if details else ''})"]
+        out += [f"  why: {e}" for e in m["evidence"]]
+        out += [f"  next: {a}" for a in m["advice"]]
+    out += _heading("Asset packs binspect can open", st)
+    out += [f"  {p['relative']}  ({p['size']} bytes)" for p in d["packs"]] or ["  (none found)"]
+    return out
+
+
+def _render_archive(d: dict, st: Style) -> List[str]:
+    out = [st(f"{d['format']} pack, {d['count']} files" +
+              ("" if d["writable"] else " (read-only)"), "bold")]
+    out += [st(f"! {note}", "yellow") for note in d["notes"]]
+    rows = [(e["name"], e["size"], ", ".join(
+        w for w, on in (("compressed", e["compressed"]), ("encrypted", e["encrypted"])) if on))
+        for e in d["items"]]
+    return out + _table(["Name", "Size", "Stored"], rows, st, right=(1,))
+
+
+def _render_resources(d: dict, st: Style) -> List[str]:
+    if not d["items"]:
+        return ["(no resources)"]
+    out = _table(["Type", "Name", "Language", "Size", "Offset"],
+                 [(r["type"], r["name"], r["language"], r["size"], f"{r['offset']:#x}")
+                  for r in d["items"]], st, right=(2, 3, 4))
+    if d["version"]:
+        out += _heading("Version information", st)
+        out += [f"{k}: {v}" for k, v in d["version"].items()]
+    return out
+
+
+def _render_done(d: dict, st: Style) -> List[str]:
+    out = [f"{p['address'] or 'file offset ' + format(p['offset'], '#x')}: "
+           f"{p['old']} -> {p['new']}" for p in d.get("patches", [])]
+    return out + [st(d["message"], "green", "bold")]
+
+
+def _cmd_engine(args, st):
+    return views.engine(args.file), _render_engine
+
+
+def _read_file(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _cmd_assets(args, st):
+    from . import archives
+    archive = archives.open_archive(args.file)
+    if args.action == "list":
+        return views.archive_listing(archive, args.grep), _render_archive
+    if args.action == "extract":
+        written = archive.extract(args.dest, args.names or None)
+        return {"dest": os.path.abspath(args.dest), "count": len(written),
+                "message": f"Extracted {len(written)} files to {args.dest}"}, _render_done
+    data = _read_file(args.newfile)
+    change = {"replacements": {args.name: data}} if args.action == "replace" \
+        else {"additions": {args.name: data}}
+    archive.repack(args.output, **change)
+    verb = "Replaced" if args.action == "replace" else "Added"
+    return {"out": os.path.abspath(args.output),
+            "message": f"{verb} {args.name}; saved {args.output}"}, _render_done
+
+
+def _cmd_resources(args, st):
+    from . import resources
+    binary = load(args.file)
+    items = resources.list_resources(binary)
+    if args.action == "list":
+        return views.resources(binary), _render_resources
+    if args.action == "extract":
+        os.makedirs(args.dest, exist_ok=True)
+        for res in items:
+            is_icon = res.type == "GROUP_ICON"
+            data = resources.icon_file(binary, res) if is_icon \
+                else resources.read_resource(binary, res)
+            stem = "".join(ch if ch.isalnum() or ch in "-_" else "_"
+                           for ch in f"{res.type}_{res.name.lstrip('#')}_{res.language}")
+            with open(os.path.join(args.dest, stem + (".ico" if is_icon else ".bin")), "wb") as f:
+                f.write(data)
+        return {"dest": os.path.abspath(args.dest), "count": len(items),
+                "message": f"Extracted {len(items)} resources to {args.dest}"}, _render_done
+    wanted = [r for r in items if r.type.lower() == args.type.lower()
+              and r.name.lstrip("#") == args.name.lstrip("#")]
+    if not wanted:
+        raise BinspectError(f"no resource of type {args.type} named {args.name}; "
+                            f"see: binspect resources list {args.file}")
+    updated = resources.replace_resource(args.file, args.output, wanted[0],
+                                         _read_file(args.newfile))
+    return {"out": os.path.abspath(args.output), "size": updated.size,
+            "message": f"Replaced {args.type} {args.name}; saved {args.output}"}, _render_done
+
+
+def _cmd_patch(args, st):
+    from . import patch
+    if bool(args.output) == bool(args.in_place):
+        raise BinspectError("say where to save: -o OUT for a modified copy, or "
+                            "--in-place to change the file (a .bak backup is kept)")
+    out = args.file if args.in_place else args.output
+    if args.action == "string":
+        results = patch.replace_string(args.file, out, args.old, args.new, args.encoding)
+    else:
+        binary = load(args.file)
+        if args.offset:
+            where = {"offset": int(args.location, 0)}
+        else:
+            try:
+                where = {"vaddr": int(args.location, 0)}
+            except ValueError:
+                where = {"vaddr": Analysis(binary).resolve(args.location)[0]}
+        if args.action == "nop":
+            data = patch.nop_bytes(binary, args.length)
+        else:
+            try:
+                data = bytes.fromhex(args.hex.replace("0x", "").replace(",", " "))
+            except ValueError:
+                raise BinspectError("bytes must be hex, for example: \"90 90 eb 05\"") from None
+        results = [patch.apply_patch(args.file, out, data, **where)]
+    return {"out": os.path.abspath(out),
+            "patches": [views.patch_result(out, r) for r in results],
+            "message": f"Saved {out}"}, _render_done
+
+
+def _cmd_gui(args, st):
+    from . import server
+    raise SystemExit(server.serve(args.file, args.port, not args.no_browser))
+
+
+def _add_modding(sub) -> None:
+    sp = sub.add_parser("engine", help="identify a game's engine and find its asset packs")
+    sp.add_argument("file", metavar="PATH", help="a game folder or its executable")
+    sp.set_defaults(func=_cmd_engine)
+
+    sp = sub.add_parser("assets", help="list, extract or replace files in an asset pack")
+    actions = sp.add_subparsers(dest="action", metavar="ACTION")
+    actions.required = True
+    a = actions.add_parser("list", help="show the files in a pack")
+    a.add_argument("file", metavar="PACK")
+    a.add_argument("--grep", metavar="REGEX", help="only names matching REGEX")
+    a = actions.add_parser("extract", help="unpack files into a folder")
+    a.add_argument("file", metavar="PACK")
+    a.add_argument("dest", metavar="FOLDER")
+    a.add_argument("names", nargs="*", metavar="NAME", help="only these files (default: all)")
+    for verb, text in (("replace", "swap one file in a pack"), ("add", "add a file to a pack")):
+        a = actions.add_parser(verb, help=text + ", saving a new pack")
+        a.add_argument("file", metavar="PACK")
+        a.add_argument("name", metavar="NAME", help="path of the file inside the pack")
+        a.add_argument("newfile", metavar="NEWFILE", help="file on disk with the new contents")
+        a.add_argument("-o", "--output", required=True, metavar="OUT",
+                       help="where to save the modified pack (the original is untouched)")
+    sp.set_defaults(func=_cmd_assets)
+
+    sp = sub.add_parser("resources", help="icons, version info and data inside a Windows program")
+    actions = sp.add_subparsers(dest="action", metavar="ACTION")
+    actions.required = True
+    a = actions.add_parser("list", help="show the resources")
+    a.add_argument("file", metavar="FILE")
+    a = actions.add_parser("extract", help="save every resource into a folder")
+    a.add_argument("file", metavar="FILE")
+    a.add_argument("dest", metavar="FOLDER")
+    a = actions.add_parser("replace", help="swap one resource, saving a new program")
+    a.add_argument("file", metavar="FILE")
+    a.add_argument("type", metavar="TYPE", help="e.g. RCDATA, MANIFEST, VERSION")
+    a.add_argument("name", metavar="NAME", help="resource name or number, as listed")
+    a.add_argument("newfile", metavar="NEWFILE")
+    a.add_argument("-o", "--output", required=True, metavar="OUT")
+    sp.set_defaults(func=_cmd_resources)
+
+    sp = sub.add_parser("patch", help="change bytes, instructions or text in a program")
+    actions = sp.add_subparsers(dest="action", metavar="ACTION")
+    actions.required = True
+
+    def common(a):
+        a.add_argument("-o", "--output", metavar="OUT", help="save a modified copy here")
+        a.add_argument("--in-place", action="store_true",
+                       help="change FILE itself; the original is kept as FILE.bak")
+
+    a = actions.add_parser("bytes", help="overwrite bytes at an address")
+    a.add_argument("file", metavar="FILE")
+    a.add_argument("location", metavar="LOCATION", help="0x address or name")
+    a.add_argument("hex", metavar="HEX", help='new bytes, e.g. "90 90 eb 05"')
+    a.add_argument("--offset", action="store_true", help="LOCATION is a file offset")
+    common(a)
+    a = actions.add_parser("nop", help="replace instructions with no-ops")
+    a.add_argument("file", metavar="FILE")
+    a.add_argument("location", metavar="LOCATION", help="0x address or name")
+    a.add_argument("length", type=_int, metavar="BYTES", help="how many bytes to blank out")
+    a.add_argument("--offset", action="store_true", help="LOCATION is a file offset")
+    common(a)
+    a = actions.add_parser("string", help="replace text in place (same length or shorter)")
+    a.add_argument("file", metavar="FILE")
+    a.add_argument("old", metavar="OLD")
+    a.add_argument("new", metavar="NEW")
+    a.add_argument("-e", "--encoding", choices=("ascii", "utf16"), default="ascii")
+    common(a)
+    sp.set_defaults(func=_cmd_patch)
+
+    sp = sub.add_parser("gui", help="open the graphical interface in your browser")
+    sp.add_argument("file", nargs="?", metavar="PATH", help="file or game folder to open")
+    sp.add_argument("--port", type=int, default=0, help="port to listen on (default: any free)")
+    sp.add_argument("--no-browser", action="store_true", help="only print the link")
+    sp.set_defaults(func=_cmd_gui)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="binspect",
-        description="Static reverse-engineering toolkit for Linux (ELF) and Windows (PE) "
-                    "binaries. Files are only read, never run.")
+        description="Reverse-engineering toolkit for Linux (ELF) and Windows (PE) programs "
+                    "and game asset packs. Files are never run; originals are never "
+                    "changed unless you ask.")
     p.add_argument("--version", action="version", version=f"binspect {__version__}")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
     p.add_argument("--color", choices=("auto", "always", "never"), default="auto",
@@ -344,6 +557,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--offset", type=_int, metavar="N", help="file offset instead of address")
     sp.add_argument("-n", "--length", type=_int, default=256, metavar="BYTES")
     add("report", _cmd_report, "everything at a glance")
+    _add_modding(sub)
     return p
 
 

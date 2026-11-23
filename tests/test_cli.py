@@ -211,3 +211,26 @@ def test_no_arguments_prints_usage(capsys):
     with pytest.raises(SystemExit) as exc:
         main([])
     assert exc.value.code == 2
+
+
+def test_gui_command_starts_the_server_with_its_options(monkeypatch):
+    from binspect import server
+    calls = []
+    monkeypatch.setattr(server, "serve", lambda *a: calls.append(a) or 0)
+    with pytest.raises(SystemExit) as exc:
+        main(["gui", ELF, "--port", "9123", "--no-browser"])
+    assert exc.value.code == 0
+    assert calls == [(ELF, 9123, False)]
+
+
+def test_session_link_carries_the_token_in_the_fragment():
+    from binspect import server
+    httpd, ws = server.create_server(port=0, token="tok")
+    try:
+        url = server.session_url(httpd, ws, ELF)
+        port = httpd.server_address[1]
+        assert url.startswith(f"http://127.0.0.1:{port}/#token=tok&open=")
+        assert "hello_elf64" in url and "?" not in url     # never sent to the server
+    finally:
+        httpd.server_close()
+        ws.close()

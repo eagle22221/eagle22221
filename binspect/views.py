@@ -245,3 +245,72 @@ def report(b: Binary, a: Optional[Analysis]) -> Dict[str, object]:
         "strings": strings(b, tagged=True),
         "functions": functions(a) if a is not None else None,
     }
+
+
+# --- modding views --------------------------------------------------------------
+
+def find_packs(root: str, also: Optional[str] = None) -> List[dict]:
+    """Asset packs binspect can open under root, at most three folders deep."""
+    from . import archives
+    found, seen = [], 0
+    candidates = [also] if also and os.path.isfile(also) else []
+    for folder, dirs, files in os.walk(root):
+        depth = 0 if folder == root else os.path.relpath(folder, root).count(os.sep) + 1
+        if depth >= 3:
+            dirs[:] = []
+        dirs.sort()
+        for name in sorted(files):
+            seen += 1
+            candidates.append(os.path.join(folder, name))
+        if seen > 4000:
+            break
+    for path in dict.fromkeys(candidates):
+        if len(found) >= 200:
+            break
+        try:
+            if archives.is_archive(path):
+                found.append({"path": path, "relative": os.path.relpath(path, root),
+                              "size": os.path.getsize(path)})
+        except OSError:
+            continue
+    return found
+
+
+def engine(path: str) -> dict:
+    """Engine detection for an executable or a game folder, plus nearby packs."""
+    from dataclasses import asdict
+
+    from . import engines
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(2, "No such file or directory", path)
+    root = path if os.path.isdir(path) else os.path.dirname(path)
+    return {"root": root,
+            "matches": [asdict(m) for m in engines.detect_engines(path)],
+            "packs": find_packs(root, path)}
+
+
+def archive_listing(archive, pattern: Optional[str] = None) -> dict:
+    rx = _compile(pattern)
+    return {
+        "format": archive.format, "writable": archive.writable,
+        "notes": list(archive.notes), "count": len(archive.entries),
+        "items": [{"name": e.name, "size": e.size, "compressed": e.compressed,
+                   "encrypted": e.encrypted}
+                  for e in archive.entries if rx is None or rx.search(e.name)],
+    }
+
+
+def resources(b: Binary) -> dict:
+    from . import resources as resources_mod
+    return {
+        "items": [{"index": i, "type": r.type, "name": r.name, "language": r.language,
+                   "size": r.size, "offset": r.offset}
+                  for i, r in enumerate(resources_mod.list_resources(b))],
+        "version": resources_mod.version_info(b),
+    }
+
+
+def patch_result(out: str, result) -> dict:
+    return {"out": out, "offset": result.offset, "address": hx(result.vaddr),
+            "old": result.old.hex(" "), "new": result.new.hex(" ")}

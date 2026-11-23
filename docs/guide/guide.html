@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>binspect user guide</title>
+<style>
+@font-face { font-family: "Barlow"; font-weight: 400; src: url("../../binspect/web/fonts/barlow-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 500; src: url("../../binspect/web/fonts/barlow-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 600; src: url("../../binspect/web/fonts/barlow-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Semi Condensed"; font-weight: 600; src: url("../../binspect/web/fonts/barlow-semi-condensed-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; src: url("../../binspect/web/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); }
+
+@page { size: A4; margin: 18mm 18mm 20mm; }
+:root { --ink: #132238; --ink-2: #4A5D78; --line: #C5D0DC; --accent: #0F56D9; --wash: #EEF3FA;
+  --code: #D4480B; --data: #0A7C74; --paper: #F8FAFC; }
+* { box-sizing: border-box; }
+html { font: 400 10.5pt/1.5 "Barlow", sans-serif; color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; }
+h1, h2, h3 { font-family: "Barlow Semi Condensed", sans-serif; font-weight: 600; line-height: 1.15; margin: 0; }
+h1 { font-size: 34pt; }
+h2 { font-size: 20pt; margin-bottom: 5pt; }
+h3 { font-size: 12.5pt; margin: 13pt 0 4pt; break-after: avoid; }
+.keep { break-inside: avoid; }
+p { margin: 0 0 7pt; max-width: 165mm; }
+ol, ul { margin: 0 0 8pt; padding-left: 15pt; max-width: 165mm; }
+li { margin-bottom: 3.5pt; }
+code, pre { font-family: "IBM Plex Mono", monospace; font-size: 8.8pt; }
+code { background: var(--wash); padding: .5pt 3pt; }
+pre { background: var(--wash); border-left: 2.5pt solid var(--accent); padding: 7pt 9pt; margin: 4pt 0 9pt; white-space: pre-wrap; line-height: 1.45; break-inside: avoid; }
+pre code { background: none; padding: 0; }
+b { font-weight: 600; }
+
+.cover { height: 257mm; display: flex; flex-direction: column; break-after: page; }
+.brand { display: flex; align-items: center; gap: 8pt; font: 600 17pt/1 "Barlow Semi Condensed"; }
+.brand svg { width: 22pt; height: 22pt; color: var(--accent); }
+.cover-main { margin-top: 58mm; }
+.cover-main p { font-size: 14pt; color: var(--ink-2); max-width: 130mm; margin-top: 10pt; line-height: 1.4; }
+.strip { display: flex; height: 19mm; border: 1.2pt solid var(--ink); margin-top: 22mm; }
+.strip div { border-right: 1.2pt solid var(--ink); position: relative; }
+.strip div:last-child { border-right: 0; }
+.strip span { position: absolute; left: 4pt; top: 4pt; background: #fff; border: .8pt solid var(--ink); padding: 1pt 4pt; font: 600 8.5pt/1.2 "Barlow Semi Condensed"; }
+.hx { background-image: repeating-linear-gradient(45deg, #3B5B92 0 .8pt, transparent .8pt 5pt), repeating-linear-gradient(-45deg, #3B5B92 0 .8pt, transparent .8pt 5pt); }
+.cd { background-image: repeating-linear-gradient(45deg, var(--code) 0 1.6pt, transparent 1.6pt 6pt); }
+.dt { background-image: repeating-linear-gradient(0deg, var(--data) 0 1.2pt, transparent 1.2pt 5pt); }
+.mt { background-image: repeating-linear-gradient(90deg, #7A869A 0 .8pt, transparent .8pt 5pt); }
+.strip-note { font-size: 9pt; color: var(--ink-2); margin-top: 4pt; }
+.cover-foot { margin-top: auto; border-top: 1.2pt solid var(--ink); padding-top: 7pt; display: flex; justify-content: space-between; color: var(--ink-2); font-size: 9.5pt; }
+
+.contents { break-after: page; }
+.contents > ol { list-style: none; padding: 0; margin-top: 10pt; max-width: none; }
+.contents > ol > li { display: flex; gap: 10pt; padding: 5.5pt 0; border-bottom: .6pt solid var(--line); margin: 0; }
+.contents .n { width: 52pt; color: var(--accent); font-weight: 600; }
+.contents .t { font-weight: 600; width: 190pt; }
+.contents .d { color: var(--ink-2); flex: 1; }
+
+.lesson { break-before: page; }
+.lesson-no { font: 600 11pt/1 "Barlow Semi Condensed"; color: var(--accent); border-top: 1.5pt solid var(--accent); display: inline-block; padding-top: 4pt; margin-bottom: 5pt; }
+.goal { font-size: 12pt; color: var(--ink-2); margin-bottom: 10pt; max-width: 150mm; }
+figure { margin: 9pt 0 10pt; break-inside: avoid; }
+figure img { width: 100%; border: .8pt solid var(--ink); display: block; }
+figcaption { font-size: 9pt; color: var(--ink-2); margin-top: 3.5pt; }
+.box { border: .8pt solid var(--ink); padding: 8pt 10pt; margin: 8pt 0 10pt; break-inside: avoid; background: var(--paper); }
+.box h3 { margin-top: 0; }
+.box ul:last-child { margin-bottom: 0; }
+.learned { border-left: 2.5pt solid var(--data); padding: 2pt 0 2pt 9pt; margin-top: 10pt; break-inside: avoid; }
+.learned b { color: var(--data); }
+table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; break-inside: avoid; }
+th { text-align: left; font-weight: 600; border-bottom: 1.2pt solid var(--ink); padding: 4pt 8pt 4pt 0; }
+td { border-bottom: .6pt solid var(--line); padding: 4pt 8pt 4pt 0; vertical-align: top; }
+td code { white-space: nowrap; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16pt; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="brand">
+    <svg viewBox="0 0 28 28"><rect x="1.5" y="1.5" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 9.5h25M9.5 9.5v17M9.5 17.5h17" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 26.5l14.5-9M16.5 26.5l10-6.2M21.5 26.5l5-3.1" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+    binspect
+  </div>
+  <div class="cover-main">
+    <h1>User guide and<br>first lessons</h1>
+    <p>How to open a Linux or Windows program, read what is inside it, and browse the asset packs that games ship with.</p>
+    <div class="strip">
+      <div class="hx" style="flex:6"></div>
+      <div class="cd" style="flex:34"><span>code</span></div>
+      <div class="dt" style="flex:22"><span>data</span></div>
+      <div class="mt" style="flex:14"><span>tables</span></div>
+    </div>
+    <div class="strip-note">Every program is laid out in parts like these. binspect draws them to scale.</div>
+  </div>
+  <div class="cover-foot"><span>For binspect 0.1 on Linux and Windows</span><span>About 30 minutes with the exercises</span></div>
+</section>
+
+<section class="contents">
+  <h2>What is in this guide</h2>
+  <p>Each lesson takes about five minutes. The practice files come with binspect, so you can follow every step exactly as written.</p>
+  <ol>
+    <li><span class="n">Start here</span><span class="t">Install and open the interface</span><span class="d">Two commands, then a browser tab.</span></li>
+    <li><span class="n">Lesson 1</span><span class="t">The overview</span><span class="d">What kind of program is this?</span></li>
+    <li><span class="n">Lesson 2</span><span class="t">The file map and sections</span><span class="d">Where the code and data sit inside the file.</span></li>
+    <li><span class="n">Lesson 3</span><span class="t">Strings</span><span class="d">The readable text a program carries.</span></li>
+    <li><span class="n">Lesson 4</span><span class="t">Code</span><span class="d">Functions, calls and a small vocabulary.</span></li>
+    <li><span class="n">Lesson 5</span><span class="t">Imports</span><span class="d">What the program asks the system to do.</span></li>
+    <li><span class="n">Lesson 6</span><span class="t">Games and asset packs</span><span class="d">Find the engine, browse a pack, swap in your own file.</span></li>
+    <li><span class="n">Reference</span><span class="t">Command line and glossary</span><span class="d">The same features, typed instead of clicked.</span></li>
+  </ol>
+
+  <div class="box">
+    <h3>Three things to know first</h3>
+    <ul>
+      <li><b>binspect never runs the file you open.</b> It only reads it.</li>
+      <li><b>Your original files are not changed.</b> Anything you modify is saved as a new file.</li>
+      <li><b>Use it on software you have the right to study and change.</b> binspect leaves encrypted and protected content alone.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Start here</div>
+  <h2>Install and open the interface</h2>
+  <p class="goal">You need Python 3.9 or newer. Everything else is installed for you.</p>
+  <ol>
+    <li>Open a terminal (on Windows: PowerShell) in the binspect folder.</li>
+    <li>Install it:
+      <pre><code>pip install .</code></pre></li>
+    <li>Start the interface:
+      <pre><code>binspect gui</code></pre>
+      Your browser opens a page served from your own computer. If it does not open by itself, copy the link the terminal prints. Keep the terminal open while you work, and press Ctrl+C in it when you are done.</li>
+  </ol>
+  <figure><img src="img/welcome.png" alt="The binspect start page"><figcaption>The start page. Drop a file anywhere on it, or choose <b>Open file or folder</b>.</figcaption></figure>
+  <h3>The practice files</h3>
+  <p>The folder <code>tests/fixtures/bin</code> holds small programs made for practising. The lessons use <code>hello_pe64.exe</code>, a tiny Windows program that prints two lines of text. Linux programs such as <code>libsample.so</code> in the same folder work in exactly the same way, and you can open either kind on either system.</p>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Lesson 1</div>
+  <h2>The overview</h2>
+  <p class="goal">Goal: say what a program is before looking at any detail.</p>
+  <ol>
+    <li>Choose <b>Open file or folder</b>, go to <code>tests/fixtures/bin</code> and pick <code>hello_pe64.exe</code>.</li>
+    <li>You land on <b>Overview</b>. Read the block at the top from left to right.</li>
+  </ol>
+  <figure><img src="img/overview.png" alt="Overview of the practice program"><figcaption>The overview: identity at the top, then build settings, libraries and notable strings.</figcaption></figure>
+  <table>
+    <tr><th>Field</th><th>What it tells you</th></tr>
+    <tr><td>Type</td><td>Linux or Windows, program or library, and the processor it was built for.</td></tr>
+    <tr><td>Entry point</td><td>The address of the first instruction.</td></tr>
+    <tr><td>Entropy</td><td>How random the bytes look, from 0 to 8. A value above about 7.2 usually means the contents are compressed.</td></tr>
+    <tr><td>SHA-256</td><td>A fingerprint of the file. Two files with the same fingerprint are identical.</td></tr>
+    <tr><td>Protections</td><td>Safety features the program was built with, such as address randomisation. Green means present.</td></tr>
+    <tr><td>Libraries</td><td>Other files the program needs in order to start.</td></tr>
+  </table>
+  <p class="learned"><b>You learned:</b> the practice file is a 64-bit Windows program for x86-64 processors that needs one system library, <code>KERNEL32.dll</code>.</p>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Lesson 2</div>
+  <h2>The file map and sections</h2>
+  <p class="goal">Goal: know where the code and the data are.</p>
+  <p>The strip under the top bar is the whole file, drawn to scale from its first byte to its last. Each kind of content has its own hatching, the way materials do in a technical drawing.</p>
+  <ol>
+    <li>Move the pointer along the strip. The line on the right names each part and gives its position and size.</li>
+    <li>Choose <b>Sections</b> on the left for the same information as a table.</li>
+    <li>Click a section name, for example <code>.rdata</code>, to see its bytes in the <b>Bytes</b> view.</li>
+  </ol>
+  <figure><img src="img/sections.png" alt="The Sections table"><figcaption>Sections of the practice program. "read, run" marks code.</figcaption></figure>
+  <div class="two">
+    <table>
+      <tr><th>Windows name</th><th>Holds</th></tr>
+      <tr><td><code>.text</code></td><td>The program's code</td></tr>
+      <tr><td><code>.rdata</code></td><td>Text, constants, import tables</td></tr>
+      <tr><td><code>.data</code></td><td>Variables</td></tr>
+      <tr><td><code>.rsrc</code></td><td>Icons, version details, dialogs</td></tr>
+    </table>
+    <table>
+      <tr><th>Linux name</th><th>Holds</th></tr>
+      <tr><td><code>.text</code></td><td>The program's code</td></tr>
+      <tr><td><code>.rodata</code></td><td>Text and constants</td></tr>
+      <tr><td><code>.data</code>, <code>.bss</code></td><td>Variables</td></tr>
+      <tr><td><code>.plt</code>, <code>.got</code></td><td>Links to library functions</td></tr>
+    </table>
+  </div>
+  <p class="learned"><b>You learned:</b> a program is made of named parts with different jobs, and the code is often a small slice of the file. If the map shows "appended data" at the end, extra content is attached after the program; many games and installers store their files there.</p>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Lesson 3</div>
+  <h2>Strings</h2>
+  <p class="goal">Goal: find a piece of readable text and see which code uses it.</p>
+  <p>Programs keep their messages, file names and web addresses as plain text. Reading them is the quickest way to get a feel for what a program does.</p>
+  <ol>
+    <li>Choose <b>Strings</b>.</li>
+    <li>Type <code>fixture</code> in the search box. The list narrows as you type.</li>
+    <li>Tick <b>Only links, addresses and paths</b> to keep just the strings binspect recognises as web addresses, IP addresses, e-mail addresses, file paths or registry keys. Untick it again.</li>
+    <li>On the row that starts with "Hello from", choose <b>Find uses</b>. binspect answers with the function that reads this text.</li>
+    <li>Click the answer to see that function in the <b>Code</b> view.</li>
+  </ol>
+  <figure><img src="img/strings.png" alt="The Strings view"><figcaption>The Strings view. <b>Find uses</b> connects a piece of text to the function that reads it.</figcaption></figure>
+  <p class="learned"><b>You learned:</b> strings work as an index into the code. A message or a file name leads you to the function that handles it.</p>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Lesson 4</div>
+  <h2>Code</h2>
+  <p class="goal">Goal: follow what a function does without knowing every instruction.</p>
+  <p>The <b>Code</b> view has three columns: the functions binspect found, the instructions of the one you chose, and <b>Used by</b>, which lists the places that call it.</p>
+  <ol>
+    <li>Choose <b>Code</b>, then <code>print</code> in the function list.</li>
+    <li>Read the green lines first. Those are calls, and the note after the semicolon names what is called. Here the function calls <code>text_length</code>, then two Windows functions, <code>GetStdHandle</code> and <code>WriteFile</code>.</li>
+    <li>Click the address on the <code>text_length</code> line to go to that function. <b>Back</b> returns you.</li>
+    <li>Look at <b>Used by</b>: it shows that <code>print</code> is called twice from <code>entry</code>.</li>
+  </ol>
+  <figure><img src="img/code.png" alt="The Code view"><figcaption>The Code view. Left: functions. Middle: instructions with notes. Right: who uses this function.</figcaption></figure>
+  <div class="keep">
+  <h3>A small vocabulary</h3>
+  <table>
+    <tr><th>Instruction</th><th>Plain meaning</th></tr>
+    <tr><td><code>mov a, b</code></td><td>Copy b into a.</td></tr>
+    <tr><td><code>lea a, [x]</code></td><td>Put the address of x into a. Often how a function gets hold of a string.</td></tr>
+    <tr><td><code>add</code>, <code>sub</code></td><td>Arithmetic.</td></tr>
+    <tr><td><code>cmp</code>, <code>test</code></td><td>Compare two values; the next jump usually depends on the result.</td></tr>
+    <tr><td><code>jmp</code>, <code>je</code>, <code>jne</code> …</td><td>Continue somewhere else, always or only if a comparison came out a certain way.</td></tr>
+    <tr><td><code>call</code></td><td>Run another function, then come back.</td></tr>
+    <tr><td><code>ret</code></td><td>Finish this function.</td></tr>
+  </table>
+  </div>
+  <p class="learned"><b>You learned:</b> you can understand the outline of a function from its calls alone, and move between functions by clicking.</p>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Lesson 5</div>
+  <h2>Imports</h2>
+  <p class="goal">Goal: see what a program asks the operating system to do.</p>
+  <p>A program does not draw windows, open files or use the network by itself. It asks the system, by calling functions in system libraries. The list of those functions is a good summary of what the program is able to do.</p>
+  <ol>
+    <li>Choose <b>Imports</b>. Functions are grouped by the library they come from.</li>
+    <li>Find <code>WriteFile</code> and choose <b>Find uses</b>. The answer is the function you read in lesson 4.</li>
+  </ol>
+  <figure><img src="img/imports.png" alt="The Imports view"><figcaption>Imports of the practice program, grouped by library.</figcaption></figure>
+  <table>
+    <tr><th>If you see…</th><th>The program probably…</th></tr>
+    <tr><td><code>CreateFile</code>, <code>ReadFile</code>, <code>fopen</code></td><td>reads or writes files</td></tr>
+    <tr><td><code>socket</code>, <code>connect</code>, <code>WSAStartup</code>, <code>InternetOpen</code></td><td>uses the network</td></tr>
+    <tr><td><code>RegOpenKey</code>, <code>RegSetValue</code></td><td>reads or changes Windows settings</td></tr>
+    <tr><td><code>CreateWindow</code>, <code>MessageBox</code></td><td>shows windows and dialogs</td></tr>
+  </table>
+  <p class="learned"><b>You learned:</b> imports show a program's abilities at a glance, and <b>Find uses</b> shows where each one is used.</p>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Lesson 6</div>
+  <h2>Games and asset packs</h2>
+  <p class="goal">Goal: find out which engine a game uses, look inside an asset pack, and swap one file for your own.</p>
+  <p>Games keep their pictures, sounds and scripts in packs. binspect can open the common open formats: ZIP-based packs (<code>.zip</code>, <code>.pk3</code>, <code>.love</code>, <code>.jar</code>), Quake <code>.pak</code>, Doom <code>.wad</code>, Godot <code>.pck</code>, Electron <code>.asar</code> and Ren'Py <code>.rpa</code>.</p>
+  <ol>
+    <li>Choose <b>Open file or folder</b>, go to the game's folder and choose <b>Open this folder as a game</b>.</li>
+    <li>The <b>Assets</b> view names the engine if it recognises one, explains why, and lists the packs it found.</li>
+    <li>Click a pack. Its files appear in a list. Select one to preview it: pictures are shown, text is displayed, anything else is shown as bytes.</li>
+    <li>To take everything out, choose <b>Extract everything to a folder</b>.</li>
+    <li>To change a file, select it, choose <b>Replace with my file</b>, pick your file, and give a name for the new pack. binspect writes a complete new pack with your file in place of the old one.</li>
+  </ol>
+  <figure><img src="img/assets.png" alt="The Assets view with a pack open"><figcaption>The Assets view: engine at the top, packs below, and the contents of the pack you opened with a preview.</figcaption></figure>
+  <div class="box">
+    <h3>Good to know</h3>
+    <ul>
+      <li>The original pack stays as it was. To try your version, keep a copy of the original and put the new pack in its place.</li>
+      <li>Encrypted packs are shown as encrypted and are not opened.</li>
+      <li>Some engines use formats binspect does not rebuild. In that case the Assets view names the community tool made for that engine.</li>
+      <li>Windows programs can also carry icons and version details inside them. They appear in the same view under <b>Built-in resources</b>.</li>
+      <li>The <b>Modify</b> view is for advanced changes to a program itself. It always saves a copy. The README describes it.</li>
+    </ul>
+  </div>
+  <p class="learned"><b>You learned:</b> how to go from a game folder to the files inside its packs, and how to make a new pack with one file changed.</p>
+</section>
+
+<section class="lesson">
+  <div class="lesson-no">Reference</div>
+  <h2>Command line</h2>
+  <p>Everything in the lessons is also available as a command. Put <code>--json</code> right after <code>binspect</code> to get output other tools can read.</p>
+  <table>
+    <tr><th>Command</th><th>Shows</th></tr>
+    <tr><td><code>binspect gui [PATH]</code></td><td>Opens the graphical interface</td></tr>
+    <tr><td><code>binspect info FILE</code></td><td>The overview (lesson 1)</td></tr>
+    <tr><td><code>binspect report FILE</code></td><td>Overview, sections, imports, notable strings and functions together</td></tr>
+    <tr><td><code>binspect sections FILE</code></td><td>The section table (lesson 2)</td></tr>
+    <tr><td><code>binspect hexdump FILE 0x2000</code></td><td>Bytes at an address</td></tr>
+    <tr><td><code>binspect strings FILE --grep TEXT</code></td><td>Strings containing TEXT (lesson 3)</td></tr>
+    <tr><td><code>binspect strings FILE --tagged</code></td><td>Only links, addresses and paths</td></tr>
+    <tr><td><code>binspect functions FILE</code></td><td>The function list (lesson 4)</td></tr>
+    <tr><td><code>binspect disasm FILE NAME</code></td><td>The instructions of one function</td></tr>
+    <tr><td><code>binspect xrefs FILE NAME</code></td><td>Where a function or import is used</td></tr>
+    <tr><td><code>binspect xrefs FILE --string TEXT</code></td><td>Where a string is used</td></tr>
+    <tr><td><code>binspect imports FILE</code></td><td>Imported functions (lesson 5)</td></tr>
+    <tr><td><code>binspect exports FILE</code></td><td>Functions a library offers</td></tr>
+    <tr><td><code>binspect engine FOLDER</code></td><td>The game engine and its packs (lesson 6)</td></tr>
+    <tr><td><code>binspect assets list PACK</code></td><td>Files in a pack</td></tr>
+    <tr><td><code>binspect assets extract PACK FOLDER</code></td><td>Unpacks a pack</td></tr>
+    <tr><td><code>binspect assets replace PACK NAME FILE -o NEW</code></td><td>Writes a new pack with one file swapped</td></tr>
+    <tr><td><code>binspect resources list FILE</code></td><td>Icons and version details in a Windows program</td></tr>
+  </table>
+  <p>For any command, <code>binspect COMMAND --help</code> lists its options.</p>
+
+  <h2 style="break-before:page">Glossary</h2>
+  <table>
+    <tr><th>Word</th><th>Meaning</th></tr>
+    <tr><td>Address</td><td>The position of a byte in memory while the program runs, written in hexadecimal, for example <code>0x140001000</code>.</td></tr>
+    <tr><td>Offset</td><td>The position of a byte in the file on disk.</td></tr>
+    <tr><td>ELF, PE</td><td>The file formats of Linux and Windows programs.</td></tr>
+    <tr><td>Section</td><td>A named part of a program file, such as code or constants.</td></tr>
+    <tr><td>Function</td><td>A piece of code with one job, which other code can call.</td></tr>
+    <tr><td>Import</td><td>A function the program borrows from a library.</td></tr>
+    <tr><td>Cross-reference</td><td>A place in the code that uses a given function, import or string. This is what <b>Find uses</b> and <b>Used by</b> show.</td></tr>
+    <tr><td>Asset pack</td><td>A single file that holds many game files, like a ZIP archive.</td></tr>
+    <tr><td>Entropy</td><td>A measure of how random data looks. Compressed data scores close to 8.</td></tr>
+  </table>
+</section>
+
+</body>
+</html>
