@@ -125,6 +125,8 @@ READ_COMMANDS = [
     ("strings", "--encoding=all", "--grep", "dll", "-n", "5"),
     ("hexdump",), ("hexdump", "--offset", "0x10", "-n", "48"),
     ("hexdump", "--offset", "0", "--length", "0x1000"), ("hexdump", "-n", "0"),
+    ("functions",), ("functions", "--grep", "sub_"), ("functions", "--grep", "main"),
+    ("disasm",), ("disasm", "-n", "5"), ("disasm", "--count", "200"), ("disasm", "-n", "0"),
     ("report",),
 ]
 
@@ -173,6 +175,90 @@ def test_hexdump_at_addresses(c_binary, name):
 ], ids=_command_id)
 def test_system_binaries_match_python(c_binary, path, command):
     assert_same_json(c_binary, command[0], path, *command[1:])
+
+
+# The Python sweep of a large program takes minutes; these are big enough.
+CODE_BINARIES = [p for p in SYSTEM_BINARIES
+                 if os.path.getsize(os.path.realpath(p)) < 3_000_000]
+
+
+@pytest.mark.parametrize("path", CODE_BINARIES)
+@pytest.mark.parametrize("command", [
+    ("functions",), ("disasm",), ("disasm", "-n", "300"), ("xrefs", "malloc"),
+    ("xrefs", "--string", "%s"), ("report",),
+], ids=_command_id)
+def test_system_binary_code_analysis_matches_python(c_binary, path, command):
+    assert_same_outcome(c_binary, command[0], path, *command[1:])
+
+
+@pytest.mark.parametrize("path", CODE_BINARIES)
+def test_system_binary_functions_disassemble_like_python(c_binary, path):
+    functions = json.loads(run_python("--json", "functions", path)[1])
+    rng = random.Random(len(functions))
+    for f in rng.sample(functions, min(25, len(functions))):
+        assert_same_json(c_binary, "disasm", path, f["address"])
+        assert_same_outcome(c_binary, "xrefs", path, f["name"])
+
+
+# --- names, cross-references and disassembly on the fixtures -------------------------
+
+def _locations(name):
+    """Things a user could pass as LOCATION/TARGET for this fixture."""
+    b = binspect.load(fixture_path(name))
+    functions = json.loads(run_python("--json", "functions", fixture_path(name))[1])
+    names = [f["name"] for f in functions] + [f["address"] for f in functions]
+    names += [s.name for s in b.symbols[:40]] + [e.name for e in b.exports[:20]]
+    for imp in b.imports:
+        names += [imp.name, f"{imp.library}!{imp.name}", f"{str(imp.library).upper()}!{imp.name}"]
+        if imp.address is not None:
+            names.append(hex(imp.address))
+    names += ["entry", " entry ", "no_such_function", "nolib!puts", "!", "", "0x0", "-1",
+              "12345678901234567890123", "main+4", "MAIN"]
+    names += [hex(s.vaddr + 1) for s in b.sections[:6] if s.vaddr]
+    return list(dict.fromkeys(names))
+
+
+@pytest.mark.parametrize("name", FIXTURE_NAMES)
+def test_locations_resolve_like_python(c_binary, name):
+    path = fixture_path(name)
+    for location in _locations(name):
+        assert_same_outcome(c_binary, "disasm", path, location)
+        assert_same_outcome(c_binary, "disasm", path, location, "-n", "3")
+        assert_same_outcome(c_binary, "xrefs", path, location)
+        assert_same_outcome(c_binary, "hexdump", path, location, "-n", "24")
+
+
+@pytest.mark.parametrize("name", FIXTURE_NAMES)
+def test_xrefs_by_string_content_match_python(c_binary, name):
+    path = fixture_path(name)
+    strings = json.loads(run_python("--json", "strings", path)[1])
+    wanted = [s["text"] for s in strings if s["address"]][:60]
+    wanted += ["fixture", "e", "%", "no such string anywhere", "\"quoted\" it's"]
+    for text in dict.fromkeys(wanted):
+        assert_same_outcome(c_binary, "xrefs", path, "--string", text)
+    assert_same_outcome(c_binary, "xrefs", path)                        # needs a target
+    assert_same_outcome(c_binary, "xrefs", path, "--string", "")
+    assert_same_outcome(c_binary, "xrefs", path, "entry", "--string", "e")
+
+
+def test_disassembly_text_and_comments(c_binary):
+    """Spot checks with values from tests/test_cli.py, then the whole text."""
+    path = fixture_path("hello_elf64")
+    listing = json.loads(run_c(c_binary, "--json", "disasm", path, "main")[1])
+    insns = listing["instructions"]
+    assert listing["name"] == "main" and len(insns) == 50
+    assert insns[0]["address"] == "0x11f2" and insns[0]["mnemonic"] == "endbr64"
+    assert insns[-1]["comment"] == "__stack_chk_fail@plt"
+    rows = json.loads(run_c(c_binary, "--json", "xrefs", path, "puts")[1])
+    assert [r["address"] for r in rows] == ["0x10a4", "0x123e", "0x1246", "0x1264"]
+    assert rows[1] == {"address": "0x123e", "kind": "call", "function": "main+0x4c",
+                       "text": "call 0x10a0"}
+    for name in FIXTURE_NAMES:
+        for args in (("disasm",), ("disasm", "-n", "40"), ("functions",), ("xrefs", "entry")):
+            full = (args[0], fixture_path(name), *args[1:])
+            assert run_c(c_binary, *full) == run_python(*full), full
+    coloured = ("--color", "always", "disasm", path, "main")
+    assert run_c(c_binary, *coloured) == run_python(*coloured)
 
 
 @pytest.mark.parametrize("path", SYSTEM_BINARIES)
@@ -533,6 +619,11 @@ def cross_binaries(tmp_path_factory):
 
 CROSS_COMMANDS = [("info",), ("sections",), ("imports",), ("exports",), ("symbols",),
                   ("strings",), ("strings", "--tagged"), ("hexdump",)]
+CROSS_CODE_COMMANDS = [("functions",), ("disasm",), ("disasm", "exported_call"),
+                       ("disasm", "_start", "-n", "12"), ("xrefs", "exported_add"),
+                       ("xrefs", "external_call"), ("xrefs", "--string", "hello from"),
+                       ("xrefs", "greeting"), ("hexdump", "visible_number", "-n", "8"),
+                       ("report",)]
 
 
 def test_other_architectures_and_byte_orders_match_python(c_binary, cross_binaries):
@@ -547,6 +638,8 @@ def test_other_architectures_and_byte_orders_match_python(c_binary, cross_binari
         seen.add((b.format, b.bits, b.endian))
         for command in CROSS_COMMANDS:
             assert_same_json(c_binary, command[0], path, *command[1:])
+        for command in CROSS_CODE_COMMANDS:     # may fail: "no disassembler for ... 's390x'"
+            assert_same_outcome(c_binary, command[0], path, *command[1:])
         assert json.loads(run_c(c_binary, "--json", "segments", path)[1]) == views.segments(b)
         assert json.loads(run_c(c_binary, "--json", "layout", path)[1]) == views.layout(b)
     assert {("ELF", 32, "big"), ("ELF", 64, "big"), ("ELF", 32, "little"),
@@ -573,9 +666,29 @@ HOSTILE_VIEWS = {
 }
 
 
-# More commands for the hostile-input runs: name -> (arguments, check), where
-# check(path, exit status, stdout, stderr) compares with Python.
-HOSTILE_EXTRA = {}
+# The code-analysis commands for the hostile-input runs.
+HOSTILE_CODE_COMMANDS = {"functions": ("functions",), "disasm": ("disasm", "-n", "8")}
+
+
+def _code_reference(blob):
+    """functions and the first instructions as Python sees them: the data, the
+    error message, or None where the reference itself breaks down."""
+    from binspect.analysis import Analysis
+    b = binspect.load_bytes(blob)
+    try:
+        a = Analysis(b)
+    except binspect.BinspectError as exc:
+        return {name: str(exc) for name in HOSTILE_CODE_COMMANDS}
+    out = {}
+    for name, view in (("functions", lambda: views.functions(a)),
+                       ("disasm", lambda: views.disassembly(a, None, 8))):
+        try:
+            out[name] = json.loads(json.dumps(view()))
+        except binspect.BinspectError as exc:
+            out[name] = str(exc)
+        except Exception:               # noqa: BLE001 - a crash of the reference
+            out[name] = None
+    return out
 
 
 def _reference(blob):
@@ -588,17 +701,17 @@ def _reference(blob):
     return {command: json.loads(json.dumps(view(b))) for command, view in HOSTILE_VIEWS.items()}
 
 
-def check_hostile(asan_binary, folder, blobs, extra=None):
+def check_hostile(asan_binary, folder, blobs, code=True):
     """Run every command of the sanitizer build on every blob (in parallel)
-    and compare with Python. `extra` maps more commands to reference
-    functions taking the blob's path."""
+    and compare with Python; `code` includes the disassembly commands."""
     paths = []
     for index, blob in enumerate(blobs):
         path = folder / f"{index:04d}.bin"
         path.write_bytes(blob)
         paths.append(path)
     commands = {name: (name,) for name in HOSTILE_VIEWS}
-    commands.update({name: spec[0] for name, spec in (extra or {}).items()})
+    if code:
+        commands.update(HOSTILE_CODE_COMMANDS)
 
     def run_all(path):
         return {name: run_c(asan_binary, "--json", args[0], path, *args[1:], timeout=60)
@@ -609,16 +722,17 @@ def check_hostile(asan_binary, folder, blobs, extra=None):
     loaded = 0
     for path, blob, outcome in zip(paths, blobs, outcomes):
         expected = _reference(blob)
-        for name, (code, out, err) in outcome.items():
+        if code and not isinstance(expected, str):
+            expected.update(_code_reference(blob))
+        for name, (status, out, err) in outcome.items():
             where = f"{name} {path.name}"
-            assert code in (0, 1), (where, code, err[-2000:])
-            if isinstance(expected, str):
-                assert (code, out, err) == (1, "", f"binspect: error: {expected}\n"), where
-            elif name in HOSTILE_VIEWS:
-                assert code == 0 and err == "", (where, err)
-                assert strip_path(json.loads(out)) == expected[name], where
-            else:
-                extra[name][1](path, code, out, err)
+            assert status in (0, 1), (where, status, err[-2000:])
+            wanted = expected if isinstance(expected, str) else expected[name]
+            if isinstance(wanted, str):
+                assert (status, out, err) == (1, "", f"binspect: error: {wanted}\n"), where
+            elif wanted is not None:
+                assert status == 0 and err == "", (where, err)
+                assert strip_path(json.loads(out)) == wanted, where
         loaded += not isinstance(expected, str)
     return loaded
 
@@ -628,7 +742,7 @@ def test_corrupted_copies_are_handled_like_python(asan_binary, tmp_path, name):
     data = fixture_bytes(name)
     blobs = list(mutations(data, seed=sum(name.encode()), count=250))
     blobs += [data[:cut] for cut in range(0, min(len(data), 0x480), 23)]
-    loaded = check_hostile(asan_binary, tmp_path, blobs, HOSTILE_EXTRA)
+    loaded = check_hostile(asan_binary, tmp_path, blobs)
     assert loaded > len(blobs) // 2        # most mutations still load: the views ran
 
 
@@ -646,7 +760,7 @@ def test_random_bytes_with_a_valid_signature_are_handled_like_python(asan_binary
         noise = bytes(rng.randrange(256) for _ in range(rng.randrange(600)))
         blobs.append(pe[:start + 26] + noise)
         blobs.append(pe[:start + 24] + rng.choice([b"\x0b\x01", b"\x0b\x02"]) + noise)
-    check_hostile(asan_binary, tmp_path, blobs, HOSTILE_EXTRA)
+    check_hostile(asan_binary, tmp_path, blobs)
 
 
 def test_huge_counts_do_not_hang_or_exhaust_memory(asan_binary, tmp_path):
@@ -665,7 +779,7 @@ def test_huge_counts_do_not_hang_or_exhaust_memory(asan_binary, tmp_path):
         for pos in range(0, min(len(data), 0x400) - 8, 4):
             for filler in (b"\xff" * 8, b"\xff\xff\xff\x7f" * 2):
                 blobs.append(data[:pos] + filler + data[pos + 8:])
-    check_hostile(asan_binary, tmp_path, blobs, HOSTILE_EXTRA)
+    check_hostile(asan_binary, tmp_path, blobs)
 
 
 def test_headerless_and_big_endian_binaries_survive_corruption(asan_binary, cross_binaries,
@@ -692,7 +806,7 @@ def test_headerless_and_big_endian_binaries_survive_corruption(asan_binary, cros
         blobs.append(bytes(headerless))
         blobs += list(mutations(bytes(headerless), seed=rng.randrange(1 << 30), count=6))
         blobs += list(mutations(data, seed=rng.randrange(1 << 30), count=6))
-    check_hostile(asan_binary, tmp_path, blobs, HOSTILE_EXTRA)
+    check_hostile(asan_binary, tmp_path, blobs)
 
 
 # --- patching -------------------------------------------------------------------------
@@ -780,6 +894,26 @@ def test_patches_match_python(c_binary, tmp_path, monkeypatch, source, args):
     out = files[args[-1]][0]
     assert len(out) == len(files["prog"][0]) and out != files["prog"][0]
     assert set(files) == {"prog", args[-1]}                 # no temp files left behind
+
+
+def test_patch_accepts_names(c_binary, tmp_path, monkeypatch):
+    code, out, files = patch_both(c_binary, tmp_path, monkeypatch, PE64,
+                                  ("nop", "prog", "print", "2", "-o", "out.exe"), json_mode=False)
+    assert code == 0 and "0x140001020: 56 57 -> 90 90" in out
+    assert files["out.exe"][0][0x420:0x422] == b"\x90\x90"
+    for source, args in [
+        ("hello_elf64", ("bytes", "prog", "main", "c3", "-o", "out")),
+        ("hello_elf64", ("nop", "prog", "add_numbers", "8", "-o", "out")),
+        ("hello_elf64", ("bytes", "prog", "entry", "90", "--in-place")),
+        (PE64, ("bytes", "prog", "KERNEL32.dll!WriteFile", "00", "-o", "out")),
+    ]:
+        assert patch_both(c_binary, tmp_path, monkeypatch, source, args)[0] == 0
+    for source, args in [
+        ("hello_elf64", ("bytes", "prog", "no_such_name", "c3", "-o", "out")),
+        ("hello_elf64", ("bytes", "prog", "puts", "c3 c3 c3 c3 c3 c3 c3 c3 c3", "-o", "out")),
+    ]:
+        code, _, files = patch_both(c_binary, tmp_path, monkeypatch, source, args)
+        assert set(files) == {"prog"} or code == 0
 
 
 def test_patch_text_output_matches_python(c_binary, tmp_path, monkeypatch):
@@ -875,3 +1009,48 @@ def test_patch_output_keeps_the_permission_bits(c_binary, tmp_path, monkeypatch)
                                  ("bytes", "prog", "0x630", "58", "--offset", "-o", "out"),
                                  prepare=set_mode)
         assert files["out"][1] == mode and len(files["out"][0]) == len(fixture_bytes(PE64))
+
+
+# --- builds ---------------------------------------------------------------------------
+
+def test_build_without_capstone_reports_the_missing_disassembler(c_binary, tmp_path):
+    """CAPSTONE=0: every command exists; the code-analysis ones fail cleanly."""
+    build = tmp_path / "plain"
+    proc = subprocess.run([MAKE, "-C", str(C_DIR), "CAPSTONE=0", f"BUILD={build}"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    binary = build / "binspect"
+    path = fixture_path("hello_elf64")
+    for args in (("functions", path), ("disasm", path), ("xrefs", path, "main"),
+                 ("hexdump", path, "main"), ("patch", "nop", path, "main", "1", "-o", "x")):
+        assert run_c(binary, *args) == (1, "", "binspect: error: this build has no disassembler\n")
+    assert run_c(binary, "--json", "info", path) == run_c(c_binary, "--json", "info", path)
+    report = json.loads(run_c(binary, "--json", "report", path)[1])
+    assert report["functions"] is None
+    assert report["functions_error"] == "this build has no disassembler"
+    full = json.loads(run_c(c_binary, "--json", "report", path)[1])
+    assert {k: v for k, v in report.items() if not k.startswith("functions")} == \
+        {k: v for k, v in full.items() if k != "functions"}
+    assert "(unavailable: this build has no disassembler)" in run_c(binary, "report", path)[1]
+
+
+@pytest.mark.skipif(not MINGW, reason="MinGW-w64 is not installed")
+def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
+    proc = subprocess.run([MAKE, "-C", str(C_DIR), "windows"], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    assert "warning" not in proc.stdout + proc.stderr
+    exe = C_DIR / "build" / "binspect.exe"
+    b = binspect.load(exe)
+    assert (b.format, b.bits, b.arch, b.kind) == ("PE", 64, "x86_64", "executable")
+    assert b.metadata["subsystem"] == "console"
+    # static: nothing but DLLs that are part of Windows itself
+    assert {lib.lower() for lib in b.libraries} <= {"kernel32.dll", "msvcrt.dll", "shell32.dll"}
+    assert not b.symbols                                         # stripped
+    imported = {i.name for i in b.imports}
+    assert {"GetConsoleProcessList", "SetConsoleMode", "MoveFileExW",
+            "CommandLineToArgvW"} <= imported
+    # ... and the C program reads its own Windows build exactly like Python does
+    for command in (("info",), ("sections",), ("imports",), ("exports",), ("symbols",),
+                    ("strings", "--tagged"), ("disasm", "-n", "64"), ("hexdump",)):
+        assert_same_json(c_binary, command[0], exe, *command[1:])
+    assert json.loads(run_c(c_binary, "--json", "layout", exe)[1]) == views.layout(b)

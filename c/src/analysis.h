@@ -12,7 +12,7 @@
 
 typedef struct Analysis Analysis;
 
-typedef VEC(uint64_t) AddressList;
+typedef VEC(big) AddressList;
 
 /* Throws ERR_NO_DISASSEMBLER (no Capstone in this build) or ERR_UNSUPPORTED
  * (no disassembler for the file's CPU). */
