@@ -56,13 +56,15 @@ __extension__ typedef unsigned __int128 ubig;
 typedef struct ArenaBlock ArenaBlock;
 typedef struct {
     ArenaBlock *head;
-    struct ArenaAdopted *adopted;
+    struct ArenaCleanup *cleanups;
 } Arena;
 
 void *arena_alloc(Arena *a, size_t size);            /* zero-filled */
 void *arena_array(Arena *a, size_t count, size_t item_size);
 /* Hand a malloc'ed buffer to the arena, to be freed with it. */
 void arena_adopt(Arena *a, void *buffer);
+/* Call fn(arg) when the arena is released (most recent first). */
+void arena_on_release(Arena *a, void (*fn)(void *), void *arg);
 void arena_release(Arena *a);
 
 /* Growable array whose storage lives in an arena. */
@@ -85,6 +87,8 @@ typedef struct {
     size_t n;
 } Str;
 
+struct Buf;
+
 #define STR_NONE ((Str){NULL, 0})
 
 Str str_c(const char *text);                         /* wraps, does not copy */
@@ -103,11 +107,19 @@ size_t utf8_length(Str s);                           /* code points */
 Str utf8_decode(Arena *a, const uint8_t *bytes, size_t n);
 /* str.strip() */
 Str str_strip(Str s);
+/* Next code point of text that should be UTF-8, advancing *at. Bytes that
+ * are not valid UTF-8 come back as 0xDC80..0xDCFF, the way Python reads
+ * such command-line arguments (surrogateescape). */
+uint32_t utf8_next(const char *text, size_t length, size_t *at);
+/* repr() of a Python str holding the given command-line argument. */
+Str py_repr(Arena *a, const char *text);
+/* "\xe9", "\u20ac" or "\U0001f600": how repr() escapes a character. */
+void buf_add_escaped(struct Buf *b, uint32_t code_point);
 /* ASCII-only str.lower() */
 Str str_lower_ascii(Arena *a, Str s);
 
 /* Growable text buffer (arena-backed). */
-typedef struct {
+typedef struct Buf {
     Arena *arena;
     char *p;
     size_t n, cap;

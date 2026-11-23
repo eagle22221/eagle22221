@@ -58,22 +58,28 @@ void *arena_array(Arena *a, size_t count, size_t item_size) {
     return arena_alloc(a, count * item_size);
 }
 
-struct ArenaAdopted {
-    struct ArenaAdopted *next;
-    void *buffer;
+struct ArenaCleanup {
+    struct ArenaCleanup *next;
+    void (*fn)(void *);
+    void *arg;
 };
 
+void arena_on_release(Arena *a, void (*fn)(void *), void *arg) {
+    struct ArenaCleanup *node = arena_alloc(a, sizeof *node);
+    node->fn = fn;
+    node->arg = arg;
+    node->next = a->cleanups;
+    a->cleanups = node;
+}
+
 void arena_adopt(Arena *a, void *buffer) {
-    struct ArenaAdopted *node = arena_alloc(a, sizeof *node);
-    node->buffer = buffer;
-    node->next = a->adopted;
-    a->adopted = node;
+    arena_on_release(a, free, buffer);
 }
 
 void arena_release(Arena *a) {
-    for (struct ArenaAdopted *node = a->adopted; node != NULL; node = node->next)
-        free(node->buffer);
-    a->adopted = NULL;
+    for (struct ArenaCleanup *node = a->cleanups; node != NULL; node = node->next)
+        node->fn(node->arg);
+    a->cleanups = NULL;
     ArenaBlock *block = a->head;
     while (block != NULL) {
         ArenaBlock *next = block->next;
@@ -323,6 +329,59 @@ Str str_lower_ascii(Arena *a, Str s) {
     }
     Str lowered = {out, s.n};
     return lowered;
+}
+
+uint32_t utf8_next(const char *text, size_t length, size_t *at) {
+    const uint8_t *p = (const uint8_t *)text + *at;
+    size_t bad = 0;
+    size_t len = utf8_sequence(p, length - *at, &bad);
+    if (len == 0) {
+        *at += 1;
+        return 0xDC00 + p[0];
+    }
+    uint32_t cp = len == 1 ? p[0] : p[0] & (0xFFu >> (len + 1));
+    for (size_t k = 1; k < len; k++)
+        cp = (cp << 6) | (p[k] & 0x3F);
+    *at += len;
+    return cp;
+}
+
+void buf_add_escaped(Buf *b, uint32_t code_point) {
+    if (code_point < 0x100)
+        buf_printf(b, "\\x%02x", (unsigned)code_point);
+    else if (code_point < 0x10000)
+        buf_printf(b, "\\u%04x", (unsigned)code_point);
+    else
+        buf_printf(b, "\\U%08x", (unsigned)code_point);
+}
+
+Str py_repr(Arena *a, const char *text) {
+    size_t length = strlen(text);
+    char quote = strchr(text, '\'') != NULL && strchr(text, '"') == NULL ? '"' : '\'';
+    Buf b;
+    buf_init(&b, a);
+    buf_addch(&b, quote);
+    for (size_t at = 0; at < length;) {
+        size_t start = at;
+        uint32_t cp = utf8_next(text, length, &at);
+        if (cp == (uint32_t)quote || cp == '\\') {
+            buf_addch(&b, '\\');
+            buf_addch(&b, (char)cp);
+        } else if (cp == '\n') {
+            buf_addc(&b, "\\n");
+        } else if (cp == '\r') {
+            buf_addc(&b, "\\r");
+        } else if (cp == '\t') {
+            buf_addc(&b, "\\t");
+        } else if (cp < 0x20 || cp == 0x7F || (cp >= 0x80 && cp <= 0xA0) || cp == 0xAD ||
+                   (cp >= 0xD800 && cp <= 0xDFFF) || cp == 0x2028 || cp == 0x2029) {
+            buf_add_escaped(&b, cp);        /* not printable */
+        } else {
+            buf_add(&b, text + start, at - start);
+        }
+    }
+    buf_addch(&b, quote);
+    return buf_str(&b);
 }
 
 /* --- text buffer ------------------------------------------------------------- */

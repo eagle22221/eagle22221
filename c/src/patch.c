@@ -214,40 +214,6 @@ static uint8_t *parse_hex(Session *s, const char *text, size_t *size) {
 
 /* --- text ---------------------------------------------------------------------- */
 
-/* Next code point of a command-line argument. Bytes that are not valid UTF-8
- * come back as 0xDC80..0xDCFF, the way Python's surrogateescape reads them. */
-static uint32_t next_code_point(const char *text, size_t length, size_t *at) {
-    const uint8_t *p = (const uint8_t *)text + *at;
-    size_t left = length - *at;
-    uint8_t c = p[0];
-    size_t need = c < 0x80 ? 1 : c < 0xC2 ? 0 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : c < 0xF5 ? 4 : 0;
-    bool valid = need != 0 && need <= left;
-    for (size_t k = 1; valid && k < need; k++)
-        valid = (p[k] & 0xC0) == 0x80;
-    if (valid && need == 3)
-        valid = !(c == 0xE0 && p[1] < 0xA0) && !(c == 0xED && p[1] >= 0xA0);
-    if (valid && need == 4)
-        valid = !(c == 0xF0 && p[1] < 0x90) && !(c == 0xF4 && p[1] >= 0x90);
-    if (!valid) {
-        *at += 1;
-        return 0xDC00 + c;
-    }
-    uint32_t cp = need == 1 ? c : c & (0xFFu >> (need + 1));
-    for (size_t k = 1; k < need; k++)
-        cp = (cp << 6) | (p[k] & 0x3F);
-    *at += need;
-    return cp;
-}
-
-static void add_escaped(Buf *b, uint32_t cp) {
-    if (cp < 0x100)
-        buf_printf(b, "\\x%02x", (unsigned)cp);
-    else if (cp < 0x10000)
-        buf_printf(b, "\\u%04x", (unsigned)cp);
-    else
-        buf_printf(b, "\\U%08x", (unsigned)cp);
-}
-
 /* Encode an argument as ASCII or UTF-16LE. On failure throws the message of
  * Python's UnicodeEncodeError. */
 static uint8_t *encode_text(Session *s, const char *text, bool utf16, size_t *size) {
@@ -255,7 +221,7 @@ static uint8_t *encode_text(Session *s, const char *text, bool utf16, size_t *si
     uint8_t *out = arena_alloc(s->a, length * 2 + 2);
     size_t n = 0, index = 0;
     for (size_t at = 0; at < length; index++) {
-        uint32_t cp = next_code_point(text, length, &at);
+        uint32_t cp = utf8_next(text, length, &at);
         bool surrogate = cp >= 0xD800 && cp <= 0xDFFF;
         if (utf16 ? surrogate : cp >= 0x80) {
             /* The error names the whole run of characters that do not fit. */
@@ -263,7 +229,7 @@ static uint8_t *encode_text(Session *s, const char *text, bool utf16, size_t *si
             uint32_t bad = cp;
             while (at < length) {
                 size_t peek = at;
-                uint32_t next = next_code_point(text, length, &peek);
+                uint32_t next = utf8_next(text, length, &peek);
                 if (utf16 ? !(next >= 0xD800 && next <= 0xDFFF) : next < 0x80)
                     break;
                 at = peek;
@@ -274,7 +240,7 @@ static uint8_t *encode_text(Session *s, const char *text, bool utf16, size_t *si
             buf_printf(&why, "'%s' codec can't encode ", utf16 ? "utf-16-le" : "ascii");
             if (last == index) {
                 buf_addc(&why, "character '");
-                add_escaped(&why, bad);
+                buf_add_escaped(&why, bad);
                 buf_printf(&why, "' in position %zu", index);
             } else {
                 buf_printf(&why, "characters in position %zu-%zu", index, last);
@@ -298,36 +264,6 @@ static uint8_t *encode_text(Session *s, const char *text, bool utf16, size_t *si
     }
     *size = n;
     return out;
-}
-
-/* repr() of a command-line argument, for error messages. */
-static Str python_repr(Arena *a, const char *text) {
-    size_t length = strlen(text);
-    char quote = strchr(text, '\'') != NULL && strchr(text, '"') == NULL ? '"' : '\'';
-    Buf b;
-    buf_init(&b, a);
-    buf_addch(&b, quote);
-    for (size_t at = 0; at < length;) {
-        size_t start = at;
-        uint32_t cp = next_code_point(text, length, &at);
-        if (cp == (uint32_t)quote || cp == '\\') {
-            buf_addch(&b, '\\');
-            buf_addch(&b, (char)cp);
-        } else if (cp == '\n') {
-            buf_addc(&b, "\\n");
-        } else if (cp == '\r') {
-            buf_addc(&b, "\\r");
-        } else if (cp == '\t') {
-            buf_addc(&b, "\\t");
-        } else if (cp < 0x20 || cp == 0x7F || (cp >= 0x80 && cp <= 0xA0) || cp == 0xAD ||
-                   (cp >= 0xD800 && cp <= 0xDFFF) || cp == 0x2028 || cp == 0x2029) {
-            add_escaped(&b, cp);
-        } else {
-            buf_add(&b, text + start, at - start);
-        }
-    }
-    buf_addch(&b, quote);
-    return buf_str(&b);
 }
 
 /* --- the command --------------------------------------------------------------- */
@@ -397,7 +333,7 @@ static void replace_string(Session *s, const char *src, const char *out, const c
     }
     if (offsets.n == 0)
         err_throw(s->err, ERR_LOCATION, "the %s text %s does not occur in the file",
-                  utf16 ? "utf16" : "ascii", python_repr(a, old_text).p);
+                  utf16 ? "utf16" : "ascii", py_repr(a, old_text).p);
     const Binary *binary = try_load(s, original, size, src);
     for (size_t i = 0; i < offsets.n; i++) {
         PatchResult r;
@@ -444,7 +380,7 @@ void cmd_patch(Session *s) {
         if (!parse_int(location, true, &where)) {
             if (by_offset)
                 err_throw(s->err, ERR_LOCATION, "%s is not a file offset",
-                          python_repr(a, location).p);
+                          py_repr(a, location).p);
             AddressList found = {0};
             analysis_resolve(analysis_new(a, binary), location, &found);
             where = found.v[0];
