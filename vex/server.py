@@ -1,7 +1,7 @@
-"""Local web interface: `binspect gui`.
+"""Local web interface: `vex gui`.
 
 A small HTTP server bound to 127.0.0.1 that serves the single-page UI in
-binspect/web and a JSON API over the same views the command line prints.
+vex/web and a JSON API over the same views the command line prints.
 
 It can read (and, for modding, write) local files on the user's behalf, so
 three things keep other web pages in the same browser from driving it:
@@ -31,7 +31,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from . import load, views
 from .analysis import Analysis
-from .errors import BinspectError
+from .errors import VexError
 from .model import Binary
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -67,7 +67,7 @@ class Workspace:
 
     def __init__(self, token: Optional[str] = None):
         self.token = token or secrets.token_urlsafe(24)
-        self.tempdir = tempfile.mkdtemp(prefix="binspect-")
+        self.tempdir = tempfile.mkdtemp(prefix="vex-")
         self.lock = threading.RLock()
         self._cache: "OrderedDict[str, tuple]" = OrderedDict()
         self._uploads = 0
@@ -457,7 +457,7 @@ class _Body:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "binspect"
+    server_version = "vex"
     protocol_version = "HTTP/1.1"
     workspace: Workspace
 
@@ -508,7 +508,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(exc.status, {"error": str(exc)})
         except FileNotFoundError as exc:
             self._json(404, {"error": f"no such file or folder: {exc.filename or exc}"})
-        except BinspectError as exc:
+        except VexError as exc:
             self._json(400, {"error": str(exc)})
         except OSError as exc:
             self._json(400, {"error": f"{exc.strerror or exc}: {exc.filename or ''}".strip(": ")})
@@ -520,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
             body.read()                     # keep the connection in sync
 
     def _api(self, method: str, name: str, params: Params, body, length: int) -> None:
-        supplied = self.headers.get("X-Binspect-Token") or ""
+        supplied = self.headers.get("X-Vex-Token") or ""
         if not hmac.compare_digest(supplied.encode(), self.workspace.token.encode()):
             raise ApiError(403, "missing or wrong session token")
         handler = (GET_ROUTES if method == "GET" else POST_ROUTES).get(name)
@@ -578,7 +578,7 @@ def session_url(httpd, workspace: Workspace, path: Optional[str] = None) -> str:
 def serve(path: Optional[str] = None, port: int = 0, open_browser: bool = True) -> int:
     httpd, workspace = create_server(port)
     url = session_url(httpd, workspace, path)
-    print(f"binspect is running at:\n\n  {url}\n\nPress Ctrl+C to stop.")
+    print(f"vex is running at:\n\n  {url}\n\nPress Ctrl+C to stop.")
     sys.stdout.flush()
     if open_browser:
         try:

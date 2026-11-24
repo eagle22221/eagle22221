@@ -1,7 +1,7 @@
 /* Text renderers: the human-readable form of each view (port of the
  * _render_* functions in cli.py). */
-#ifndef BINSPECT_RENDER_H
-#define BINSPECT_RENDER_H
+#ifndef VEX_RENDER_H
+#define VEX_RENDER_H
 
 #include "json.h"
 

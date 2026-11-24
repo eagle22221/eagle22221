@@ -1,7 +1,7 @@
 /* Printable-string extraction (ASCII and UTF-16LE) with light tagging of
  * strings that usually matter in reverse engineering (port of strings.py). */
-#ifndef BINSPECT_STRINGS_H
-#define BINSPECT_STRINGS_H
+#ifndef VEX_STRINGS_H
+#define VEX_STRINGS_H
 
 #include "model.h"
 

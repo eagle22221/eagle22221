@@ -42,7 +42,7 @@ def main():
         ("textures/hero.png", hero),
         ("scripts/config.json", json.dumps(
             {"title": "Demo Game", "difficulty": "normal", "lives": 3}, indent=2).encode()),
-        ("readme.txt", b"Demo asset pack for the binspect guide.\n"),
+        ("readme.txt", b"Demo asset pack for the vex guide.\n"),
     ]
     with zipfile.ZipFile(GAME / "assets.pk3", "w", zipfile.ZIP_DEFLATED) as pack:
         for name, data in files:

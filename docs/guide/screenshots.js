@@ -1,4 +1,4 @@
-// Captures the screenshots used in the guide from a running binspect server.
+// Captures the screenshots used in the guide from a running vex server.
 // Usage: node screenshots.js BASE_URL TOKEN PRACTICE_EXE [GAME_FOLDER]
 const { chromium } = require('playwright');
 const path = require('path');

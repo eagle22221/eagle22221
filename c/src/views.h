@@ -2,8 +2,8 @@
  * (--json and text) is rendered from these, so the two cannot disagree.
  * Addresses are hex strings ("0x140001000"): JSON numbers lose precision
  * above 2**53, which 64-bit addresses can exceed. */
-#ifndef BINSPECT_VIEWS_H
-#define BINSPECT_VIEWS_H
+#ifndef VEX_VIEWS_H
+#define VEX_VIEWS_H
 
 #include "json.h"
 #include "model.h"

@@ -94,7 +94,7 @@ class RpaArchive(Archive):
                 f"RPA index offset {index_offset:#x} is outside the file ({size} bytes)")
         maximum = limit("MAX_INDEX_SIZE")
         if size - index_offset > maximum:
-            raise UnsupportedError("RPA index exceeds binspect.archives.MAX_INDEX_SIZE")
+            raise UnsupportedError("RPA index exceeds vex.archives.MAX_INDEX_SIZE")
         blob = read_at(fh, index_offset, size - index_offset, size, "RPA index")
         inflater = zlib.decompressobj()
         try:
@@ -103,7 +103,7 @@ class RpaArchive(Archive):
             raise ParseError(f"RPA index is not valid zlib data: {exc}") from None
         if inflater.unconsumed_tail:
             raise UnsupportedError(
-                "RPA index expands beyond binspect.archives.MAX_INDEX_SIZE "
+                "RPA index expands beyond vex.archives.MAX_INDEX_SIZE "
                 f"({maximum} bytes)")
         if not inflater.eof:
             raise ParseError("RPA index is truncated (incomplete zlib stream)")

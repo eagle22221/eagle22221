@@ -1,7 +1,7 @@
-binspect for Windows
+vex for Windows
 ====================
 
-binspect.exe takes a program apart and shows what is inside it, without
+vex.exe takes a program apart and shows what is inside it, without
 running it. It reads Windows programs (.exe, .dll) and Linux programs.
 It is one file: nothing to install, and it does not need Python.
 
@@ -9,10 +9,10 @@ It is one file: nothing to install, and it does not need Python.
 The quickest start
 ------------------
 
-Double-click binspect.exe. It opens a graphical interface in your web
+Double-click vex.exe. It opens a graphical interface in your web
 browser, served from your own computer (nothing is uploaded, and the
 file you look at is never run). Choose "Open file or folder" and pick a
-program, or drag any .exe or .dll onto binspect.exe to open it straight
+program, or drag any .exe or .dll onto vex.exe to open it straight
 away. Try it with practice\hello_pe64.exe.
 
 The interface has an Overview (what the file is and how it is protected),
@@ -22,7 +22,7 @@ Sections, a Bytes view, Assets (game asset packs), and Modify.
 Prefer the terminal? Everything is also a command (see below), including
 a report you can read without the browser:
 
-    .\binspect.exe report practice\hello_pe64.exe
+    .\vex.exe report practice\hello_pe64.exe
 
 
 Using commands
@@ -32,7 +32,7 @@ For more control, open a terminal in this folder: hold Shift, right-click
 an empty part of the folder and choose "Open PowerShell window here" (or
 "Open in Terminal"). Then type a command:
 
-    .\binspect.exe info practice\hello_pe64.exe
+    .\vex.exe info practice\hello_pe64.exe
 
     Command                              Shows
     -----------------------------------  ---------------------------------------
@@ -60,11 +60,11 @@ an empty part of the folder and choose "Open PowerShell window here" (or
     patch bytes FILE 0x1400.. "90 90"    change bytes (into a copy)
     gui                                  open the browser interface
 
-Add --json right after binspect.exe to get output other tools can read:
+Add --json right after vex.exe to get output other tools can read:
 
-    .\binspect.exe --json imports practice\hello_pe64.exe
+    .\vex.exe --json imports practice\hello_pe64.exe
 
-For the options of any command:  .\binspect.exe COMMAND --help
+For the options of any command:  .\vex.exe COMMAND --help
 
 
 Five short lessons
@@ -73,29 +73,29 @@ Five short lessons
 Use practice\hello_pe64.exe, a tiny program that prints two lines of text.
 
 1. What is it?
-       .\binspect.exe info practice\hello_pe64.exe
+       .\vex.exe info practice\hello_pe64.exe
    Read the first lines: Windows or Linux, 32 or 64 bit, where the code
    starts ("entry point"), and which protections it was built with.
 
 2. Where is everything?
-       .\binspect.exe sections practice\hello_pe64.exe
+       .\vex.exe sections practice\hello_pe64.exe
    ".text" is the code, ".rdata" holds text and constants. Entropy near 8
    means compressed contents.
 
 3. What text does it carry?
-       .\binspect.exe strings practice\hello_pe64.exe --grep fixture
+       .\vex.exe strings practice\hello_pe64.exe --grep fixture
    Programs keep their messages and web addresses as plain text. They are
    the quickest way to see what a program is about.
 
 4. Which code uses that text?
-       .\binspect.exe xrefs practice\hello_pe64.exe --string "Hello from"
+       .\vex.exe xrefs practice\hello_pe64.exe --string "Hello from"
    The answer names the function that reads the text. Then read it:
-       .\binspect.exe disasm practice\hello_pe64.exe entry
+       .\vex.exe disasm practice\hello_pe64.exe entry
    Lines starting with "call" run another function; the note after the
    semicolon says which one.
 
 5. What does it ask Windows to do?
-       .\binspect.exe imports practice\hello_pe64.exe
+       .\vex.exe imports practice\hello_pe64.exe
    Functions such as WriteFile or CreateFile mean it works with files;
    socket or connect mean it uses the network.
 
@@ -103,18 +103,18 @@ Use practice\hello_pe64.exe, a tiny program that prints two lines of text.
 Good to know
 ------------
 
-- binspect never runs the file you give it. It only reads it.
-- Windows may warn about binspect.exe the first time ("unknown publisher"),
+- vex never runs the file you give it. It only reads it.
+- Windows may warn about vex.exe the first time ("unknown publisher"),
   because the file is not digitally signed. Choose "More info", then
   "Run anyway" if you trust where you got it.
 - The practice folder has more to try: sample.dll and libsample.so (a Linux
   library) for "exports"; evasion_pe64.exe, a harmless sample that trips every
   check, for "techniques"; and demo_game\ (a pretend game) for "engine" and the
-  Assets view, e.g.  .\binspect.exe engine practice\demo_game
-- This one binspect.exe does everything above - the browser interface, the
+  Assets view, e.g.  .\vex.exe engine practice\demo_game
+- This one vex.exe does everything above - the browser interface, the
   analysis and disassembly, the techniques scan, game asset packs and patching -
-  with nothing to install. The Python edition of binspect adds a few extras:
+  with nothing to install. The Python edition of vex adds a few extras:
   editing icons and other resources inside Windows programs, Electron (.asar)
   and Ren'Py (.rpa) packs, and an illustrated PDF guide.
-- The disassembler inside binspect is Capstone (BSD licence); its licence
+- The disassembler inside vex is Capstone (BSD licence); its licence
   text is in the licences folder.

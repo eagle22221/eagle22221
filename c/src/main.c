@@ -1,4 +1,4 @@
-/* binspect: static reverse-engineering toolkit for ELF and PE binaries. */
+/* vex: static reverse-engineering toolkit for ELF and PE binaries. */
 #include "cli.h"
 #include "platform.h"
 

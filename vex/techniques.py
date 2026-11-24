@@ -4,7 +4,7 @@ This answers "what is this program doing to hide from, or reach into, the
 rest of the system?" — the view a malware analyst takes, and the one you need
 to dissect a game cheat (what does this .exe do to my machine?) or an
 anti-cheat (what techniques does it use?). The same techniques appear in
-anti-cheat, DRM, cheats and malware, so binspect only *identifies and
+anti-cheat, DRM, cheats and malware, so vex only *identifies and
 explains* them. It never disables, bypasses or defeats anything.
 
 Everything here is read from the already-parsed Binary: imports, section

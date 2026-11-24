@@ -1,8 +1,8 @@
-# binspect, native C version.
+# vex, native C version.
 #
-#   make            build/binspect           (this machine)
-#   make windows    build/binspect.exe       (64-bit Windows, MinGW-w64, static)
-#   make asan       build/binspect-asan      (AddressSanitizer + UBSan, for tests)
+#   make            build/vex           (this machine)
+#   make windows    build/vex.exe       (64-bit Windows, MinGW-w64, static)
+#   make asan       build/vex-asan      (AddressSanitizer + UBSan, for tests)
 #   make clean
 #
 # The disassembly commands (disasm, functions, xrefs) use the Capstone engine,
@@ -25,9 +25,9 @@ BUILD     = build
 CORE      = util hash model elf pe strings json views techniques render platform patch cli main server
 HEADERS   = $(wildcard src/*.h)
 
-# --- web interface (binspect gui) -----------------------------------------------
-# tools/embed_web.py compiles binspect/web into a C source served from memory.
-WEB_DIR    = ../binspect/web
+# --- web interface (vex gui) -----------------------------------------------
+# tools/embed_web.py compiles vex/web into a C source served from memory.
+WEB_DIR    = ../vex/web
 WEB_FILES  = $(shell find $(WEB_DIR) -type f 2>/dev/null)
 GEN_SRC    = $(BUILD)/gen/web_assets.c
 web_object = $(BUILD)/$(1)/web_assets.o
@@ -44,7 +44,7 @@ endif
 CS_VERSION = 5.0.9
 CS_DIR     = third_party/capstone-$(CS_VERSION)/src
 CAPSTONE  ?= $(if $(wildcard $(CS_DIR)/cs.c),1,0)
-# Only the CPUs binspect can analyse; AT&T syntax is never used.
+# Only the CPUs vex can analyse; AT&T syntax is never used.
 CS_ARCHS   = X86 AArch64 ARM Mips PowerPC
 CS_DEFINES = -DCAPSTONE_USE_SYS_DYN_MEM -DCAPSTONE_X86_ATT_DISABLE -DCAPSTONE_HAS_X86 \
              -DCAPSTONE_HAS_ARM64 -DCAPSTONE_HAS_ARM -DCAPSTONE_HAS_MIPS -DCAPSTONE_HAS_POWERPC
@@ -67,17 +67,17 @@ endif
 objects = $(SOURCES:%=$(BUILD)/$(1)/%.o)
 
 .PHONY: all windows asan clean
-all: $(BUILD)/binspect
-windows: $(BUILD)/binspect.exe
-asan: $(BUILD)/binspect-asan
+all: $(BUILD)/vex
+windows: $(BUILD)/vex.exe
+asan: $(BUILD)/vex-asan
 
-$(BUILD)/binspect: $(call objects,native) $(call web_object,native) $(call cs_library,native)
+$(BUILD)/vex: $(call objects,native) $(call web_object,native) $(call cs_library,native)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
-$(BUILD)/binspect-asan: $(call objects,asan) $(call web_object,asan) $(call cs_library,asan)
+$(BUILD)/vex-asan: $(call objects,asan) $(call web_object,asan) $(call cs_library,asan)
 	$(CC) $(CFLAGS) -O1 $(SANITIZE) -o $@ $^ -lm
 
-$(BUILD)/binspect.exe: $(call objects,windows) $(call web_object,windows) $(call cs_library,windows)
+$(BUILD)/vex.exe: $(call objects,windows) $(call web_object,windows) $(call cs_library,windows)
 	$(MINGW) $(CFLAGS) -static -s -o $@ $^ -lws2_32 -lshell32
 
 $(BUILD)/native/%.o: src/%.c $(HEADERS)
@@ -92,7 +92,7 @@ $(BUILD)/windows/%.o: src/%.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(MINGW) $(CFLAGS) $(CS_USE) -c -o $@ $<
 
-# The embedded web interface: generated from binspect/web, then compiled like
+# The embedded web interface: generated from vex/web, then compiled like
 # any other source (-Isrc so the generated file finds server.h).
 $(GEN_SRC): tools/embed_web.py $(WEB_FILES)
 	@mkdir -p $(@D)

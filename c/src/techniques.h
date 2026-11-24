@@ -1,8 +1,8 @@
 /* Static detection of protection and evasion techniques (port of
  * techniques.py). Everything is read from the already-parsed Binary: imports,
  * section names and entropy, subsystem, strings and overlay. */
-#ifndef BINSPECT_TECHNIQUES_H
-#define BINSPECT_TECHNIQUES_H
+#ifndef VEX_TECHNIQUES_H
+#define VEX_TECHNIQUES_H
 
 #include "json.h"
 #include "model.h"

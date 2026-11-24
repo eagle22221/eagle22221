@@ -1,6 +1,6 @@
 /* MD5, SHA-1 and SHA-256 of a byte buffer, as lowercase hex strings. */
-#ifndef BINSPECT_HASH_H
-#define BINSPECT_HASH_H
+#ifndef VEX_HASH_H
+#define VEX_HASH_H
 
 #include "common.h"
 

@@ -2,7 +2,7 @@
 #include "common.h"
 
 NORETURN void die_out_of_memory(void) {
-    fputs("binspect: error: out of memory\n", stderr);
+    fputs("vex: error: out of memory\n", stderr);
     exit(1);
 }
 
@@ -583,7 +583,7 @@ void err_set(Err *e, ErrKind kind, const char *fmt, ...) {
 NORETURN void err_raise(Err *e) {
     ErrFrame *frame = e->top;
     if (frame == NULL) {
-        fprintf(stderr, "binspect: error: %s\n", e->msg ? e->msg : "internal error");
+        fprintf(stderr, "vex: error: %s\n", e->msg ? e->msg : "internal error");
         exit(1);
     }
     e->top = frame->prev;

@@ -51,8 +51,8 @@ class PlanItem:
 
 def limit(name: str) -> int:
     """A size limit, looked up on the package at call time so callers can
-    adjust binspect.archives.MAX_ENTRIES and friends."""
-    import binspect.archives as package
+    adjust vex.archives.MAX_ENTRIES and friends."""
+    import vex.archives as package
     return int(getattr(package, name))
 
 
@@ -251,7 +251,7 @@ class Archive:
         if count > maximum:
             raise UnsupportedError(
                 f"{self.format} archive declares {count} {what}, more than "
-                f"binspect.archives.MAX_ENTRIES ({maximum})")
+                f"vex.archives.MAX_ENTRIES ({maximum})")
 
     def _finish(self) -> None:
         """Called once the listing is complete."""
@@ -270,7 +270,7 @@ class Archive:
         if any(e.encrypted for e in self.entries):
             count = sum(e.encrypted for e in self.entries)
             self._read_only(
-                f"{count} entries are encrypted; binspect does not decrypt them and "
+                f"{count} entries are encrypted; vex does not decrypt them and "
                 "cannot repack this archive")
 
     def _read_only(self, reason: str) -> None:
@@ -334,7 +334,7 @@ class Archive:
         entry = self.entries[index]
         if entry.encrypted:
             raise UnsupportedError(
-                f"{entry.name!r} is encrypted; binspect does not decrypt archive "
+                f"{entry.name!r} is encrypted; vex does not decrypt archive "
                 "contents (no key recovery, no DRM removal)")
         if index in self._broken:
             raise ParseError(f"{entry.name!r}: {self._broken[index]}")

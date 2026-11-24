@@ -7,8 +7,8 @@
  * image base 0xffffffffffffffff + RVA, and the Python reference then works
  * with (and prints) the unwrapped 65-bit sum. Keeping the same arithmetic is
  * what lets the two implementations agree on every input. */
-#ifndef BINSPECT_MODEL_H
-#define BINSPECT_MODEL_H
+#ifndef VEX_MODEL_H
+#define VEX_MODEL_H
 
 #include "common.h"
 

@@ -1,5 +1,5 @@
-// Records the product demo video: a scripted tour of the native binspect GUI.
-// Usage: start `c/build/binspect gui --no-browser --port 8792`, then
+// Records the product demo video: a scripted tour of the native vex GUI.
+// Usage: start `c/build/vex gui --no-browser --port 8792`, then
 //   node docs/demo/record.js http://127.0.0.1:8792 TOKEN docs/demo
 // and encode docs/demo/raw/*.webm to MP4 with ffmpeg (libx264, yuv420p).
 const { chromium } = require('playwright');
@@ -60,7 +60,7 @@ const overlay = () => {
   await app(null);
   await page.waitForSelector('.welcome');
   await sleep(400);
-  await caption('One native binspect.exe — double-click it and this opens in your browser');
+  await caption('One native vex.exe — double-click it and this opens in your browser');
   await moveTo(page.locator('#open-button'));
   await sleep(2600);
 
@@ -142,7 +142,7 @@ const overlay = () => {
   await page.mouse.move(-50, -50);
   await sleep(300);
   await caption('Dissect cheats and anti-cheat: flags anti-debug, VM checks, injection, hooking and packing');
-  const cmd = '.\\binspect.exe techniques evasion_pe64.exe';
+  const cmd = '.\\vex.exe techniques evasion_pe64.exe';
   for (const ch of cmd) { await page.evaluate((c) => { document.getElementById('cmd').textContent += c; }, ch); await sleep(55); }
   await sleep(450);
   await page.evaluate(() => {

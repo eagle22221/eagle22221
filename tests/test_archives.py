@@ -4,7 +4,7 @@ Ren'Py RPA).
 Every container used here is assembled in this file: by hand with struct.pack
 following the format's specification (offsets are spelled out next to each
 builder), or with the standard library's zipfile. Expected values are literals
-worked out from those layouts. Nothing is produced by binspect.archives and
+worked out from those layouts. Nothing is produced by vex.archives and
 then fed back to it as an expectation; where a test inspects a repacked file
 it re-parses it with a small reference reader written here from the spec.
 """
@@ -20,10 +20,10 @@ import zlib
 
 import pytest
 
-from binspect import archives
-from binspect.archives import ArchiveEntry
-from binspect.errors import (
-    BinspectError,
+from vex import archives
+from vex.archives import ArchiveEntry
+from vex.errors import (
+    VexError,
     LocationError,
     ParseError,
     UnknownFormatError,
@@ -315,7 +315,7 @@ def build_rpa_named(names, payload=b"DATA") -> bytes:
 
 
 def ref_rpa(data: bytes) -> dict:
-    """Reference reader for archives written by binspect (trusted input, so
+    """Reference reader for archives written by vex (trusted input, so
     plain pickle is fine here): {name: bytes}."""
     if data.startswith(b"RPA-3.0 "):
         offset, key = int(data[8:24], 16), int(data[25:33], 16)
@@ -529,7 +529,7 @@ def test_replacing_or_removing_a_missing_name_is_a_location_error(tmp_path, kind
 def test_adding_a_name_that_already_exists_is_refused(tmp_path, kind):
     path, content = sample(tmp_path, kind)
     out = tmp_path / "out.bin"
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         archives.open_archive(path).repack(out, additions={list(content)[0]: b"x"})
     assert not out.exists()
 
@@ -541,11 +541,11 @@ def test_repack_refuses_to_overwrite_its_own_source(tmp_path, kind):
     a = archives.open_archive(path)
     for target in (path, str(path), tmp_path / "sub" / ".." / path.name):
         (tmp_path / "sub").mkdir(exist_ok=True)
-        with pytest.raises(BinspectError):
+        with pytest.raises(VexError):
             a.repack(target, replacements={a.entries[0].name: b"x"})
     link = tmp_path / "alias"
     os.symlink(path, link)
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         a.repack(link, replacements={a.entries[0].name: b"x"})
     assert path.read_bytes() == original
 
@@ -693,7 +693,7 @@ def test_pak_entry_pointing_outside_the_file_is_listed_but_unreadable(tmp_path):
 def test_git_packfile_is_not_mistaken_for_a_quake_pak_without_an_error(tmp_path):
     # git packs also start with 'PACK': version 2, 1 object, big endian.
     path = write(tmp_path, "pack-1234.pack", b"PACK" + struct.pack(">II", 2, 1) + bytes(40))
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         archives.open_archive(path)
 
 
@@ -1047,7 +1047,7 @@ def test_pck_path_traversal_is_rejected(tmp_path):
     files = [(b"res://../../evil.txt", b"x"), (b"res://ok.txt", b"y")]
     a = archives.open_archive(write(tmp_path, "game.pck", build_pck(files=files)))
     dest = tmp_path / "a" / "b" / "out"
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         a.extract(dest)
     assert tree(tmp_path / "a") == {} if (tmp_path / "a").exists() else True
     assert not (tmp_path / "evil.txt").exists()
@@ -1078,7 +1078,7 @@ def test_asar_header_layout_and_entries(tmp_path):
 def test_asar_unpacked_file_is_read_from_the_sibling_directory(tmp_path):
     path = write(tmp_path, "app.asar", build_asar())
     a = archives.open_archive(path)
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         a.read("native.node")                               # app.asar.unpacked missing
     (tmp_path / "app.asar.unpacked").mkdir()
     (tmp_path / "app.asar.unpacked" / "native.node").write_bytes(b"\x7fELF")
@@ -1092,9 +1092,9 @@ def test_asar_unpacked_entry_cannot_escape_the_unpacked_directory(tmp_path):
     (tmp_path / "app.asar.unpacked").mkdir()
     a = archives.open_archive(path)
     assert [e.name for e in a.entries] == ["../secret.txt"]
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         a.read("../secret.txt")
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         a.extract(tmp_path / "out")
 
 
@@ -1164,7 +1164,7 @@ def test_asar_header_larger_than_the_file_is_a_parse_error(tmp_path):
     data = bytearray(build_asar())
     data[4:8] = struct.pack("<I", 0x7FFFFFF8)
     data[8:12] = struct.pack("<I", 0x7FFFFFF4)
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         archives.open_archive(write(tmp_path, "app.asar", bytes(data)))
 
 
@@ -1198,7 +1198,7 @@ def test_pickle_pair_without_a_json_object_is_not_an_asar(tmp_path):
 def test_asar_deeply_nested_header_is_a_parse_error_not_a_recursion_error(tmp_path):
     depth = 100_000
     header = '{"files":' * depth + "{}" + "}" * depth
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         archives.open_archive(write(tmp_path, "app.asar", build_asar(header, b"")))
 
 
@@ -1392,7 +1392,7 @@ def test_rpa_decompression_bomb_index_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(archives, "MAX_INDEX_SIZE", 1 << 16)
     bomb = zlib.compress(bytes(8 << 20), 9)                 # 8 MiB of zeros in ~8 KiB
     assert len(bomb) < 1 << 16
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         archives.open_archive(write(tmp_path, "bomb.rpa", build_rpa3(bomb)))
 
 
@@ -1691,7 +1691,7 @@ def test_entry_count_limit_applies_before_anything_is_allocated(tmp_path, monkey
     monkeypatch.setattr(archives, "MAX_ENTRIES", 1)
     for kind in ("pak", "wad", "pck2", "asar", "rpa3", "zip"):
         path, _ = sample(tmp_path, kind)
-        with pytest.raises(BinspectError):
+        with pytest.raises(VexError):
             archives.open_archive(path)
 
 
@@ -1739,9 +1739,9 @@ def test_extract_rejects_hostile_names_before_writing_anything(tmp_path, name):
     assert a.extract(dest, names=["good.txt"])[0].read_bytes() == b"DATA"
 
 
-def test_unsafe_entry_error_is_a_binspect_parse_error():
+def test_unsafe_entry_error_is_a_vex_parse_error():
     assert issubclass(archives.UnsafeEntryError, ParseError)
-    assert issubclass(archives.UnsafeEntryError, BinspectError)
+    assert issubclass(archives.UnsafeEntryError, VexError)
 
 
 @pytest.mark.parametrize("name", ["../evil.txt", "/abs.txt", "a/../../evil.txt"])
@@ -1826,15 +1826,15 @@ def test_repack_rejects_hostile_addition_names(tmp_path):
 # =============================================================================
 
 def exercise(path) -> None:
-    """Open, list and read everything. Only BinspectError may escape."""
+    """Open, list and read everything. Only VexError may escape."""
     try:
         a = archives.open_archive(path)
-    except BinspectError:
+    except VexError:
         return
     for entry in a.entries:
         try:
             a.read(entry.name, max_size=1 << 20)
-        except BinspectError:
+        except VexError:
             pass
 
 
@@ -1858,7 +1858,7 @@ def fuzz_samples(tmp_path):
 @pytest.mark.filterwarnings("ignore:Overlapped entries")
 @pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "pck3", "asar", "rpa3",
                                   "rpa3-py2", "rpa2", "zip"])
-def test_every_truncation_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
+def test_every_truncation_is_a_vex_error_or_a_valid_archive(tmp_path, kind):
     data = fuzz_samples(tmp_path)[kind]
     path = tmp_path / "fuzz.bin"
     for cut in range(len(data)):
@@ -1870,7 +1870,7 @@ def test_every_truncation_is_a_binspect_error_or_a_valid_archive(tmp_path, kind)
 @pytest.mark.filterwarnings("ignore:Overlapped entries")
 @pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "pck3", "asar", "rpa3",
                                   "rpa3-py2", "rpa2", "zip"])
-def test_every_single_byte_corruption_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
+def test_every_single_byte_corruption_is_a_vex_error_or_a_valid_archive(tmp_path, kind):
     data = fuzz_samples(tmp_path)[kind]
     path = tmp_path / "fuzz.bin"
     for pos in range(len(data)):
@@ -1886,7 +1886,7 @@ def test_every_single_byte_corruption_is_a_binspect_error_or_a_valid_archive(tmp
 @pytest.mark.filterwarnings("ignore:Overlapped entries")
 @pytest.mark.parametrize("kind", ["pak", "wad", "pck1", "pck2", "pck3", "asar", "rpa3", "rpa2",
                                   "zip"])
-def test_every_overwritten_32_bit_field_is_a_binspect_error_or_a_valid_archive(tmp_path, kind):
+def test_every_overwritten_32_bit_field_is_a_vex_error_or_a_valid_archive(tmp_path, kind):
     data = fuzz_samples(tmp_path)[kind]
     path = tmp_path / "fuzz.bin"
     for pos in range(0, len(data) - 3):

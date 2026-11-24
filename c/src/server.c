@@ -1,4 +1,4 @@
-/* The graphical interface: `binspect gui [PATH] [--port N] [--no-browser]`
+/* The graphical interface: `vex gui [PATH] [--port N] [--no-browser]`
  * (port of server.py).
  *
  * A single-threaded HTTP server bound to the loopback interface. It serves
@@ -100,7 +100,7 @@ struct Req {
 
     const char *method;             /* "GET" / "POST" */
     const char *host;               /* Host header value, or NULL */
-    const char *token_hdr;          /* X-Binspect-Token, or NULL */
+    const char *token_hdr;          /* X-Vex-Token, or NULL */
     big content_length;
 
     QParam *params;
@@ -403,7 +403,7 @@ static void send_response(Req *req, int status, const char *ctype, const uint8_t
     Buf h;
     buf_init(&h, req->a);
     buf_printf(&h, "HTTP/1.1 %d %s\r\n", status, reason_phrase(status));
-    buf_addc(&h, "Server: binspect\r\n");
+    buf_addc(&h, "Server: vex\r\n");
     buf_printf(&h, "Content-Type: %s\r\n", ctype);
     buf_printf(&h, "Content-Length: %zu\r\n", len);
     buf_addc(&h, "X-Content-Type-Options: nosniff\r\n");
@@ -1739,7 +1739,7 @@ static void handle_request(Req *req, char *head) {
             char *value = trim_value(colon + 1);
             if (ci_eq(p, "Host"))
                 req->host = value;
-            else if (ci_eq(p, "X-Binspect-Token"))
+            else if (ci_eq(p, "X-Vex-Token"))
                 req->token_hdr = value;
             else if (ci_eq(p, "Content-Length")) {
                 big cl;
@@ -1848,7 +1848,7 @@ static const char *make_tempdir(Arena *a) {
             suffix[i * 2 + 1] = hexd[raw[i] & 15];
         }
         suffix[16] = '\0';
-        const char *dir = str_printf(a, "%sbinspect-%s", base, suffix).p;
+        const char *dir = str_printf(a, "%svex-%s", base, suffix).p;
         if (_mkdir(dir) == 0)
             return dir;
     }
@@ -1859,7 +1859,7 @@ static const char *make_tempdir(Arena *a) {
         base = "/tmp";
     size_t n = strlen(base);
     const char *sep = n > 0 && base[n - 1] == '/' ? "" : "/";
-    char *tmpl = (char *)str_printf(a, "%s%sbinspect-XXXXXX", base, sep).p;
+    char *tmpl = (char *)str_printf(a, "%s%svex-XXXXXX", base, sep).p;
     return mkdtemp(tmpl);
 #endif
 }
@@ -1958,7 +1958,7 @@ void cmd_gui(Session *s) {
         Str enc = url_quote(s->a, platform_abspath(s->a, path));
         buf_printf(&url, "&open=%.*s", (int)enc.n, enc.p);
     }
-    printf("binspect is running at:\n\n  %s\n\nPress Ctrl+C to stop.\n", buf_str(&url).p);
+    printf("vex is running at:\n\n  %s\n\nPress Ctrl+C to stop.\n", buf_str(&url).p);
     fflush(stdout);
 
     if (!no_browser)

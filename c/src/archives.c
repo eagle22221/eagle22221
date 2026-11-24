@@ -1,5 +1,5 @@
 /* Game asset packs: ZIP family, Quake PAK, Doom WAD and Godot PCK (the C
- * counterpart of binspect/archives/). Electron ASAR and Ren'Py RPA are
+ * counterpart of vex/archives/). Electron ASAR and Ren'Py RPA are
  * detected but only opened in the Python edition.
  *
  * A container's index is attacker-controlled, so the rules of archives.py
@@ -299,7 +299,7 @@ static void read_only(BsArchive *a, Str reason) {
 static void check_count(Ctx *c, uint64_t count, const char *what) {
     if (count > MAX_ENTRIES)
         err_throw(c->err, ERR_UNSUPPORTED, "%s archive declares %" PRIu64 " %s, more than "
-                  "binspect.archives.MAX_ENTRIES (%" PRIu64 ")", c->a->format, count, what,
+                  "vex.archives.MAX_ENTRIES (%" PRIu64 ")", c->a->format, count, what,
                   MAX_ENTRIES);
 }
 
@@ -354,7 +354,7 @@ static void finish(Ctx *c) {
         note(a, str_printf(ar, "%zu entries point outside the file (truncated or corrupt "
                            "archive) and cannot be read", broken));
     if (encrypted)
-        read_only(a, str_printf(ar, "%zu entries are encrypted; binspect does not decrypt them "
+        read_only(a, str_printf(ar, "%zu entries are encrypted; vex does not decrypt them "
                                 "and cannot repack this archive", encrypted));
 
     a->entries = arena_array(ar, a->npub ? a->npub : 1, sizeof *a->entries);
@@ -604,7 +604,7 @@ static void load_pck(Ctx *c, FILE *f, uint64_t size, const uint8_t *head, size_t
     a->pck_format = (int)fmt;
     if (fmt != 1 && fmt != 2 && fmt != 3)
         err_throw(c->err, ERR_UNSUPPORTED, "Godot pack format version %" PRIu32 " is not supported "
-                  "(binspect reads formats 1 to 3, Godot 3.x and 4.x)", fmt);
+                  "(vex reads formats 1 to 3, Godot 3.x and 4.x)", fmt);
     uint64_t pos = (uint64_t)start + 20;
     uint32_t flags = 0;
     uint64_t file_base = 0;
@@ -627,11 +627,11 @@ static void load_pck(Ctx *c, FILE *f, uint64_t size, const uint8_t *head, size_t
     }
     if (flags & PACK_DIR_ENCRYPTED)
         err_throw(c->err, ERR_UNSUPPORTED, "the index (directory) of this Godot pack is encrypted "
-                  "with a key compiled into the game; binspect does not decrypt packs or recover "
+                  "with a key compiled into the game; vex does not decrypt packs or recover "
                   "keys");
     if (flags & PACK_SPARSE_BUNDLE)
         err_throw(c->err, ERR_UNSUPPORTED, "this Godot pack is a sparse bundle (file data is "
-                  "stored outside the pack), which binspect does not support");
+                  "stored outside the pack), which vex does not support");
     const uint8_t *cb = fetch(c, f, size, (big)pos, 4, "PCK file count");
     uint32_t count = ld32(cb);
     pos += 4;
@@ -651,7 +651,7 @@ static void load_pck(Ctx *c, FILE *f, uint64_t size, const uint8_t *head, size_t
         pos += 4 + length + fixed;
         if (pos - directory_start > MAX_INDEX_SIZE)
             err_throw(c->err, ERR_UNSUPPORTED,
-                      "Godot pack directory exceeds binspect.archives.MAX_INDEX_SIZE");
+                      "Godot pack directory exceeds vex.archives.MAX_INDEX_SIZE");
         size_t rawlen = 0;
         while (rawlen < length && row[rawlen] != '\0') rawlen++;
         uint64_t offset = ld64(row + length), length_ = ld64(row + length + 8);
@@ -698,7 +698,7 @@ static void load_pck(Ctx *c, FILE *f, uint64_t size, const uint8_t *head, size_t
         note(a, str_printf(a->arena, "%" PRIu64 " entries are removal markers of a patch pack",
                            removals));
     if (fmt == 3)
-        read_only(a, str_c("pack format 3 (Godot 4.5+) is read-only in binspect: listing and "
+        read_only(a, str_c("pack format 3 (Godot 4.5+) is read-only in vex: listing and "
                            "extraction work, repacking is not implemented"));
     finish(c);
 }
@@ -744,7 +744,7 @@ static void load_zip(Ctx *c, FILE *f, uint64_t size, const uint8_t *head, size_t
                   "inconsistent (truncated or corrupt archive)");
     if (t.count > MAX_ENTRIES || t.cd_size / 46 > MAX_ENTRIES)
         err_throw(c->err, ERR_UNSUPPORTED, "ZIP central directory describes more than "
-                  "binspect.archives.MAX_ENTRIES (%" PRIu64 ") entries", MAX_ENTRIES);
+                  "vex.archives.MAX_ENTRIES (%" PRIu64 ") entries", MAX_ENTRIES);
     a->zip_relative = t.cd_start != t.cd_offset;
     big concat = (big)t.cd_start - (big)t.cd_offset;
     const uint8_t *cd = fetch(c, f, size, (big)t.cd_start, (big)t.cd_size, "ZIP central directory");
@@ -886,7 +886,7 @@ static void parse_worker(void *arg) {
     case F_ASAR:
     case F_RPA:
         err_throw(j->err, ERR_UNSUPPORTED,
-                  "this pack format is available in the Python edition of binspect");
+                  "this pack format is available in the Python edition of vex");
     }
 }
 
@@ -1102,7 +1102,7 @@ static size_t lookup(Ctx *c, const char *name, const char *action) {
 static void check_entry(Ctx *c, size_t pub_index, bool have_max, uint64_t maximum) {
     Rec *r = &c->a->rec[c->a->pub[pub_index]];
     if (r->encrypted)
-        err_throw(c->err, ERR_UNSUPPORTED, "%s is encrypted; binspect does not decrypt archive "
+        err_throw(c->err, ERR_UNSUPPORTED, "%s is encrypted; vex does not decrypt archive "
                   "contents (no key recovery, no DRM removal)", reprn(c->a_arena, r->name));
     if (r->broken)
         err_throw(c->err, ERR_PARSE, "%s: %s", reprn(c->a_arena, r->name), r->broken);
@@ -1989,7 +1989,7 @@ static void repack_worker(void *arg) {
             write_pck(&c, src, fsize, &out, plan, nplan);
         else
             err_throw(j->err, ERR_UNSUPPORTED,
-                      "this pack format is available in the Python edition of binspect");
+                      "this pack format is available in the Python edition of vex");
     }
 
     if (fflush(outf) != 0)

@@ -101,7 +101,7 @@ class AsarArchive(Archive):
             raise ParseError(
                 f"ASAR header ({header_size} bytes) is larger than the file ({size} bytes)")
         if json_len > limit("MAX_INDEX_SIZE"):
-            raise UnsupportedError("ASAR header exceeds binspect.archives.MAX_INDEX_SIZE")
+            raise UnsupportedError("ASAR header exceeds vex.archives.MAX_INDEX_SIZE")
         raw = read_at(fh, 16, json_len, size, "ASAR header")
         try:
             header = json.loads(raw.decode("utf-8"))
@@ -160,7 +160,7 @@ class AsarArchive(Archive):
             self.notes.append(
                 "the header carries per-file integrity hashes: repack updates them, but "
                 "an app with ASAR integrity validation enabled also stores a hash of the "
-                "whole header in its executable, which binspect does not update")
+                "whole header in its executable, which vex does not update")
         self._finish()
 
     # -- reading ---------------------------------------------------------------

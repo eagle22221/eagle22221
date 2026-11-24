@@ -561,7 +561,7 @@ void render_report(Arena *a, const Style *st, const JVal *d, Lines *out) {
     for (size_t i = 0; i < j_len(strings) && i < 60; i++)
         add(a, out, render_string_row(a, st, j_at(strings, i)));
     if (j_len(strings) > 60)
-        add(a, out, styled(a, st, str_printf(a, "... %zu more (binspect strings --tagged)",
+        add(a, out, styled(a, st, str_printf(a, "... %zu more (vex strings --tagged)",
                                              j_len(strings) - 60), DIM));
     heading(a, st, out, "Functions");
     const JVal *functions = j_get(d, "functions");
@@ -572,7 +572,7 @@ void render_report(Arena *a, const Style *st, const JVal *d, Lines *out) {
     } else {
         functions_table(a, st, functions, 60, out);
         if (j_len(functions) > 60)
-            add(a, out, styled(a, st, str_printf(a, "... %zu more (binspect functions)",
+            add(a, out, styled(a, st, str_printf(a, "... %zu more (vex functions)",
                                                  j_len(functions) - 60), DIM));
     }
 }

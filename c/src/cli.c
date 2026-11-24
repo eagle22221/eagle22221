@@ -1,4 +1,4 @@
-/* Command-line interface: `binspect <command> FILE ...` (port of cli.py). */
+/* Command-line interface: `vex <command> FILE ...` (port of cli.py). */
 #include "cli.h"
 
 #include <errno.h>
@@ -12,7 +12,7 @@
 /* --- usage errors ------------------------------------------------------------- */
 
 static const char USAGE[] =
-    "usage: binspect [--json] [--color auto|always|never] COMMAND FILE [options]\n";
+    "usage: vex [--json] [--color auto|always|never] COMMAND FILE [options]\n";
 
 static const char HELP[] =
     "\n"
@@ -71,7 +71,7 @@ static const char HELP[] =
     "(case-sensitive); it is not a regular expression.\n"
     "\n"
     "Giving just a file (or dropping one on the program) is the same as\n"
-    "`binspect report FILE`.\n";
+    "`vex report FILE`.\n";
 
 NORETURN void cli_usage_error(Session *s, const char *fmt, ...) {
     va_list args;
@@ -368,7 +368,7 @@ static void render_engine(Arena *a, const Style *st, const JVal *d, Lines *out) 
             add_line(a, out, str_printf(a, "  next: %s", j_text(j_at(adv, k)).p));
     }
     add_line(a, out, str_c(""));
-    add_line(a, out, str_c("== Asset packs binspect can open =="));
+    add_line(a, out, str_c("== Asset packs vex can open =="));
     const JVal *packs = j_get(d, "packs");
     if (j_len(packs) == 0)
         add_line(a, out, str_c("  (none found)"));
@@ -731,14 +731,14 @@ static void parse_arguments(Session *s, int argc, char **argv, bool *want_help) 
             for (size_t i = 0; i < ARRAY_LEN(PYTHON_ONLY); i++)
                 if (strcmp(PYTHON_ONLY[i], arg) == 0)
                     cli_usage_error(s, "the '%s' command is only available in the Python "
-                                       "version of binspect", arg);
+                                       "version of vex", arg);
             if (gui_started_from_desktop() && gui_can_open(arg)) {
                 /* A file or folder dropped on the program's icon: open the
                  * graphical interface on it. */
                 s->command = find_command("gui", NULL);
             } else {
                 if (!platform_is_file(arg))
-                    cli_usage_error(s, "argument COMMAND: invalid choice: '%s' (see binspect "
+                    cli_usage_error(s, "argument COMMAND: invalid choice: '%s' (see vex "
                                        "--help)", arg);
                 /* Just a file on the command line: show the report. */
                 s->command = find_command("report", NULL);
@@ -806,23 +806,23 @@ int cli_main(int argc, char **argv) {
     if (argc < 2 && !gui_started_from_desktop()) {
         fputs(USAGE, stderr);
         fputs(HELP, stderr);
-        fputs("\nbinspect: error: the following arguments are required: COMMAND\n", stderr);
+        fputs("\nvex: error: the following arguments are required: COMMAND\n", stderr);
         status = 2;
     } else if (!err_protect(&err, run, &inv)) {
         fflush(stdout);
         if (err.kind == ERR_USAGE) {
             fputs(USAGE, stderr);
-            fprintf(stderr, "binspect: error: %s\n", err.msg);
+            fprintf(stderr, "vex: error: %s\n", err.msg);
             status = 2;
         } else {
-            fprintf(stderr, "binspect: error: %s\n", err.msg);
+            fprintf(stderr, "vex: error: %s\n", err.msg);
             status = 1;
         }
     } else if (inv.help) {
         fputs(USAGE, stdout);
         fputs(HELP, stdout);
     } else if (session.want_version) {
-        fputs("binspect " BINSPECT_VERSION "\n", stdout);
+        fputs("vex " VEX_VERSION "\n", stdout);
     }
     if (fflush(stdout) != 0 && status == 0)
         status = 1;

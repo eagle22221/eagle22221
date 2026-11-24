@@ -9,9 +9,9 @@ from urllib.parse import quote
 
 import pytest
 
-import binspect
-from binspect import resources, server
-from binspect.cli import main
+import vex
+from vex import resources, server
+from vex.cli import main
 from conftest import fixture_bytes, fixture_path
 
 PE = str(fixture_path("hello_pe64.exe"))
@@ -55,7 +55,7 @@ def test_resources_replace_saves_a_new_program(capsys, tmp_path):
     code, out, _ = run(capsys, "resources", "replace", RES, "rcdata", "101",
                        str(new), "-o", str(out_path))
     assert code == 0 and "Replaced" in out
-    modded = binspect.load(out_path)
+    modded = vex.load(out_path)
     res = next(r for r in resources.list_resources(modded)
                if (r.type, r.name) == ("RCDATA", "#101"))
     assert resources.read_resource(modded, res) == b"replacement payload"
@@ -130,7 +130,7 @@ class Api:
         query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
         conn = http.client.HTTPConnection("127.0.0.1", self.httpd.server_address[1], timeout=10)
         conn.request(method, f"/api/{endpoint}?{query}", body=body,
-                     headers={"X-Binspect-Token": self.ws.token})
+                     headers={"X-Vex-Token": self.ws.token})
         resp = conn.getresponse()
         data = resp.read()
         conn.close()
@@ -175,7 +175,7 @@ def test_api_replaces_a_resource(api, tmp_path):
     status, done = api.call("POST", "resource/replace", body=b"abc", path=RES,
                             index=rc["index"], out=str(out))
     assert status == 200 and done["size"] == 3
-    modded = binspect.load(out)
+    modded = vex.load(out)
     res = next(r for r in resources.list_resources(modded)
                if (r.type, r.name) == ("RCDATA", "#101"))
     assert resources.read_resource(modded, res) == b"abc"
@@ -287,7 +287,7 @@ def test_assets_errors_are_clean(capsys, pack, tmp_path):
                        "-o", str(tmp_path / "o.pk3"))
     assert code == 1 and "no/such/file" in err and not (tmp_path / "o.pk3").exists()
     code, _, err = run(capsys, "assets", "list", str(new))
-    assert code == 1 and err.startswith("binspect: error:")
+    assert code == 1 and err.startswith("vex: error:")
 
 
 def test_engine_command_reports_packs_next_to_a_program(capsys, pack):

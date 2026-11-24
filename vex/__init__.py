@@ -1,11 +1,11 @@
-"""binspect: static reverse-engineering toolkit for ELF and PE binaries."""
+"""vex: static reverse-engineering toolkit for ELF and PE binaries."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Union
 
 from .errors import (
-    BinspectError,
+    VexError,
     LocationError,
     MissingDependencyError,
     ParseError,
@@ -18,7 +18,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Binary", "Section", "Segment", "Symbol", "Import", "Export",
-    "BinspectError", "UnknownFormatError", "ParseError",
+    "VexError", "UnknownFormatError", "ParseError",
     "MissingDependencyError", "UnsupportedError", "LocationError",
     "load", "load_bytes", "entropy", "__version__",
 ]

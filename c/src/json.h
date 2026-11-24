@@ -1,8 +1,8 @@
 /* A small JSON document tree. The views build one per command; the CLI then
  * either prints it as JSON or renders text from it, so the two outputs cannot
  * disagree (the same arrangement as views.py and cli.py). */
-#ifndef BINSPECT_JSON_H
-#define BINSPECT_JSON_H
+#ifndef VEX_JSON_H
+#define VEX_JSON_H
 
 #include "common.h"
 

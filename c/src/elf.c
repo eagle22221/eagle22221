@@ -1,4 +1,4 @@
-/* ELF parser (port of binspect/elf.py).
+/* ELF parser (port of vex/elf.py).
  *
  * Works from the program headers first, because the section header table is
  * optional at run time and is often removed from stripped or tampered

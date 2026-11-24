@@ -2,8 +2,8 @@
 addresses were read from objdump / llvm-objdump for the committed fixtures."""
 import pytest
 
-import binspect
-from binspect.analysis import Analysis
+import vex
+from vex.analysis import Analysis
 
 
 @pytest.fixture(scope="module")
@@ -93,7 +93,7 @@ def test_resolve_import_gives_stub_and_slot(elf, pe):
 
 
 def test_resolve_unknown_name_is_an_error(elf):
-    with pytest.raises(binspect.LocationError, match="no_such_thing"):
+    with pytest.raises(vex.LocationError, match="no_such_thing"):
         elf.resolve("no_such_thing")
 
 

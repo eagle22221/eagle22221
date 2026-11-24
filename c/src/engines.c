@@ -1,5 +1,5 @@
 /* Which engine or runtime a game was built with, and nearby asset packs (the
- * C counterpart of binspect/engines.py and views.engine()/find_packs()).
+ * C counterpart of vex/engines.py and views.engine()/find_packs()).
  *
  * Detection uses cheap evidence only: the names of neighbouring files and
  * folders, the signature of asset containers found there, and a capped scan
@@ -608,21 +608,21 @@ static const char *strip_dot(Arena *a, const char *s) {
     return str_copy(a, s, n).p;
 }
 
-/* (can binspect open it, advice sentence). */
+/* (can vex open it, advice sentence). */
 static bool archive_advice(Tree *t, const char *relative, const char *what, const char **sentence) {
     Arena *a = t->arena;
     const char *shown = tree_report(t, relative);
     char err[512];
     BsArchive *ar = tree_archive(t, relative, err, sizeof err);
     if (ar == NULL) {
-        *sentence = str_printf(a, "binspect cannot open %s: %s.", shown, strip_dot(a, err)).p;
+        *sentence = str_printf(a, "vex cannot open %s: %s.", shown, strip_dot(a, err)).p;
         return false;
     }
     bool writable = bs_archive_writable(ar);
     if (writable) {
         *sentence = str_printf(a,
-            "binspect can browse, extract and repack %s (%s): open it in the Assets view, or run "
-            "`binspect assets list PACK`, `binspect assets extract PACK FOLDER`, `binspect assets "
+            "vex can browse, extract and repack %s (%s): open it in the Assets view, or run "
+            "`vex assets list PACK`, `vex assets extract PACK FOLDER`, `vex assets "
             "replace PACK NAME NEWFILE -o NEWPACK`. Repacking always writes a new file, so keep "
             "the original as a backup.", what, shown).p;
         bs_archive_close(ar);
@@ -640,8 +640,8 @@ static bool archive_advice(Tree *t, const char *relative, const char *what, cons
     }
     const char *whytext = why.n ? strip_dot(a, buf_str(&why).p) : "not supported for this pack";
     *sentence = str_printf(a,
-        "binspect can browse and extract %s (%s) in the Assets view or with `binspect assets list "
-        "PACK` and `binspect assets extract PACK FOLDER`, but cannot repack it: %s.", what, shown,
+        "vex can browse and extract %s (%s) in the Assets view or with `vex assets list "
+        "PACK` and `vex assets extract PACK FOLDER`, but cannot repack it: %s.", what, shown,
         whytext).p;
     bs_archive_close(ar);
     return true;
@@ -760,13 +760,13 @@ static void d_unity(Case *c) {
         "*_data/*.assets", "*_data/data.unity3d", "*_data/globalgamemanagers", "*_data/maindata",
         "*_data/level*", "*_data/*.bundle", "*_data/*.unity3d", "*_data/streamingassets/*.bundle",
         "*_data/streamingassets/*/*.bundle", "*_data/streamingassets/*.unity3d"));
-    c_advice(c, "binspect cannot open Unity's serialized files (.assets, level*, "
+    c_advice(c, "vex cannot open Unity's serialized files (.assets, level*, "
              "globalgamemanagers) or asset bundles / UnityFS (data.unity3d, *.bundle). Use "
              "AssetStudio or AssetRipper to browse and export assets, and UABEA to edit or "
              "replace them.");
     const char *scr = c_detail_get(c, "scripting");
     if (scr && strcmp(scr, "IL2CPP") == 0) {
-        c_advice(c, "Game code is compiled to native code (IL2CPP) in GameAssembly: binspect can "
+        c_advice(c, "Game code is compiled to native code (IL2CPP) in GameAssembly: vex can "
                  "disassemble it like any native binary, but recovering class and method names "
                  "needs Il2CppDumper or Cpp2IL together with il2cpp_data/Metadata/"
                  "global-metadata.dat.");
@@ -775,12 +775,12 @@ static void d_unity(Case *c) {
             Str h = tree_head(t, md.v[0], 4);
             if (h.n != 0 && !(h.n == 4 && memcmp(h.p, "\xaf\x1b\xb1\xfa", 4) == 0))
                 c_advice(c, str_printf(a, "%s does not start with the IL2CPP metadata signature: "
-                         "it is probably encrypted or obfuscated. binspect does not decrypt it.",
+                         "it is probably encrypted or obfuscated. vex does not decrypt it.",
                          tree_report(t, md.v[0])).p);
         }
     } else if (scr && strcmp(scr, "Mono") == 0) {
         c_advice(c, str_printf(a, "Game code is .NET IL in %s: decompile and edit it with ILSpy or "
-                 "dnSpy (dnSpyEx). binspect only reads the PE headers of .NET assemblies; it does "
+                 "dnSpy (dnSpyEx). vex only reads the PE headers of .NET assemblies; it does "
                  "not decompile IL.", tree_report(t, managed.v[0])).p);
     }
 }
@@ -847,14 +847,14 @@ static void d_unreal(Case *c) {
         }
         break;
     }
-    c_advice(c, "binspect cannot open Unreal .pak or IoStore (.utoc/.ucas) containers, nor the "
+    c_advice(c, "vex cannot open Unreal .pak or IoStore (.utoc/.ucas) containers, nor the "
              ".uasset/.umap packages inside. Use FModel or UE Viewer (umodel) to browse and "
              "export assets, and UnrealPak or repak to build paks.");
     c_advice(c, "Mods are normally shipped as an additional patch pak (a name ending in _P) in "
              "Content/Paks, often in a ~mods subfolder, rather than by rewriting the game's own "
              "pak.");
     if (encrypted)
-        c_advice(c, "The pak index is encrypted (AES): those tools need the game's key. binspect "
+        c_advice(c, "The pak index is encrypted (AES): those tools need the game's key. vex "
                  "does not decrypt paks and does not recover keys.");
 }
 
@@ -957,7 +957,7 @@ static void d_godot(Case *c) {
         c_advice(c, s);
     }
     if (encrypted)
-        c_advice(c, "The pack's index is encrypted with a key compiled into the game. binspect "
+        c_advice(c, "The pack's index is encrypted with a key compiled into the game. vex "
                  "reports this but does not decrypt the pack or recover the key.");
     if (packs.n)
         c_advice(c, "Files inside a pack are in Godot's imported formats (.ctex/.stex textures, "
@@ -994,11 +994,11 @@ static void d_gamemaker(Case *c) {
         return;
     c_assets_list(c, data_files);
     c_assets_list(c, TGLOB(t, "audiogroup*.dat", "*/audiogroup*.dat"));
-    c_advice(c, "binspect cannot open data.win / game.unx (GameMaker's IFF-style 'FORM' data file "
+    c_advice(c, "vex cannot open data.win / game.unx (GameMaker's IFF-style 'FORM' data file "
              "holding sprites, sounds, rooms and code). Use UndertaleModTool to browse and edit "
              "it.");
     c_advice(c, "Games built with the YYC compiler have their code compiled into the executable "
-             "instead of bytecode in the data file; binspect can disassemble that as native code "
+             "instead of bytecode in the data file; vex can disassemble that as native code "
              "but cannot recover GML.");
 }
 
@@ -1068,7 +1068,7 @@ static void d_renpy(Case *c) {
     c_advice(c, "Ren'Py looks for a file in the game/ folder before it looks in the archives, so a "
              "changed image, sound or script can simply be placed in game/ under the same path; "
              "repacking is rarely necessary.");
-    c_advice(c, ".rpyc files are compiled scripts: binspect does not decompile them; use unrpyc to "
+    c_advice(c, ".rpyc files are compiled scripts: vex does not decompile them; use unrpyc to "
              "get .rpy sources back.");
 }
 
@@ -1136,7 +1136,7 @@ static void d_rpg_maker(Case *c) {
             c_detail_set(c, "encrypted_assets", "yes");
             c_assets_list(c, scrambled);
             c_advice(c, "Images and/or audio were deployed with RPG Maker's built-in asset "
-                     "encryption (.rpgmvp/.rpgmvo/.rpgmvm, or .png_/.ogg_/.m4a_ in MZ). binspect "
+                     "encryption (.rpgmvp/.rpgmvo/.rpgmvm, or .png_/.ogg_/.m4a_ in MZ). vex "
                      "reports this but does not decrypt them.");
         } else {
             c_advice(c, "Images (img/) and audio (audio/) are plain .png/.ogg/.m4a files: replace "
@@ -1146,12 +1146,12 @@ static void d_rpg_maker(Case *c) {
                  "can be edited directly.");
     }
     if (rgss.n)
-        c_advice(c, str_printf(a, "%s is an RGSS archive, which is always encrypted: binspect "
+        c_advice(c, str_printf(a, "%s is an RGSS archive, which is always encrypted: vex "
                  "cannot open it and does not decrypt it.", rgss.v[0]).p);
     const char *ver = c_detail_get(c, "version");
     if (ver && strcmp(ver, "2000/2003") == 0)
         c_advice(c, "RPG Maker 2000/2003 keeps assets as loose files in folders next to RPG_RT.exe "
-                 "(some in the proprietary XYZ image format); binspect has no special support for "
+                 "(some in the proprietary XYZ image format); vex has no special support for "
                  "its .ldb/.lmu databases. EasyRPG's tools can read them.");
 }
 
@@ -1210,13 +1210,13 @@ static void d_electron(Case *c) {
                  "header marks as unpacked live in resources/app.asar.unpacked/ instead.");
         c_advice(c, "If the app enables Electron's ASAR integrity validation, a modified app.asar "
                  "is rejected unless the hash stored in the executable is updated as well; "
-                 "binspect does not do that.");
+                 "vex does not do that.");
     } else if (TFILE(t, "resources/app/package.json")) {
         c_advice(c, "The application is not packed: its JavaScript, HTML and CSS are plain files "
                  "under resources/app/ and can be edited directly.");
     } else {
         c_advice(c, "No resources/app.asar was found next to this executable; if the app keeps one "
-                 "elsewhere, binspect can browse, extract and repack it (Assets view, or `binspect "
+                 "elsewhere, vex can browse, extract and repack it (Assets view, or `vex "
                  "assets list PACK`).");
     }
 }
@@ -1299,7 +1299,7 @@ static void d_love(Case *c) {
         c_advice(c, s);
     }
     c_advice(c, "A L\xC3\x96VE game is Lua source plus loose images and sounds. Scripts are normally "
-             "plain text; if they were precompiled to LuaJIT bytecode, binspect does not decompile "
+             "plain text; if they were precompiled to LuaJIT bytecode, vex does not decompile "
              "them.");
 }
 
@@ -1353,7 +1353,7 @@ static void d_source(Case *c) {
     if (!c->score)
         return;
     c_assets_list(c, vpks);
-    c_advice(c, "binspect cannot open Valve VPK pack files. Use VPKEdit or GCFScape to browse and "
+    c_advice(c, "vex cannot open Valve VPK pack files. Use VPKEdit or GCFScape to browse and "
              "extract them, and Valve's vpk tool (shipped in the game's bin folder) to build new "
              "ones.");
     c_advice(c, "Many Source games load loose files or extra VPKs from a custom/ or addons/ folder "
@@ -1397,7 +1397,7 @@ static void d_goldsrc(Case *c) {
     }
     if (texwads.n)
         c_advice(c, str_printf(a, "%s and the other .wad files are Half-Life texture WADs (WAD3), a "
-                 "different format from Doom's IWAD/PWAD: binspect cannot open them. Use a WAD3 "
+                 "different format from Doom's IWAD/PWAD: vex cannot open them. Use a WAD3 "
                  "editor such as Wally.", tree_report(t, texwads.v[0])).p);
     c_advice(c, "GoldSrc loads loose files from the game folder (and its _addon/_hd variants) "
              "before pak files, so replacement assets can usually be placed there directly.");
@@ -1487,7 +1487,7 @@ static void d_id_tech(Case *c) {
              "the original.");
     if (iwads.n || pwads.n)
         c_advice(c, "WAD lumps are in Doom's own formats (patches, flats, maps, DMX sounds): "
-                 "binspect extracts and replaces the raw lumps; use SLADE to view, convert and "
+                 "vex extracts and replaces the raw lumps; use SLADE to view, convert and "
                  "edit them.");
 }
 
@@ -1586,13 +1586,13 @@ static void d_java(Case *c) {
         archive_advice(t, preferred ? preferred : jars.v[0], "JAR files (they are ZIP archives)", &s);
         c_advice(c, s);
         c_advice(c, "Images, sounds and data inside a JAR are ordinary files. .class files are JVM "
-                 "bytecode, which binspect does not decompile: use a Java decompiler such as CFR, "
+                 "bytecode, which vex does not decompile: use a Java decompiler such as CFR, "
                  "Vineflower or JD-GUI, or Recaf to edit classes.");
         c_advice(c, "A signed JAR (META-INF/*.SF) fails verification once changed: remove the "
                  "signature files or re-sign it.");
     } else {
         c_advice(c, "The executable looks like a Java launcher but no JAR was found next to it; JAR "
-                 "files are ZIP archives that binspect can browse, extract and repack.");
+                 "files are ZIP archives that vex can browse, extract and repack.");
     }
 }
 
@@ -1628,10 +1628,10 @@ static void d_monogame(Case *c) {
     if (!c->score)
         return;
     c_assets_list(c, content);
-    c_advice(c, "binspect cannot open .xnb files (XNA's compiled content, usually LZX or LZ4 "
+    c_advice(c, "vex cannot open .xnb files (XNA's compiled content, usually LZX or LZ4 "
              "compressed). Use an XNB tool such as xnbcli to unpack and repack them.");
     c_advice(c, "The game code is .NET: decompile and edit the game's .exe and .dll assemblies with "
-             "ILSpy or dnSpy. binspect only reads their PE headers.");
+             "ILSpy or dnSpy. vex only reads their PE headers.");
 }
 
 typedef void (*Detector)(Case *);
@@ -1670,7 +1670,7 @@ static JVal *case_to_json(Arena *a, Case *c) {
     return d;
 }
 
-/* find_packs: asset packs binspect can open under root (at most 3 deep). */
+/* find_packs: asset packs vex can open under root (at most 3 deep). */
 typedef struct { const char *abspath; } Cand;
 typedef struct { Cand *v; size_t n, cap; } CandVec;
 

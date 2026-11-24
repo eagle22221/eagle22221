@@ -5,8 +5,8 @@
  * Operands are analysed from Capstone's text output rather than its detail
  * structures, exactly like the Python version, so both produce the same
  * references for every architecture. */
-#ifndef BINSPECT_DISASM_H
-#define BINSPECT_DISASM_H
+#ifndef VEX_DISASM_H
+#define VEX_DISASM_H
 
 #include "model.h"
 

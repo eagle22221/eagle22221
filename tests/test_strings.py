@@ -1,7 +1,7 @@
 """String extraction. Offsets were read from the fixtures with `strings -t x`."""
 import pytest
 
-from binspect import strings
+from vex import strings
 
 
 def find(found, text):

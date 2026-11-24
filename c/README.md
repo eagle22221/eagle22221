@@ -1,8 +1,8 @@
-# binspect, native version
+# vex, native version
 
 The same static reverse-engineering toolkit as the Python package in
-`../binspect`, written in C so that it ships as one program with nothing to
-install: `binspect.exe` on Windows, `binspect` on Linux. Files are never run;
+`../vex`, written in C so that it ships as one program with nothing to
+install: `vex.exe` on Windows, `vex` on Linux. Files are never run;
 originals are never changed unless you ask.
 
 The Python version is the reference. For every command below, `--json`
@@ -11,11 +11,11 @@ output of the two is the same data (checked by `tests/test_c_port.py`).
 ## Build
 
     ./fetch_capstone.sh   # once: disassembler source into third_party/
-    make                  # build/binspect        (this machine; gcc or clang)
-    make windows          # build/binspect.exe    (64-bit Windows, needs MinGW-w64)
-    make asan             # build/binspect-asan   (sanitizer build used by the tests)
+    make                  # build/vex        (this machine; gcc or clang)
+    make windows          # build/vex.exe    (64-bit Windows, needs MinGW-w64)
+    make asan             # build/vex-asan   (sanitizer build used by the tests)
 
-`binspect.exe` is statically linked: copy the one file to any 64-bit Windows.
+`vex.exe` is statically linked: copy the one file to any 64-bit Windows.
 The code is C11 plus the compiler's 128-bit integer type (gcc, clang and
 MinGW-w64 have it on 64-bit targets) and builds with `-Wall -Wextra -Werror`.
 
@@ -27,25 +27,25 @@ compiled from source into the program. Without `third_party/` (or with
 
 ## Use
 
-    binspect [--json] [--color auto|always|never] COMMAND FILE [options]
+    vex [--json] [--color auto|always|never] COMMAND FILE [options]
 
-    binspect report FILE                 everything at a glance
-    binspect info FILE                   identity, hashes, security mitigations
-    binspect sections | segments | imports | exports | layout FILE
-    binspect symbols FILE [--grep TEXT]
-    binspect strings FILE [-n MIN] [-e all|ascii|utf16] [--grep TEXT] [--tagged]
-    binspect hexdump FILE [LOCATION] [--offset N] [-n BYTES]
-    binspect functions FILE [--grep TEXT]
-    binspect disasm FILE [LOCATION] [-n COUNT]
-    binspect xrefs FILE TARGET | --string TEXT
-    binspect patch bytes  FILE LOCATION HEX   [--offset] (-o OUT | --in-place)
-    binspect patch nop    FILE LOCATION BYTES [--offset] (-o OUT | --in-place)
-    binspect patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)
+    vex report FILE                 everything at a glance
+    vex info FILE                   identity, hashes, security mitigations
+    vex sections | segments | imports | exports | layout FILE
+    vex symbols FILE [--grep TEXT]
+    vex strings FILE [-n MIN] [-e all|ascii|utf16] [--grep TEXT] [--tagged]
+    vex hexdump FILE [LOCATION] [--offset N] [-n BYTES]
+    vex functions FILE [--grep TEXT]
+    vex disasm FILE [LOCATION] [-n COUNT]
+    vex xrefs FILE TARGET | --string TEXT
+    vex patch bytes  FILE LOCATION HEX   [--offset] (-o OUT | --in-place)
+    vex patch nop    FILE LOCATION BYTES [--offset] (-o OUT | --in-place)
+    vex patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)
 
 LOCATION and TARGET are a `0x` address, a function, symbol or import name
-(optionally `library!name`), or `entry`. `binspect --help` lists everything.
+(optionally `library!name`), or `entry`. `vex --help` lists everything.
 
-On Windows you can also drop a file onto `binspect.exe`: that shows the
+On Windows you can also drop a file onto `vex.exe`: that shows the
 report and waits for Enter before the window closes.
 
 ## Differences from the Python version
@@ -56,7 +56,7 @@ report and waits for Enter before the window closes.
   regions) are extra commands; Python has these views but no command for them.
 * A file given without a command is shown as a report instead of being a
   usage error, and `--json` / `--color` are accepted after the command too.
-* Commands of the Python version that are not in `binspect --help` answer
+* Commands of the Python version that are not in `vex --help` answer
   "only available in the Python version".
 * Where Python stops with a traceback the C program does not: a `--offset`
   value that is not a number is an ordinary error, and `strings -n` with an
@@ -72,7 +72,7 @@ report and waits for Enter before the window closes.
 runs both implementations on every fixture, on system binaries, on programs
 cross-compiled for other CPUs and byte orders (when clang/lld are installed)
 and on thousands of deliberately corrupted files, the latter with the
-sanitizer build. `BINSPECT_TEST_SANITIZED=1` runs everything with it.
+sanitizer build. `VEX_TEST_SANITIZED=1` runs everything with it.
 
 ## Layout of the source
 

@@ -1,7 +1,7 @@
 /* Game asset packs (ZIP, PAK, WAD, ...): listing, reading, extracting and
  * rebuilding (the C counterpart of archives.py). */
-#ifndef BINSPECT_ARCHIVES_H
-#define BINSPECT_ARCHIVES_H
+#ifndef VEX_ARCHIVES_H
+#define VEX_ARCHIVES_H
 
 #include "common.h"
 

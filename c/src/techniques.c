@@ -458,7 +458,7 @@ void render_techniques(Arena *a, const Style *st, const JVal *rows, Lines *out) 
         return;
     }
     add_line(a, out, tstyled(a, st,
-                             str_c("binspect identifies these techniques; it does not defeat them."),
+                             str_c("vex identifies these techniques; it does not defeat them."),
                              T_DIM));
     for (size_t i = 0; i < j_len(rows); i++) {
         const JVal *r = j_at(rows, i);

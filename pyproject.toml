@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "binspect"
+name = "vex"
 version = "0.1.0"
 description = "Static reverse-engineering toolkit for Linux (ELF) and Windows (PE) binaries"
 readme = "README.md"
@@ -14,13 +14,13 @@ dependencies = ["capstone>=4.0"]
 dev = ["pytest>=7"]
 
 [project.scripts]
-binspect = "binspect.cli:main"
+vex = "vex.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["binspect*"]
+include = ["vex*"]
 
 [tool.setuptools.package-data]
-binspect = ["web/*.html", "web/*.css", "web/*.js", "web/fonts/*"]
+vex = ["web/*.html", "web/*.css", "web/*.js", "web/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

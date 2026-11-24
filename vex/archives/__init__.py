@@ -19,7 +19,7 @@ Supported (unencrypted) formats:
 Nothing here decrypts anything: encrypted entries and encrypted indexes are
 reported (ArchiveEntry.encrypted, UnsupportedError) and left alone.
 
-Errors are BinspectError subclasses: UnknownFormatError (not a supported
+Errors are VexError subclasses: UnknownFormatError (not a supported
 container), ParseError (corrupt or hostile container; UnsafeEntryError for
 entry names that would escape the extraction directory), UnsupportedError
 (encrypted, over a size limit, or not possible for this archive) and
@@ -34,7 +34,7 @@ import struct
 import zlib
 from typing import BinaryIO, List, Optional, Type
 
-from ..errors import BinspectError, ParseError, UnknownFormatError
+from ..errors import VexError, ParseError, UnknownFormatError
 from ._base import Archive, ArchiveEntry, UnsafeEntryError
 
 __all__ = [
@@ -125,7 +125,7 @@ def open_archive(path) -> Archive:
         archive = cls(path)
         try:
             archive._load(fh, size, head)
-        except (BinspectError, OSError):
+        except (VexError, OSError):
             raise
         except (struct.error, zlib.error, ValueError, LookupError, OverflowError,
                 EOFError, RecursionError, MemoryError, ArithmeticError) as exc:

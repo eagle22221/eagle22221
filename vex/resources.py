@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-from .errors import BinspectError, LocationError, ParseError, UnsupportedError
+from .errors import VexError, LocationError, ParseError, UnsupportedError
 from .model import Binary
 from .patch import PathLike, save_copy
 from .reader import Reader
@@ -603,7 +603,7 @@ def replace_resource(src_path: PathLike, dst_path: PathLike, resource: Resource,
 
     The copy is written atomically. With `dst_path == src_path` the original
     is first saved as `<src>.bak` unless that file exists (see
-    binspect.patch.save_copy). Before anything is written the result is
+    vex.patch.save_copy). Before anything is written the result is
     parsed again and the resource read back. Errors: LocationError when the
     file has no such resource, UnsupportedError for non-PE files or images
     that cannot be grown, ParseError for corrupt ones. Nothing is written on
@@ -623,7 +623,7 @@ def replace_resource(src_path: PathLike, dst_path: PathLike, resource: Resource,
         check = load_bytes(image, src)
         intact = (any(r == updated for r, _entry in _Walk(check).found)
                   and read_resource(check, updated) == new)
-    except BinspectError:
+    except VexError:
         intact = False
     if not intact:
         raise ParseError(

@@ -1,4 +1,4 @@
-"""Command-line interface: `binspect <command> FILE ...`."""
+"""Command-line interface: `vex <command> FILE ...`."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ from typing import List, Optional, Sequence
 
 from . import __version__, load, views
 from .analysis import Analysis
-from .errors import BinspectError, MissingDependencyError, UnsupportedError
+from .errors import VexError, MissingDependencyError, UnsupportedError
 
 
 # --- terminal styling ----------------------------------------------------------
@@ -217,7 +217,7 @@ _CONFIDENCE_COLOUR = {"high": "red", "medium": "yellow"}
 def _render_techniques(rows: List[dict], st: Style) -> List[str]:
     if not rows:
         return [st("No notable protection or evasion techniques found.", "green")]
-    out = [st("binspect identifies these techniques; it does not defeat them.", "dim")]
+    out = [st("vex identifies these techniques; it does not defeat them.", "dim")]
     for r in rows:
         out += ["", st(f"{r['title']}  [{r['confidence']}]",
                        "bold", _CONFIDENCE_COLOUR.get(r["confidence"], "cyan"))]
@@ -237,14 +237,14 @@ def _render_report(d: dict, st: Style) -> List[str]:
     out += _heading("Interesting strings", st)
     out += _render_strings(d["strings"][:60], st) if d["strings"] else ["(none tagged)"]
     if len(d["strings"]) > 60:
-        out.append(st(f"... {len(d['strings']) - 60} more (binspect strings --tagged)", "dim"))
+        out.append(st(f"... {len(d['strings']) - 60} more (vex strings --tagged)", "dim"))
     out += _heading("Functions", st)
     if d["functions"] is None:
         out.append("(unavailable: " + d.get("functions_error", "no disassembler") + ")")
     else:
         out += _render_functions(d["functions"][:60], st)
         if len(d["functions"]) > 60:
-            out.append(st(f"... {len(d['functions']) - 60} more (binspect functions)", "dim"))
+            out.append(st(f"... {len(d['functions']) - 60} more (vex functions)", "dim"))
     return out
 
 
@@ -329,7 +329,7 @@ def _render_engine(d: dict, st: Style) -> List[str]:
                 f"  ({m['confidence']} confidence{'; ' + details if details else ''})"]
         out += [f"  why: {e}" for e in m["evidence"]]
         out += [f"  next: {a}" for a in m["advice"]]
-    out += _heading("Asset packs binspect can open", st)
+    out += _heading("Asset packs vex can open", st)
     out += [f"  {p['relative']}  ({p['size']} bytes)" for p in d["packs"]] or ["  (none found)"]
     return out
 
@@ -410,8 +410,8 @@ def _cmd_resources(args, st):
     wanted = [r for r in items if r.type.lower() == args.type.lower()
               and r.name.lstrip("#") == args.name.lstrip("#")]
     if not wanted:
-        raise BinspectError(f"no resource of type {args.type} named {args.name}; "
-                            f"see: binspect resources list {args.file}")
+        raise VexError(f"no resource of type {args.type} named {args.name}; "
+                            f"see: vex resources list {args.file}")
     updated = resources.replace_resource(args.file, args.output, wanted[0],
                                          _read_file(args.newfile))
     return {"out": os.path.abspath(args.output), "size": updated.size,
@@ -421,7 +421,7 @@ def _cmd_resources(args, st):
 def _cmd_patch(args, st):
     from . import patch
     if bool(args.output) == bool(args.in_place):
-        raise BinspectError("say where to save: -o OUT for a modified copy, or "
+        raise VexError("say where to save: -o OUT for a modified copy, or "
                             "--in-place to change the file (a .bak backup is kept)")
     out = args.file if args.in_place else args.output
     if args.action == "string":
@@ -441,7 +441,7 @@ def _cmd_patch(args, st):
             try:
                 data = bytes.fromhex(args.hex.replace("0x", "").replace(",", " "))
             except ValueError:
-                raise BinspectError("bytes must be hex, for example: \"90 90 eb 05\"") from None
+                raise VexError("bytes must be hex, for example: \"90 90 eb 05\"") from None
         results = [patch.apply_patch(args.file, out, data, **where)]
     return {"out": os.path.abspath(out),
             "patches": [views.patch_result(out, r) for r in results],
@@ -531,11 +531,11 @@ def _add_modding(sub) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="binspect",
+        prog="vex",
         description="Reverse-engineering toolkit for Linux (ELF) and Windows (PE) programs "
                     "and game asset packs. Files are never run; originals are never "
                     "changed unless you ask.")
-    p.add_argument("--version", action="version", version=f"binspect {__version__}")
+    p.add_argument("--version", action="version", version=f"vex {__version__}")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
     p.add_argument("--color", choices=("auto", "always", "never"), default="auto",
                    help="colour the output (default: only on a terminal)")
@@ -596,11 +596,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     st = Style(_use_colour(args.color) and not args.json)
     try:
         data, renderer = args.func(args, st)
-    except BinspectError as exc:
-        print(f"binspect: error: {exc}", file=sys.stderr)
+    except VexError as exc:
+        print(f"vex: error: {exc}", file=sys.stderr)
         return 1
     except OSError as exc:
-        print(f"binspect: error: cannot read {getattr(args, 'file', 'file')}: "
+        print(f"vex: error: cannot read {getattr(args, 'file', 'file')}: "
               f"{exc.strerror or exc}", file=sys.stderr)
         return 1
     try:

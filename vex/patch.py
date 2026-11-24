@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Union
 
-from .errors import BinspectError, LocationError, UnknownFormatError, UnsupportedError
+from .errors import VexError, LocationError, UnknownFormatError, UnsupportedError
 from .model import Binary
 
 PathLike = Union[str, "os.PathLike[str]"]
@@ -142,7 +142,7 @@ def _try_load(data: bytes, path: str) -> Optional[Binary]:
     from . import load_bytes
     try:
         return load_bytes(data, path)
-    except BinspectError:
+    except VexError:
         return None
 
 

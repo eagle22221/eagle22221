@@ -1,8 +1,8 @@
 """ELF parsing. Expected values were read from the committed fixtures with
-readelf/objdump, never computed by binspect itself."""
+readelf/objdump, never computed by vex itself."""
 import pytest
 
-import binspect
+import vex
 from conftest import fixture_bytes
 
 
@@ -134,7 +134,7 @@ def test_imports_survive_removal_of_section_headers():
     data = bytearray(fixture_bytes("hello_elf64"))
     data[0x28:0x30] = bytes(8)      # e_shoff
     data[0x3C:0x40] = bytes(4)      # e_shnum, e_shstrndx
-    b = binspect.load_bytes(bytes(data))
+    b = vex.load_bytes(bytes(data))
     assert b.sections == []
     assert b.libraries == ["libc.so.6"]
     by_name = {i.name: i for i in b.imports}
@@ -178,24 +178,24 @@ def test_relro_without_bind_now_is_partial(load_fixture):
 # --- malformed input -------------------------------------------------------
 
 def test_unknown_format_is_rejected():
-    with pytest.raises(binspect.UnknownFormatError):
-        binspect.load_bytes(b"this is not a binary at all, just text")
+    with pytest.raises(vex.UnknownFormatError):
+        vex.load_bytes(b"this is not a binary at all, just text")
 
 
 def test_empty_file_is_rejected():
-    with pytest.raises(binspect.UnknownFormatError):
-        binspect.load_bytes(b"")
+    with pytest.raises(vex.UnknownFormatError):
+        vex.load_bytes(b"")
 
 
 def test_truncated_elf_header_is_a_parse_error():
-    with pytest.raises(binspect.ParseError):
-        binspect.load_bytes(fixture_bytes("hello_elf64")[:40])
+    with pytest.raises(vex.ParseError):
+        vex.load_bytes(fixture_bytes("hello_elf64")[:40])
 
 
 def test_section_table_past_end_of_file_degrades_to_a_warning():
     data = bytearray(fixture_bytes("hello_elf64"))
     data[0x28:0x30] = (0x7FFFFFF0).to_bytes(8, "little")   # e_shoff far past EOF
-    b = binspect.load_bytes(bytes(data))
+    b = vex.load_bytes(bytes(data))
     assert b.sections == []
     assert b.entry == 0x10E0
     assert any("section" in w.lower() for w in b.warnings)
@@ -220,7 +220,7 @@ def test_dynamic_only_symbols_are_kept_when_static_table_is_stripped():
     with tempfile.TemporaryDirectory() as tmp:
         out = pathlib.Path(tmp) / "libsample_stripped.so"
         subprocess.run(["strip", "-o", str(out), str(fixture_path("libsample.so"))], check=True)
-        b = binspect.load(out)
+        b = vex.load(out)
     assert b.security["stripped"] is True
     assert {(s.name, s.address) for s in b.symbols} == {
         ("sample_add", 0x1101), ("sample_greet", 0x1109)}

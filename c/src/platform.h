@@ -1,7 +1,7 @@
 /* Everything that differs between Windows and POSIX systems lives behind
- * this interface (platform.c); the rest of binspect is portable C11. */
-#ifndef BINSPECT_PLATFORM_H
-#define BINSPECT_PLATFORM_H
+ * this interface (platform.c); the rest of vex is portable C11. */
+#ifndef VEX_PLATFORM_H
+#define VEX_PLATFORM_H
 
 #include "common.h"
 

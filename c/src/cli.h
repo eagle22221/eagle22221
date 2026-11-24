@@ -1,6 +1,6 @@
 /* Command-line session shared by the command implementations. */
-#ifndef BINSPECT_CLI_H
-#define BINSPECT_CLI_H
+#ifndef VEX_CLI_H
+#define VEX_CLI_H
 
 #include "analysis.h"
 #include "render.h"

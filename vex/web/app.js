@@ -1,5 +1,5 @@
 'use strict';
-/* binspect web interface. Everything shown comes from untrusted files, so
+/* vex web interface. Everything shown comes from untrusted files, so
    text is only ever inserted with textContent, never as HTML. */
 
 const $ = (id) => document.getElementById(id);
@@ -59,7 +59,7 @@ async function api(name, params, options) {
   }
   const res = await fetch(`/api/${name}?${qs}`, {
     method: opts.method || 'GET',
-    headers: { 'X-Binspect-Token': state.token },
+    headers: { 'X-Vex-Token': state.token },
     body: opts.body,
   });
   if (!res.ok) {
@@ -196,7 +196,7 @@ async function openPath(path) {
       await api('archive/list', { path: opened.path, limit: 1 });
       opened.kind = 'archive';
     } catch (error) {
-      toast(`${opened.name} is not a Linux/Windows program or an asset pack binspect can read.`, true);
+      toast(`${opened.name} is not a Linux/Windows program or an asset pack vex can read.`, true);
       return;
     }
   }
@@ -211,7 +211,7 @@ async function openPath(path) {
   $('file-name').textContent = name;
   $('file-path').textContent = opened.path;
   $('bar-file').hidden = false;
-  document.title = `${name} · binspect`;
+  document.title = `${name} · vex`;
   $('goto').hidden = opened.kind !== 'binary';
   $('map').hidden = true;
   if (opened.kind === 'binary') {
@@ -273,7 +273,7 @@ function renderWelcome() {
     h('button', { type: 'button', class: 'btn btn-primary', text: 'Open file or folder', onclick: openDialog }));
   fill($('main'), h('div', { class: 'welcome' },
     h('h1', { text: 'Take a program apart and see how it works' }),
-    h('p', { text: 'binspect reads a compiled program without running it and shows what is inside: its layout, the code, the text it contains and the functions it borrows from the system. It can also open game asset packs and save modified copies.' }),
+    h('p', { text: 'vex reads a compiled program without running it and shows what is inside: its layout, the code, the text it contains and the functions it borrows from the system. It can also open game asset packs and save modified copies.' }),
     drop,
     h('ol', { class: 'steps' },
       h('li', {}, h('span', {}, h('b', { text: 'Open something. ' }), 'Pick a program, or a game folder to find its engine and asset packs.')),
@@ -397,7 +397,7 @@ async function renderOverview(box) {
   api('techniques', { path: state.path }).then((rows) => {
     if (!rows.length) return;
     fill(techNote, h('p', { class: 'notice' },
-      h('strong', { text: `binspect found ${rows.length} protection or evasion technique${rows.length === 1 ? '' : 's'}: ` }),
+      h('strong', { text: `vex found ${rows.length} protection or evasion technique${rows.length === 1 ? '' : 's'}: ` }),
       rows.map((t) => t.title).join(', ') + '. ',
       h('button', { class: 'link', type: 'button', text: 'See the evidence', onclick: () => show('techniques') })));
   }).catch(() => {});
@@ -680,7 +680,7 @@ function dedupeLinks(items) {
 async function renderTechniques(box) {
   const rows = await api('techniques', { path: state.path });
   add(box, h('div', { class: 'view-head' }, h('h2', { text: `Techniques (${rows.length})` }),
-    h('p', { text: 'Protection and evasion techniques this program uses, with the evidence for each. binspect identifies them; it never disables or defeats them.' })));
+    h('p', { text: 'Protection and evasion techniques this program uses, with the evidence for each. vex identifies them; it never disables or defeats them.' })));
   if (!rows.length) {
     add(box, h('p', { class: 'notice is-ok', text: 'No notable protection or evasion techniques found: no packing, anti-debugging, VM checks, injection, hooking or driver use.' }));
     return;
@@ -868,7 +868,7 @@ function renderArchive(box, path) {
     row.classList.add('is-selected');
     fill(actions);
     if (entry.encrypted) {
-      fill(preview, h('p', { class: 'notice', text: 'This file is encrypted. binspect does not decrypt protected content.' }));
+      fill(preview, h('p', { class: 'notice', text: 'This file is encrypted. vex does not decrypt protected content.' }));
       return;
     }
     fill(preview, busy('Reading…'));
@@ -897,7 +897,7 @@ function renderArchive(box, path) {
     try {
       const found = await api('archive/list', { path, q: options.q, limit: options.shown });
       writable = found.writable;
-      summary.textContent = `${found.format} pack, ${found.count} files` + (found.writable ? '' : ' (read-only: binspect cannot rebuild this kind)');
+      summary.textContent = `${found.format} pack, ${found.count} files` + (found.writable ? '' : ' (read-only: vex cannot rebuild this kind)');
       fill(notes, ...found.notes.map((n) => h('p', { class: 'notice', text: n })));
       more.hidden = found.items.length >= found.total;
       fill(tbody, ...found.items.map((entry) => {
@@ -1028,7 +1028,7 @@ async function renderAssets(box) {
   if (result.packs.length) {
     add(stack, h('section', {},
       h('div', { class: 'view-head' }, h('h2', { text: `Asset packs here (${result.packs.length})` }),
-        h('p', { text: 'Packs binspect can open. Choose one to browse, extract or replace its files.' })),
+        h('p', { text: 'Packs vex can open. Choose one to browse, extract or replace its files.' })),
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', { scope: 'col', text: 'File' }), h('th', { scope: 'col', class: 'num', text: 'Size' }))),
         h('tbody', {}, result.packs.map((pack) => h('tr', {},
@@ -1108,19 +1108,19 @@ function applyTheme(theme) {
   const button = $('theme-toggle');
   button.textContent = theme === 'dark' ? 'Light' : 'Dark';
   button.setAttribute('aria-pressed', String(theme === 'dark'));
-  try { localStorage.setItem('binspect-theme', theme); } catch (e) { /* private mode */ }
+  try { localStorage.setItem('vex-theme', theme); } catch (e) { /* private mode */ }
 }
 
 function start() {
   const params = new URLSearchParams(location.hash.slice(1));
   let stored = null;
-  try { stored = sessionStorage.getItem('binspect-token'); } catch (e) { /* ignore */ }
+  try { stored = sessionStorage.getItem('vex-token'); } catch (e) { /* ignore */ }
   state.token = params.get('token') || stored || '';
-  try { sessionStorage.setItem('binspect-token', state.token); } catch (e) { /* ignore */ }
+  try { sessionStorage.setItem('vex-token', state.token); } catch (e) { /* ignore */ }
   if (location.hash) history.replaceState(null, '', location.pathname);
 
   let theme = null;
-  try { theme = localStorage.getItem('binspect-theme'); } catch (e) { /* ignore */ }
+  try { theme = localStorage.getItem('vex-theme'); } catch (e) { /* ignore */ }
   applyTheme(theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   $('theme-toggle').addEventListener('click', () =>
     applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
@@ -1152,7 +1152,7 @@ function start() {
   if (!state.token) {
     fill($('main'), h('div', { class: 'welcome' },
       h('h1', { text: 'This page needs its session link' }),
-      h('p', { text: 'Start binspect from a terminal with “binspect gui” and open the link it prints. The link carries a one-time key so that no other web page can use this tool.' })));
+      h('p', { text: 'Start vex from a terminal with “vex gui” and open the link it prints. The link carries a one-time key so that no other web page can use this tool.' })));
     $('open-button').disabled = true;
     return;
   }

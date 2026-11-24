@@ -1,4 +1,4 @@
-"""The native C version of binspect (c/) against the Python implementation.
+"""The native C version of vex (c/) against the Python implementation.
 
 The Python package is the reference: for every command the C program must
 print the same JSON. Most tests here are differential: run both on the same
@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-import binspect
-from binspect import views
-from binspect.cli import main as python_main
+import vex
+from vex import views
+from vex.cli import main as python_main
 from conftest import FIXTURES, fixture_bytes, fixture_path
 
 C_DIR = Path(__file__).resolve().parent.parent / "c"
@@ -61,20 +61,20 @@ def _make(target):
 
 @pytest.fixture(scope="session")
 def c_binary():
-    """The native build. BINSPECT_TEST_SANITIZED=1 runs every test against
+    """The native build. VEX_TEST_SANITIZED=1 runs every test against
     the AddressSanitizer/UBSan build instead (slower, but any memory error in
     any command then fails the test that reaches it)."""
-    if os.environ.get("BINSPECT_TEST_SANITIZED"):
+    if os.environ.get("VEX_TEST_SANITIZED"):
         _make("asan")
-        return C_DIR / "build" / "binspect-asan"
+        return C_DIR / "build" / "vex-asan"
     _make("all")
-    return C_DIR / "build" / "binspect"
+    return C_DIR / "build" / "vex"
 
 
 @pytest.fixture(scope="session")
 def asan_binary():
     _make("asan")
-    return C_DIR / "build" / "binspect-asan"
+    return C_DIR / "build" / "vex-asan"
 
 
 def run_c(binary, *args, timeout=120, env=None):
@@ -134,7 +134,7 @@ def assert_same_outcome(binary, *args):
     if code == 0:
         assert strip_path(json.loads(out)) == strip_path(json.loads(py_out)), args
     else:
-        assert err.startswith("binspect: error: ") or "\nbinspect: error: " in err
+        assert err.startswith("vex: error: ") or "\nvex: error: " in err
     return code
 
 
@@ -177,14 +177,14 @@ def test_segments_and_layout_match_the_python_views(c_binary, name):
     """`segments` and `layout` are extra commands of the C program; they print
     views.segments() and views.layout(), which the Python CLI does not expose."""
     path = fixture_path(name)
-    b = binspect.load(path)
+    b = vex.load(path)
     assert json.loads(run_c(c_binary, "--json", "segments", path)[1]) == views.segments(b)
     assert json.loads(run_c(c_binary, "--json", "layout", path)[1]) == views.layout(b)
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
 def test_hexdump_at_addresses(c_binary, name):
-    b = binspect.load(fixture_path(name))
+    b = vex.load(fixture_path(name))
     wanted = [m[0] for m in b.maps] + [m[0] + m[2] - 1 for m in b.maps]
     if b.entry is not None:
         wanted.append(b.entry)
@@ -228,7 +228,7 @@ def test_system_binary_functions_disassemble_like_python(c_binary, path):
 
 def _locations(name):
     """Things a user could pass as LOCATION/TARGET for this fixture."""
-    b = binspect.load(fixture_path(name))
+    b = vex.load(fixture_path(name))
     functions = json.loads(run_python("--json", "functions", fixture_path(name))[1])
     names = [f["name"] for f in functions] + [f["address"] for f in functions]
     names += [s.name for s in b.symbols[:40]] + [e.name for e in b.exports[:20]]
@@ -287,7 +287,7 @@ def test_disassembly_text_and_comments(c_binary):
 
 @pytest.mark.parametrize("path", SYSTEM_BINARIES)
 def test_system_binary_segments_and_layout(c_binary, path):
-    b = binspect.load(path)
+    b = vex.load(path)
     assert json.loads(run_c(c_binary, "--json", "segments", path)[1]) == views.segments(b)
     assert json.loads(run_c(c_binary, "--json", "layout", path)[1]) == views.layout(b)
 
@@ -332,7 +332,7 @@ def test_colour_only_on_request_and_never_with_no_color(c_binary):
 
 
 def test_version_and_help(c_binary):
-    assert run_c(c_binary, "--version") == (0, f"binspect {binspect.__version__}\n", "")
+    assert run_c(c_binary, "--version") == (0, f"vex {vex.__version__}\n", "")
     code, out, _ = run_c(c_binary, "--help")
     assert code == 0
     for word in ("info", "sections", "imports", "exports", "symbols", "strings", "hexdump",
@@ -343,7 +343,7 @@ def test_version_and_help(c_binary):
 
 
 def test_a_file_without_a_command_gets_a_report(c_binary):
-    """Dropping a file on binspect.exe starts it with just that path."""
+    """Dropping a file on vex.exe starts it with just that path."""
     path = fixture_path("hello_pe64.exe")
     assert run_c(c_binary, path) == run_c(c_binary, "report", path)
     assert run_c(c_binary, "--json", path) == run_c(c_binary, "--json", "report", path)
@@ -394,7 +394,7 @@ def test_unreadable_and_foreign_files_fail_like_python(c_binary, tmp_path, comma
     for label, path in _files_that_do_not_load(tmp_path).items():
         mine, reference = run_c(c_binary, command, path), run_python(command, path)
         assert mine == reference, label
-        assert mine[0] == 1 and mine[1] == "" and mine[2].startswith("binspect: error: ")
+        assert mine[0] == 1 and mine[1] == "" and mine[2].startswith("vex: error: ")
 
 
 @pytest.mark.parametrize("args", [
@@ -409,7 +409,7 @@ def test_bad_locations_fail_like_python(c_binary, name, args):
     full = (args[0], fixture_path(name), *args[1:])
     mine, reference = run_c(c_binary, *full), run_python(*full)
     if "010" in args:           # a name, not a number: needs the disassembler
-        assert mine[0] == reference[0] == 1 and mine[2].startswith("binspect: error: ")
+        assert mine[0] == reference[0] == 1 and mine[2].startswith("vex: error: ")
     else:
         assert mine == reference
     assert mine[0] in (0, 1)
@@ -426,7 +426,7 @@ def test_bad_locations_fail_like_python(c_binary, name, args):
 def test_usage_errors_exit_with_status_2(c_binary, args):
     args = tuple(str(fixture_path("hello_elf64")) if a == "FILE" else a for a in args)
     code, out, err = run_c(c_binary, *args)
-    assert (code, out) == (2, "") and "binspect: error: " in err and "usage: " in err
+    assert (code, out) == (2, "") and "vex: error: " in err and "usage: " in err
     assert run_python(*args)[0] == 2
 
 
@@ -553,12 +553,12 @@ def _noise(rng, length):
 
 def test_undecodable_names_are_replaced_like_python(c_binary, tmp_path):
     rng = random.Random(99)
-    elf = binspect.load(fixture_path("hello_elf64"))
+    elf = vex.load(fixture_path("hello_elf64"))
     by_name = {s.name: s for s in elf.sections}
     pe_data = fixture_bytes("hello_pe64.exe")
     section_table = struct.unpack_from("<I", pe_data, 0x3C)[0] + 24 + \
         struct.unpack_from("<H", pe_data, struct.unpack_from("<I", pe_data, 0x3C)[0] + 20)[0]
-    dll = binspect.load(fixture_path("sample.dll"))
+    dll = vex.load(fixture_path("sample.dll"))
     for round_ in range(120):
         # ELF: symbol names (.strtab, .dynstr), section names, the .comment text
         data = bytearray(fixture_bytes("hello_elf64"))
@@ -675,8 +675,8 @@ def test_other_architectures_and_byte_orders_match_python(c_binary, cross_binari
     seen = set()
     for path in cross_binaries:
         try:
-            b = binspect.load(path)
-        except binspect.BinspectError:
+            b = vex.load(path)
+        except vex.VexError:
             continue                            # e.g. a COFF object: not ELF/PE
         seen.add((b.format, b.bits, b.endian))
         for command in CROSS_COMMANDS:
@@ -718,18 +718,18 @@ HOSTILE_CODE_COMMANDS = {"functions": ("functions",), "disasm": ("disasm", "-n",
 def _code_reference(blob):
     """functions and the first instructions as Python sees them: the data, the
     error message, or None where the reference itself breaks down."""
-    from binspect.analysis import Analysis
-    b = binspect.load_bytes(blob)
+    from vex.analysis import Analysis
+    b = vex.load_bytes(blob)
     try:
         a = Analysis(b)
-    except binspect.BinspectError as exc:
+    except vex.VexError as exc:
         return {name: str(exc) for name in HOSTILE_CODE_COMMANDS}
     out = {}
     for name, view in (("functions", lambda: views.functions(a)),
                        ("disasm", lambda: views.disassembly(a, None, 8))):
         try:
             out[name] = json.loads(json.dumps(view()))
-        except binspect.BinspectError as exc:
+        except vex.VexError as exc:
             out[name] = str(exc)
         except Exception:               # noqa: BLE001 - a crash of the reference
             out[name] = None
@@ -740,8 +740,8 @@ def _reference(blob):
     """What the Python implementation makes of the bytes: {command: data}, or
     the error message when it refuses to load them."""
     try:
-        b = binspect.load_bytes(blob)
-    except binspect.BinspectError as exc:
+        b = vex.load_bytes(blob)
+    except vex.VexError as exc:
         return str(exc)
     return {command: json.loads(json.dumps(view(b))) for command, view in HOSTILE_VIEWS.items()}
 
@@ -774,7 +774,7 @@ def check_hostile(asan_binary, folder, blobs, code=True):
             assert status in (0, 1), (where, status, err[-2000:])
             wanted = expected if isinstance(expected, str) else expected[name]
             if isinstance(wanted, str):
-                assert (status, out, err) == (1, "", f"binspect: error: {wanted}\n"), where
+                assert (status, out, err) == (1, "", f"vex: error: {wanted}\n"), where
             elif wanted is not None:
                 assert status == 0 and err == "", (where, err)
                 assert strip_path(json.loads(out)) == wanted, where
@@ -1068,11 +1068,11 @@ def test_build_without_capstone_reports_the_missing_disassembler(c_binary, tmp_p
     proc = subprocess.run([MAKE, "-C", str(C_DIR), "CAPSTONE=0", f"BUILD={build}"],
                           capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-3000:]
-    binary = build / "binspect"
+    binary = build / "vex"
     path = fixture_path("hello_elf64")
     for args in (("functions", path), ("disasm", path), ("xrefs", path, "main"),
                  ("hexdump", path, "main"), ("patch", "nop", path, "main", "1", "-o", "x")):
-        assert run_c(binary, *args) == (1, "", "binspect: error: this build has no disassembler\n")
+        assert run_c(binary, *args) == (1, "", "vex: error: this build has no disassembler\n")
     assert run_c(binary, "--json", "info", path) == run_c(c_binary, "--json", "info", path)
     report = json.loads(run_c(binary, "--json", "report", path)[1])
     assert report["functions"] is None
@@ -1088,8 +1088,8 @@ def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
     proc = subprocess.run([MAKE, "-C", str(C_DIR), "windows"], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-3000:]
     assert "warning" not in proc.stdout + proc.stderr
-    exe = C_DIR / "build" / "binspect.exe"
-    b = binspect.load(exe)
+    exe = C_DIR / "build" / "vex.exe"
+    b = vex.load(exe)
     assert (b.format, b.bits, b.arch, b.kind) == ("PE", 64, "x86_64", "executable")
     assert b.metadata["subsystem"] == "console"
     # static: nothing but DLLs that are part of Windows itself

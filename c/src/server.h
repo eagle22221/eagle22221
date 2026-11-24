@@ -1,12 +1,12 @@
-/* The graphical interface: `binspect gui [PATH] [--port N] [--no-browser]`
+/* The graphical interface: `vex gui [PATH] [--port N] [--no-browser]`
  * (port of server.py).
  *
  * A small HTTP server bound to 127.0.0.1 that serves the single-page
- * interface of binspect/web (compiled into the program, see
+ * interface of vex/web (compiled into the program, see
  * tools/embed_web.py) and a JSON API over the same views the command line
  * prints. */
-#ifndef BINSPECT_SERVER_H
-#define BINSPECT_SERVER_H
+#ifndef VEX_SERVER_H
+#define VEX_SERVER_H
 
 #include "cli.h"
 

@@ -1,4 +1,4 @@
-/* PE parser (port of binspect/pe.py): Windows executables, DLLs and drivers,
+/* PE parser (port of vex/pe.py): Windows executables, DLLs and drivers,
  * PE32 and PE32+.
  *
  * Only the DOS/COFF/optional headers are mandatory; every data directory

@@ -1,14 +1,14 @@
 """Static technique detection: the 'dissect cheats and anti-cheat' view.
 
 Expected values are derived by hand from the fixtures' imports, section names,
-section entropy and strings (see `binspect imports/sections/strings` on each),
+section entropy and strings (see `vex imports/sections/strings` on each),
 never from the detector itself. The detector only identifies and explains
 techniques a binary uses; it does nothing to defeat them.
 """
 import pytest
 
-import binspect
-from binspect import techniques
+import vex
+from vex import techniques
 from conftest import fixture_bytes
 
 
@@ -103,7 +103,7 @@ def test_executable_high_entropy_section_without_a_packer_name_is_packing():
     data = bytearray(fixture_bytes("evasion_pe64.exe"))
     pos = data.find(b"UPX1")
     data[pos:pos + 4] = b".blob"[:4]
-    t = by_category(techniques.analyze(binspect.load_bytes(bytes(data))))["packing"]
+    t = by_category(techniques.analyze(vex.load_bytes(bytes(data))))["packing"]
     assert t.confidence == "high"
     assert any("entropy" in e and "executable" in e for e in t.evidence)
     assert not any("(UPX)" in e for e in t.evidence)
@@ -119,7 +119,7 @@ def test_native_subsystem_is_a_kernel_driver(load_fixture):
     # Flip the subsystem of a normal PE to native (1); kind becomes "driver".
     data = bytearray(fixture_bytes("hello_pe64.exe"))
     data[0xD4] = 1                          # Subsystem field in the optional header
-    b = binspect.load_bytes(bytes(data))
+    b = vex.load_bytes(bytes(data))
     assert b.kind == "driver"
     t = by_category(techniques.analyze(b))["driver"]
     assert t.confidence == "high"
@@ -127,7 +127,7 @@ def test_native_subsystem_is_a_kernel_driver(load_fixture):
 
 
 def test_appended_data_is_reported_as_overlay():
-    b = binspect.load_bytes(fixture_bytes("hello_pe64.exe") + b"PAYLOAD" * 100)
+    b = vex.load_bytes(fixture_bytes("hello_pe64.exe") + b"PAYLOAD" * 100)
     t = by_category(techniques.analyze(b))["overlay"]
     assert t.confidence == "medium"
     assert any("700" in e or "appended" in e.lower() for e in t.evidence)
@@ -141,7 +141,7 @@ def _pe_importing(symbol):
     assert len(symbol) <= len(old)
     pos = data.find(old)
     data[pos:pos + len(old)] = symbol.encode().ljust(len(old), b"\0")
-    return binspect.load_bytes(bytes(data))
+    return vex.load_bytes(bytes(data))
 
 
 def test_markers_in_a_packed_section_are_ignored_but_not_in_normal_data():
@@ -149,10 +149,10 @@ def test_markers_in_a_packed_section_are_ignored_but_not_in_normal_data():
     # A marker hidden in the high-entropy UPX1 section must not count.
     hidden = bytearray(base)
     hidden[0xC00:0xC0A] = b"vboxtray\x00\x00"
-    ev = by_category(techniques.analyze(binspect.load_bytes(bytes(hidden))))["anti-vm"].evidence
+    ev = by_category(techniques.analyze(vex.load_bytes(bytes(hidden))))["anti-vm"].evidence
     assert 'string "vboxtray"' not in ev
     # The same marker in ordinary data is reported.
     shown = bytearray(base)
     shown[0xB00:0xB0A] = b"vboxtray\x00\x00"
-    ev = by_category(techniques.analyze(binspect.load_bytes(bytes(shown))))["anti-vm"].evidence
+    ev = by_category(techniques.analyze(vex.load_bytes(bytes(shown))))["anti-vm"].evidence
     assert 'string "vboxtray"' in ev

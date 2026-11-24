@@ -2,10 +2,10 @@
  * resolution and cross-references (port of disasm.py and analysis.py).
  *
  * The implementation needs the Capstone engine. A build without it
- * (-DBINSPECT_NO_CAPSTONE) still provides these functions; analysis_new()
+ * (-DVEX_NO_CAPSTONE) still provides these functions; analysis_new()
  * then throws ERR_NO_DISASSEMBLER. */
-#ifndef BINSPECT_ANALYSIS_H
-#define BINSPECT_ANALYSIS_H
+#ifndef VEX_ANALYSIS_H
+#define VEX_ANALYSIS_H
 
 #include "json.h"
 #include "model.h"

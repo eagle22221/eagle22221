@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 from . import strings as strings_mod
 from .analysis import Analysis
-from .errors import BinspectError, LocationError
+from .errors import VexError, LocationError
 from .model import Binary, entropy
 
 # key -> (label, meaning). "protect": yes is good. "risk": a value is a
@@ -46,7 +46,7 @@ def _compile(pattern: Optional[str]):
     try:
         return re.compile(pattern)
     except re.error as exc:
-        raise BinspectError(f"invalid regular expression {pattern!r}: {exc}") from None
+        raise VexError(f"invalid regular expression {pattern!r}: {exc}") from None
 
 
 def _security_details(b: Binary) -> List[dict]:
@@ -259,7 +259,7 @@ def report(b: Binary, a: Optional[Analysis]) -> Dict[str, object]:
 # --- modding views --------------------------------------------------------------
 
 def find_packs(root: str, also: Optional[str] = None) -> List[dict]:
-    """Asset packs binspect can open under root, at most three folders deep."""
+    """Asset packs vex can open under root, at most three folders deep."""
     from . import archives
     found, seen = [], 0
     candidates = [also] if also and os.path.isfile(also) else []

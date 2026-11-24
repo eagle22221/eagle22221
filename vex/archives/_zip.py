@@ -163,7 +163,7 @@ class ZipArchive(Archive):
         if max(tail.count, tail.cd_size // _CENTRAL_MIN) > maximum:
             raise UnsupportedError(
                 f"ZIP central directory describes more than "
-                f"binspect.archives.MAX_ENTRIES ({maximum}) entries")
+                f"vex.archives.MAX_ENTRIES ({maximum}) entries")
         self._size = size
         self._relative = tail.cd_start != tail.cd_offset
         self._positions: List[int] = []

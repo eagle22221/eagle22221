@@ -1,13 +1,13 @@
 """Hostile-input checks: a reverse-engineering tool is pointed at broken and
 malicious files on purpose. Whatever the bytes, loading must either succeed
-or raise a BinspectError, and the views built on a loaded file must not crash."""
+or raise a VexError, and the views built on a loaded file must not crash."""
 import random
 
 import pytest
 
-import binspect
-from binspect import strings, views
-from binspect.analysis import Analysis
+import vex
+from vex import strings, views
+from vex.analysis import Analysis
 from conftest import fixture_bytes
 
 FIXTURES = ["hello_elf64", "hello_elf64_stripped", "bare_elf32", "bare_arm64",
@@ -18,8 +18,8 @@ FIXTURES = ["hello_elf64", "hello_elf64_stripped", "bare_elf32", "bare_arm64",
 def exercise(data: bytes) -> None:
     """Everything a user can trigger for one file."""
     try:
-        b = binspect.load_bytes(data)
-    except binspect.BinspectError:
+        b = vex.load_bytes(data)
+    except vex.VexError:
         return
     views.info(b)
     views.sections(b)
@@ -36,7 +36,7 @@ def exercise(data: bytes) -> None:
         views.disassembly(a, None, 8)
         if b.entry is not None:
             a.xrefs([b.entry])
-    except binspect.BinspectError:
+    except vex.VexError:
         pass
 
 

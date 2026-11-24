@@ -2,8 +2,8 @@
  * C standard library does not have (directories, symbolic links, files
  * larger than 2 GiB). Everything that differs between Windows and POSIX is
  * inside fswalk.c; callers see UTF-8 paths and errno. */
-#ifndef BINSPECT_FSWALK_H
-#define BINSPECT_FSWALK_H
+#ifndef VEX_FSWALK_H
+#define VEX_FSWALK_H
 
 #include "common.h"
 

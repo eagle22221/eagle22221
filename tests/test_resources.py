@@ -1,7 +1,7 @@
 """Windows resources of resdemo.exe (built by tests/fixtures/build_resources.sh).
 
 Every expected value was read from the committed fixture with independent
-tools, never computed by binspect: `llvm-readobj --file-headers --sections
+tools, never computed by vex: `llvm-readobj --file-headers --sections
 --coff-resources --symbols`, the pefile module (offsets, hashes, version
 strings, checksums) and a hex dump. Layout of the fixture:
 
@@ -32,10 +32,10 @@ from pathlib import Path
 
 import pytest
 
-import binspect
-from binspect import resources
-from binspect.errors import BinspectError, LocationError, ParseError, UnsupportedError
-from binspect.resources import Resource
+import vex
+from vex import resources
+from vex.errors import VexError, LocationError, ParseError, UnsupportedError
+from vex.resources import Resource
 from conftest import fixture_bytes, fixture_path
 
 SRC = Path(__file__).parent / "fixtures" / "src"
@@ -85,7 +85,7 @@ def patched(edits, name="resdemo.exe") -> bytes:
 
 
 def listing(data: bytes):
-    return resources.list_resources(binspect.load_bytes(data))
+    return resources.list_resources(vex.load_bytes(data))
 
 
 def without(*dropped):
@@ -242,14 +242,14 @@ def test_version_info_is_empty_without_a_version_resource(load_fixture, name):
 
 def test_version_info_is_empty_when_the_version_resource_is_removed():
     # Retype the VERSION entry of the root directory (0x838) as RCDATA.
-    b = binspect.load_bytes(patched({0x838: u32(10)}))
+    b = vex.load_bytes(patched({0x838: u32(10)}))
     assert resources.version_info(b) == {}
 
 
 def test_version_string_with_empty_value_is_reported_as_empty():
     # "ProductVersion" node at resource offset 0x260: wLength 0x2C, wValueLength 4.
     # Declare that the node has no value.
-    b = binspect.load_bytes(patched({0xDB8 + 0x262: u16(0)}))
+    b = vex.load_bytes(patched({0xDB8 + 0x262: u16(0)}))
     info = resources.version_info(b)
     assert info["ProductVersion"] == ""
     assert info["ProductName"] == "Binspect Resource Demo"
@@ -258,7 +258,7 @@ def test_version_string_with_empty_value_is_reported_as_empty():
 def test_version_value_is_cut_at_its_terminator_whatever_the_declared_length():
     # "FileVersion" node at resource offset 0x130: text "1.2.3.4" at 0x150.
     # Old resource compilers store a byte count (16) instead of a character count (8).
-    b = binspect.load_bytes(patched({0xDB8 + 0x132: u16(16)}))
+    b = vex.load_bytes(patched({0xDB8 + 0x132: u16(16)}))
     assert resources.version_info(b)["FileVersion"] == "1.2.3.4"
 
 
@@ -275,7 +275,7 @@ def test_version_value_is_cut_at_its_terminator_whatever_the_declared_length():
     {ENTRY_VERSION + 4: u32(0x61)},     # cut in the middle of a key
 ])
 def test_corrupt_version_resource_never_raises(edits):
-    b = binspect.load_bytes(patched(edits))
+    b = vex.load_bytes(patched(edits))
     with time_limit(10):
         info = resources.version_info(b)
     assert isinstance(info, dict)
@@ -289,7 +289,7 @@ def test_version_info_survives_any_single_corrupt_byte():
             for value in (0x00, 0xFF):
                 data = bytearray(original)
                 data[offset] = value
-                info = resources.version_info(binspect.load_bytes(bytes(data)))
+                info = resources.version_info(vex.load_bytes(bytes(data)))
                 assert isinstance(info, dict)
 
 
@@ -322,7 +322,7 @@ def test_icon_file_needs_a_group_icon_resource(load_fixture, resource):
 
 def test_icon_group_entry_without_its_image_is_left_out():
     # The first group entry's icon ID (0xD38 + 6 + 12) points at ICON #9.
-    b = binspect.load_bytes(patched({0xD4A: u16(9)}))
+    b = vex.load_bytes(patched({0xD4A: u16(9)}))
     ico = resources.icon_file(b, GROUP)
     assert ico[:6] == bytes.fromhex("0000 0100 0100")
     assert struct.unpack_from("<BBBBHHII", ico, 6) == (32, 32, 2, 0, 1, 1, 304, 22)
@@ -331,14 +331,14 @@ def test_icon_group_entry_without_its_image_is_left_out():
 
 
 def test_icon_group_without_any_image_is_a_parse_error():
-    b = binspect.load_bytes(patched({0xD4A: u16(9), 0xD58: u16(8)}))
+    b = vex.load_bytes(patched({0xD4A: u16(9), 0xD58: u16(8)}))
     with pytest.raises(ParseError):
         resources.icon_file(b, GROUP)
 
 
 def test_icon_directory_uses_the_real_size_of_each_image():
     # The group claims 0x99999 bytes for the first image; the ICON resource has 296.
-    b = binspect.load_bytes(patched({0xD38 + 6 + 8: u32(0x99999)}))
+    b = vex.load_bytes(patched({0xD38 + 6 + 8: u32(0x99999)}))
     assert resources.icon_file(b, GROUP) == (SRC / "resdemo.ico").read_bytes()
 
 
@@ -350,13 +350,13 @@ def test_icon_directory_uses_the_real_size_of_each_image():
     {0xA84: u32(0)},
     {0xA84: u32(19)},                   # truncated inside the first entry
 ])
-def test_corrupt_icon_group_gives_an_ico_or_a_binspect_error(edits):
-    b = binspect.load_bytes(patched(edits))
+def test_corrupt_icon_group_gives_an_ico_or_a_vex_error(edits):
+    b = vex.load_bytes(patched(edits))
     group = next(r for r in resources.list_resources(b) if r.type == "GROUP_ICON")
     with time_limit(10):
         try:
             ico = resources.icon_file(b, group)
-        except BinspectError:
+        except VexError:
             return
     count = struct.unpack_from("<H", ico, 4)[0]
     assert 1 <= count <= 2 and ico[:4] == b"\0\0\1\0"
@@ -366,7 +366,7 @@ def test_corrupt_icon_group_gives_an_ico_or_a_binspect_error(edits):
 
 def test_subdirectory_pointing_back_at_the_root_is_a_cycle_not_a_loop():
     # 0x81C: where the ICON entry of the root says its subdirectory is.
-    b = binspect.load_bytes(patched({0x81C: u32(0x80000000)}))
+    b = vex.load_bytes(patched({0x81C: u32(0x80000000)}))
     with time_limit(10):
         found = resources.list_resources(b)
     assert found == without(ICON1, ICON2)
@@ -407,7 +407,7 @@ def test_data_entry_above_the_language_level_is_skipped():
     ({0xAC2: u16(0xFFFF)}, (LEVELDATA,)),           # type name longer than the section
 ])
 def test_out_of_range_offsets_cost_only_the_entries_they_break(edits, dropped):
-    b = binspect.load_bytes(patched(edits))
+    b = vex.load_bytes(patched(edits))
     assert resources.list_resources(b) == without(*dropped)
     assert any("resource" in w for w in b.warnings)
 
@@ -433,7 +433,7 @@ def test_named_entries_read_their_utf16_names():
 
 def test_absurd_entry_count_stops_at_the_end_of_the_data():
     for edits in ({0x80E: u16(0xFFFF)}, {0x80C: u16(0xFFFF), 0x80E: u16(0xFFFF)}):
-        b = binspect.load_bytes(patched(edits))
+        b = vex.load_bytes(patched(edits))
         with time_limit(10):
             found = resources.list_resources(b)
         assert found[:11] == ALL                    # the genuine entries come first
@@ -444,7 +444,7 @@ def test_absurd_entry_count_stops_at_the_end_of_the_data():
 
 def test_absurd_count_in_a_language_directory():
     # ICON #1 language directory (0x920): 65535 ID entries.
-    b = binspect.load_bytes(patched({0x92E: u16(0xFFFF)}))
+    b = vex.load_bytes(patched({0x92E: u16(0xFFFF)}))
     with time_limit(10):
         found = resources.list_resources(b)
     assert [r for r in found if r in ALL] == ALL
@@ -458,14 +458,14 @@ def test_absurd_count_in_a_language_directory():
     u32(0x3BF8, 0xB80),         # 8 bytes before the end: no room for a directory
 ])
 def test_resource_directory_outside_the_image_gives_an_empty_list(entry):
-    b = binspect.load_bytes(patched({RESOURCE_DIR: entry}))
+    b = vex.load_bytes(patched({RESOURCE_DIR: entry}))
     assert resources.list_resources(b) == []
     assert any("resource" in w for w in b.warnings)
     assert resources.version_info(b) == {}
 
 
 def test_warnings_are_not_duplicated_by_listing_twice():
-    b = binspect.load_bytes(patched({0x81C: u32(0xFFFFFFF0)}))
+    b = vex.load_bytes(patched({0x81C: u32(0xFFFFFFF0)}))
     resources.list_resources(b)
     first = list(b.warnings)
     resources.list_resources(b)
@@ -495,7 +495,7 @@ def fan_out_image() -> bytes:
 
 
 def test_exponential_fan_out_is_cut_off():
-    b = binspect.load_bytes(fan_out_image())
+    b = vex.load_bytes(fan_out_image())
     with time_limit(30):
         found = resources.list_resources(b)
     assert 1 <= len(found) <= 65536
@@ -515,7 +515,7 @@ def test_any_single_corrupt_byte_in_the_directory_is_survived():
                 if data[offset] == value:
                     continue
                 data[offset] = value
-                b = binspect.load_bytes(bytes(data))
+                b = vex.load_bytes(bytes(data))
                 found = resources.list_resources(b)     # must not raise
                 assert len(found) <= 5000
                 for r in found:
@@ -527,7 +527,7 @@ def test_truncated_files_are_survived():
     original = fixture_bytes("resdemo.exe")
     with time_limit(60):
         for size in list(range(0x400, 0x1800, 0x37)) + [0x800, 0x810, 0xA00, 0xA08, 0xAE0]:
-            b = binspect.load_bytes(original[:size])
+            b = vex.load_bytes(original[:size])
             found = resources.list_resources(b)
             assert all(r in ALL for r in found)
             for r in found:
@@ -549,7 +549,7 @@ def test_smaller_data_is_rewritten_in_place(exe, tmp_path):
     expected[ENTRY_RCDATA101 + 4:ENTRY_RCDATA101 + 8] = u32(8)  # Size of the data entry
     assert out.read_bytes() == bytes(expected)
 
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.warnings == []
     found = resources.list_resources(b)
     assert found == [updated if r == RCDATA101 else r for r in ALL]
@@ -572,19 +572,19 @@ def test_resource_can_be_emptied(exe, tmp_path):
     out = tmp_path / "out.exe"
     updated = resources.replace_resource(exe, out, SETTINGS, b"")
     assert updated == Resource("RCDATA", "SETTINGS", 1033, 0xD90, 0, 0)
-    b = binspect.load(out)
+    b = vex.load(out)
     assert resources.read_resource(b, resources.list_resources(b)[6]) == b""
     assert out.read_bytes()[0xD90:0xD90 + 24] == bytes(24)
 
 
 def test_version_info_can_be_edited_in_place(exe, tmp_path):
     out = tmp_path / "out.exe"
-    data = bytearray(resources.read_resource(binspect.load(exe), VERSION))
+    data = bytearray(resources.read_resource(vex.load(exe), VERSION))
     old = "Binspect Fixtures".encode("utf-16-le")
     assert data.count(old) == 1
     data = bytes(data).replace(old, "Modded by a user!".encode("utf-16-le"))
     resources.replace_resource(exe, out, VERSION, data)
-    info = resources.version_info(binspect.load(out))
+    info = resources.version_info(vex.load(out))
     assert info["CompanyName"] == "Modded by a user!"
     assert info["ProductName"] == "Binspect Resource Demo"
 
@@ -600,7 +600,7 @@ def test_one_language_of_a_resource_is_replaced_without_touching_the_other(exe, 
     out = tmp_path / "out.exe"
     new = b"\0\0\2\0H\0i\0" + bytes(28)
     resources.replace_resource(exe, out, STRING_DE, new)
-    b = binspect.load(out)
+    b = vex.load(out)
     found = resources.list_resources(b)
     assert found[3] == Resource("STRING", "#1", 1031, 0x1318, 36, 0)
     assert found[4] == STRING_EN
@@ -625,7 +625,7 @@ def test_larger_data_moves_into_the_padding_of_the_resource_section(exe, tmp_pat
     expected[RESOURCE_DIR + 4:RESOURCE_DIR + 8] = u32(0xBE4)            # directory size
     assert out.read_bytes() == bytes(expected)
 
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.warnings == []
     assert [(s.name, s.vaddr, s.vsize, s.offset, s.size) for s in b.sections] == [
         (".text", 0x140001000, 0x16, 0x400, 0x200),
@@ -646,7 +646,7 @@ def test_padding_is_used_up_to_its_last_byte(exe, tmp_path):
     assert len(data) == 0x1800
     assert data[NUM_SECTIONS:NUM_SECTIONS + 2] == u16(4)
     assert data[RSRC_HEADER + 8:RSRC_HEADER + 12] == u32(0xC00)
-    assert binspect.load(out).warnings == []
+    assert vex.load(out).warnings == []
 
 
 def test_second_relocation_goes_after_the_first_one(exe, tmp_path):
@@ -659,7 +659,7 @@ def test_second_relocation_goes_after_the_first_one(exe, tmp_path):
     assert data[0x1380:0x1380 + 50] == b"\x11" * 50
     assert data[0x13B8:0x13B8 + 60] == b"\x22" * 60
     assert data[RSRC_HEADER + 8:RSRC_HEADER + 12] == u32(0xBB8 + 60)
-    b = binspect.load(out)
+    b = vex.load(out)
     found = resources.list_resources(b)
     assert resources.read_resource(b, found[6]) == b"\x11" * 50
     assert resources.read_resource(b, found[0]) == b"\x22" * 60
@@ -684,7 +684,7 @@ def test_resource_sharing_its_bytes_with_another_is_not_rewritten_in_place(tmp_p
     out = tmp_path / "out.exe"
     updated = resources.replace_resource(src, out, SETTINGS, b"x")
     assert (updated.offset, updated.size) == (0x1380, 1)
-    b = binspect.load(out)
+    b = vex.load(out)
     found = resources.list_resources(b)
     assert found[7] == Resource("RCDATA", "#101", 1033, 0xD90, 24, 0)
     assert resources.read_resource(b, found[7]) == SETTINGS_DATA    # still intact
@@ -735,7 +735,7 @@ def test_data_too_large_for_the_padding_goes_into_a_new_section(exe, tmp_path):
 def test_image_with_a_new_section_still_loads_cleanly(exe, tmp_path):
     out = tmp_path / "out.exe"
     updated = resources.replace_resource(exe, out, MANIFEST, NEW_MANIFEST)
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.warnings == []
     assert [(s.name, s.vaddr, s.vsize, s.offset, s.size, s.perms) for s in b.sections] == [
         (".text", 0x140001000, 0x16, 0x400, 0x200, "r-x"),
@@ -752,7 +752,7 @@ def test_image_with_a_new_section_still_loads_cleanly(exe, tmp_path):
     by_name = {s.name: s.address for s in b.symbols}
     assert by_name["entry"] == 0x140001000
     assert by_name["resdemo_table"] == 0x140002020
-    assert len(b.symbols) == len(binspect.load(exe).symbols) > 0
+    assert len(b.symbols) == len(vex.load(exe).symbols) > 0
     assert "overlay" not in b.metadata
     assert resources.version_info(b)["ProductName"] == "Binspect Resource Demo"
 
@@ -775,7 +775,7 @@ def test_image_size_follows_the_section_alignment(exe, tmp_path):
     assert data[FREE_HEADER_SLOT + 8:FREE_HEADER_SLOT + 24] == \
         u32(0x1001, 0x5000, 0x1200, 0x1600)
     assert len(data) == 0x1800 + 0x1200
-    assert binspect.load(out).warnings == []
+    assert vex.load(out).warnings == []
 
 
 def test_later_relocations_reuse_the_section_added_before(exe, tmp_path):
@@ -797,7 +797,7 @@ def test_later_relocations_reuse_the_section_added_before(exe, tmp_path):
     assert len(data) == 0x1800 + 0xE00
     assert data[0x2400:] == fixture_bytes("resdemo.exe")[0x1600:]
 
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.warnings == []
     found = resources.list_resources(b)
     assert resources.read_resource(b, found[9]) == new_version
@@ -816,7 +816,7 @@ def test_image_without_trailing_data_just_grows(tmp_path):
     assert len(data) == 0x1600 + 0x800
     assert data[SYMTAB_PTR:SYMTAB_PTR + 8] == u32(0, 0)
     assert data[0x1600:0x1600 + 2000] == NEW_MANIFEST
-    assert binspect.load(out).warnings == []
+    assert vex.load(out).warnings == []
 
 
 def test_debug_data_behind_the_sections_is_still_found_after_it_moved(tmp_path):
@@ -831,14 +831,14 @@ def test_debug_data_behind_the_sections_is_still_found_after_it_moved(tmp_path):
         0x71C: u32(0, 0, 0, 0, 16, 0x2080, 0x680),
         0x1740: codeview,
     }))
-    assert binspect.load(src).metadata["pdb_path"] == "C:\\mods\\resdemo.pdb"
+    assert vex.load(src).metadata["pdb_path"] == "C:\\mods\\resdemo.pdb"
     out = tmp_path / "out.exe"
     resources.replace_resource(src, out, MANIFEST, NEW_MANIFEST)
     data = out.read_bytes()
     assert data[0x700 + 24:0x700 + 28] == u32(0x1740 + 0x800)      # moved with the data
     assert data[0x71C + 24:0x71C + 28] == u32(0x680)               # inside a section: stays
     assert data[0x1F40:0x1F40 + len(codeview)] == codeview
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.warnings == []
     assert b.metadata["pdb_path"] == "C:\\mods\\resdemo.pdb"
 
@@ -848,12 +848,12 @@ def test_appended_payload_stays_at_the_end_of_the_file(tmp_path):
     payload = b"PK-OVERLAY-PAYLOAD" * 40
     src = tmp_path / "in.exe"
     src.write_bytes(fixture_bytes("resdemo.exe") + payload)
-    assert binspect.load(src).metadata["overlay"] == {"offset": 0x1800, "size": 720}
+    assert vex.load(src).metadata["overlay"] == {"offset": 0x1800, "size": 720}
     out = tmp_path / "out.exe"
     resources.replace_resource(src, out, MANIFEST, NEW_MANIFEST)
     data = out.read_bytes()
     assert data.endswith(payload) and len(data) == 0x2000 + 720
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.warnings == []
     assert b.metadata["overlay"] == {"offset": 0x2000, "size": 720}
 
@@ -874,7 +874,7 @@ def test_no_room_for_another_section_header_is_unsupported(tmp_path, edits):
     assert only_entries(tmp_path) == ["in.exe"]
     # Data that fits where it is can still be replaced.
     resources.replace_resource(src, out, MANIFEST, b"<assembly/>")
-    assert resources.read_resource(binspect.load(out), Resource(
+    assert resources.read_resource(vex.load(out), Resource(
         "MANIFEST", "#1", 1033, 0x1088, 11, 0)) == b"<assembly/>"
 
 
@@ -898,7 +898,7 @@ def signed_fixture() -> bytes:
 
 
 def test_fixture_with_a_certificate_counts_as_signed():
-    assert binspect.load_bytes(signed_fixture()).security["signed"] is True
+    assert vex.load_bytes(signed_fixture()).security["signed"] is True
 
 
 def test_signature_is_stripped_when_rewriting_in_place(tmp_path):
@@ -911,7 +911,7 @@ def test_signature_is_stripped_when_rewriting_in_place(tmp_path):
     expected[0xD60:0xD60 + 43] = b"patched!" + bytes(35)
     expected[ENTRY_RCDATA101 + 4:ENTRY_RCDATA101 + 8] = u32(8)
     assert out.read_bytes() == bytes(expected)
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.security["signed"] is False
     assert b.warnings == [] and "overlay" not in b.metadata
 
@@ -925,7 +925,7 @@ def test_signature_is_stripped_when_adding_a_section(tmp_path):
     assert data[SECURITY_DIR:SECURITY_DIR + 8] == bytes(8)
     assert b"SIGNATURE-BYTES!" not in data
     assert len(data) == 0x2000
-    b = binspect.load(out)
+    b = vex.load(out)
     assert b.security["signed"] is False and b.warnings == []
 
 
@@ -947,7 +947,7 @@ def test_certificate_followed_by_other_data_is_unlinked_but_not_cut_out(tmp_path
     data = out.read_bytes()
     assert data[SECURITY_DIR:SECURITY_DIR + 8] == bytes(8)
     assert data[0x1800:] == FAKE_CERTIFICATE + b"MORE-PAYLOAD"     # nothing moved
-    assert binspect.load(out).security["signed"] is False
+    assert vex.load(out).security["signed"] is False
 
 
 def test_certificate_directory_pointing_into_the_image_never_truncates_it(tmp_path):
@@ -970,7 +970,7 @@ def test_zero_checksum_stays_zero(exe, tmp_path):
 
 def test_nonzero_checksum_is_recomputed(tmp_path):
     # pefile.generate_checksum(): 0x6601 for the fixture, 0x9E1B for the expected
-    # output of this in-place replacement (built by hand, not by binspect).
+    # output of this in-place replacement (built by hand, not by vex).
     src = tmp_path / "in.exe"
     src.write_bytes(patched({CHECKSUM: u32(0x6601)}))
     out = tmp_path / "out.exe"
@@ -999,7 +999,7 @@ def test_files_without_resources_are_refused(tmp_path):
         resources.replace_resource(fixture_path("hello_pe64.exe"), out, RCDATA101, b"x")
     junk = tmp_path / "junk.bin"
     junk.write_bytes(b"not an executable")
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         resources.replace_resource(junk, out, RCDATA101, b"x")
     assert only_entries(tmp_path) == ["junk.bin"]
 
@@ -1010,7 +1010,7 @@ def test_replacement_that_would_wreck_the_image_is_refused(tmp_path):
     src.write_bytes(patched({0xA10: u32(0)}))
     out = tmp_path / "out.exe"
     in_headers = Resource("ICON", "#1", 1033, 0, 296, 0)
-    assert in_headers in resources.list_resources(binspect.load(src))
+    assert in_headers in resources.list_resources(vex.load(src))
     with pytest.raises(ParseError):
         resources.replace_resource(src, out, in_headers, b"\xCC" * 296)
     assert only_entries(tmp_path) == ["in.exe"]
@@ -1021,7 +1021,7 @@ def test_replacing_in_the_same_file_keeps_the_original_as_bak(exe, tmp_path):
     resources.replace_resource(exe, exe, MANIFEST, NEW_MANIFEST)
     assert (tmp_path / "resdemo.exe.bak").read_bytes() == fixture_bytes("resdemo.exe")
     assert only_entries(tmp_path) == ["resdemo.exe", "resdemo.exe.bak"]
-    b = binspect.load(exe)
+    b = vex.load(exe)
     found = resources.list_resources(b)
     assert resources.read_resource(b, found[7]) == b"patched!"
     assert resources.read_resource(b, found[10]) == NEW_MANIFEST
@@ -1049,11 +1049,11 @@ def test_new_data_may_be_a_bytearray(exe, tmp_path):
 
 def test_replaced_icon_image_shows_up_in_the_rebuilt_ico(exe, tmp_path):
     out = tmp_path / "out.exe"
-    b = binspect.load(exe)
+    b = vex.load(exe)
     image = bytearray(resources.read_resource(b, ICON1))
     image[0x68:0x70] = b"\xFF" * 8              # repaint the bottom row of pixels
     resources.replace_resource(exe, out, ICON1, bytes(image))
-    ico = resources.icon_file(binspect.load(out), GROUP)
+    ico = resources.icon_file(vex.load(out), GROUP)
     assert ico[38:334] == bytes(image)
     assert ico[:38] == (SRC / "resdemo.ico").read_bytes()[:38]
     assert ico[334:] == (SRC / "resdemo.ico").read_bytes()[334:]

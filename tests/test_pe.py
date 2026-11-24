@@ -1,8 +1,8 @@
 """PE parsing. Expected values were read from the committed fixtures with
-llvm-readobj/llvm-objdump, never computed by binspect itself."""
+llvm-readobj/llvm-objdump, never computed by vex itself."""
 import pytest
 
-import binspect
+import vex
 from conftest import fixture_bytes
 
 # Header field offsets in the 64-bit fixtures (e_lfanew = 0x78):
@@ -172,7 +172,7 @@ def test_unhardened_image_reports_no_aslr_or_dep(load_fixture):
 
 def test_control_flow_guard_and_no_seh_flags_are_read():
     flags = (0x8160 | 0x4000 | 0x0400).to_bytes(2, "little")
-    sec = binspect.load_bytes(patched("hello_pe64.exe", DLL_CHARACTERISTICS, flags)).security
+    sec = vex.load_bytes(patched("hello_pe64.exe", DLL_CHARACTERISTICS, flags)).security
     assert sec["cfg"] is True
     assert sec["seh"] is False
 
@@ -181,37 +181,37 @@ def test_certificate_table_marks_image_as_signed():
     data = fixture_bytes("hello_pe64.exe")
     entry = len(data).to_bytes(4, "little") + (16).to_bytes(4, "little")
     data = patched("hello_pe64.exe", DATA_DIRECTORIES + 4 * 8, entry) + bytes(16)
-    assert binspect.load_bytes(data).security["signed"] is True
+    assert vex.load_bytes(data).security["signed"] is True
 
 
 def test_clr_header_marks_image_as_dotnet():
     entry = (0x2000).to_bytes(4, "little") + (0x48).to_bytes(4, "little")
     data = patched("hello_pe64.exe", DATA_DIRECTORIES + 14 * 8, entry)
-    assert binspect.load_bytes(data).security["dotnet"] is True
+    assert vex.load_bytes(data).security["dotnet"] is True
 
 
 # --- malformed input -------------------------------------------------------
 
 def test_dos_executable_without_pe_header_is_not_a_supported_format():
-    with pytest.raises(binspect.UnknownFormatError):
-        binspect.load_bytes(b"MZ" + bytes(62) + b"This program cannot be run in DOS mode")
+    with pytest.raises(vex.UnknownFormatError):
+        vex.load_bytes(b"MZ" + bytes(62) + b"This program cannot be run in DOS mode")
 
 
 def test_pe_header_offset_outside_file_is_rejected():
     data = patched("hello_pe64.exe", 0x3C, (0x7FFFFFF0).to_bytes(4, "little"))
-    with pytest.raises(binspect.BinspectError):
-        binspect.load_bytes(data)
+    with pytest.raises(vex.VexError):
+        vex.load_bytes(data)
 
 
 def test_truncated_optional_header_is_a_parse_error():
-    with pytest.raises(binspect.ParseError):
-        binspect.load_bytes(fixture_bytes("hello_pe64.exe")[:0xA0])
+    with pytest.raises(vex.ParseError):
+        vex.load_bytes(fixture_bytes("hello_pe64.exe")[:0xA0])
 
 
 def test_corrupt_import_directory_degrades_to_a_warning():
     # Point the import directory far outside the image.
     entry = (0x7FFF0000).to_bytes(4, "little") + (0x28).to_bytes(4, "little")
-    b = binspect.load_bytes(patched("hello_pe64.exe", DATA_DIRECTORIES + 1 * 8, entry))
+    b = vex.load_bytes(patched("hello_pe64.exe", DATA_DIRECTORIES + 1 * 8, entry))
     assert b.imports == []
     assert b.entry == 0x140001060
     assert any("import" in w.lower() for w in b.warnings)
@@ -219,7 +219,7 @@ def test_corrupt_import_directory_degrades_to_a_warning():
 
 def test_section_data_past_end_of_file_is_clipped():
     # Truncate inside .rdata: the section is still listed, with fewer bytes.
-    b = binspect.load_bytes(fixture_bytes("hello_pe64.exe")[:0x680])
+    b = vex.load_bytes(fixture_bytes("hello_pe64.exe")[:0x680])
     rdata = next(s for s in b.sections if s.name == ".rdata")
     assert rdata.size == 0x80
     assert b.read(0x140002030, 5) == b"Hello"
@@ -228,10 +228,10 @@ def test_section_data_past_end_of_file_is_clipped():
 def test_raw_data_pointer_is_rounded_down_like_the_windows_loader_does():
     # .rdata is the 2nd section header (0x180 + 40); PointerToRawData is at +20.
     data = patched("hello_pe64.exe", 0x180 + 40 + 20, (0x610).to_bytes(4, "little"))
-    assert binspect.load_bytes(data).read(0x140002030, 5) == b"Hello"
+    assert vex.load_bytes(data).read(0x140002030, 5) == b"Hello"
 
 
 def test_aslr_needs_relocations_to_be_present():
     # COFF Characteristics is at 0x78 + 4 + 18; bit 0 = relocations stripped.
     data = patched("hello_pe64.exe", 0x8E, (0x23).to_bytes(2, "little"))
-    assert binspect.load_bytes(data).security["aslr"] is False
+    assert vex.load_bytes(data).security["aslr"] is False

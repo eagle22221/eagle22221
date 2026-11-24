@@ -5,7 +5,7 @@
 #include "engines.h"
 #include "platform.h"
 
-static const char UNAVAILABLE[] = "asset packs are not available in this build of binspect";
+static const char UNAVAILABLE[] = "asset packs are not available in this build of vex";
 
 static void unavailable(char *err, size_t errlen) {
     if (err != NULL && errlen > 0)

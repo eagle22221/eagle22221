@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from binspect.cli import main
+from vex.cli import main
 from conftest import fixture_path
 
 ELF = str(fixture_path("hello_elf64"))
@@ -174,7 +174,7 @@ def test_report_combines_the_main_views(capsys):
 def test_missing_file_is_a_clean_error(capsys):
     code, out, err = run(capsys, "info", "/no/such/file.bin")
     assert code == 1 and out == ""
-    assert err.startswith("binspect: error:") and "Traceback" not in err
+    assert err.startswith("vex: error:") and "Traceback" not in err
 
 
 def test_non_binary_input_is_a_clean_error(capsys, tmp_path):
@@ -214,7 +214,7 @@ def test_no_arguments_prints_usage(capsys):
 
 
 def test_gui_command_starts_the_server_with_its_options(monkeypatch):
-    from binspect import server
+    from vex import server
     calls = []
     monkeypatch.setattr(server, "serve", lambda *a: calls.append(a) or 0)
     with pytest.raises(SystemExit) as exc:
@@ -224,7 +224,7 @@ def test_gui_command_starts_the_server_with_its_options(monkeypatch):
 
 
 def test_session_link_carries_the_token_in_the_fragment():
-    from binspect import server
+    from vex import server
     httpd, ws = server.create_server(port=0, token="tok")
     try:
         url = server.session_url(httpd, ws, ELF)

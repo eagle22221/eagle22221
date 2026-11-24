@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fetch the source of the Capstone disassembly engine into third_party/.
 #
-# binspect's disasm/functions/xrefs commands are built on Capstone
+# vex's disasm/functions/xrefs commands are built on Capstone
 # (https://www.capstone-engine.org, BSD 3-clause licence). The version is
 # pinned to the one the Python reference implementation was tested with, so
 # both print identical instruction text. The source comes from the PyPI

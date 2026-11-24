@@ -92,7 +92,7 @@ class PckArchive(Archive):
         self._fmt = fmt
         if fmt not in (1, 2, 3):
             raise UnsupportedError(
-                f"Godot pack format version {fmt} is not supported (binspect reads "
+                f"Godot pack format version {fmt} is not supported (vex reads "
                 "formats 1 to 3, Godot 3.x and 4.x)")
         pos = start + 20
         self._flags, file_base = 0, 0
@@ -112,11 +112,11 @@ class PckArchive(Archive):
         if self._flags & PACK_DIR_ENCRYPTED:
             raise UnsupportedError(
                 "the index (directory) of this Godot pack is encrypted with a key "
-                "compiled into the game; binspect does not decrypt packs or recover keys")
+                "compiled into the game; vex does not decrypt packs or recover keys")
         if self._flags & PACK_SPARSE_BUNDLE:
             raise UnsupportedError(
                 "this Godot pack is a sparse bundle (file data is stored outside the "
-                "pack), which binspect does not support")
+                "pack), which vex does not support")
 
         (count,) = struct.unpack("<I", read_at(fh, pos, 4, size, "PCK file count"))
         pos += 4
@@ -135,7 +135,7 @@ class PckArchive(Archive):
             row = read_at(fh, pos + 4, length + fixed, size, "PCK directory")
             pos += 4 + length + fixed
             if pos - directory_start > limit("MAX_INDEX_SIZE"):
-                raise UnsupportedError("Godot pack directory exceeds binspect.archives.MAX_INDEX_SIZE")
+                raise UnsupportedError("Godot pack directory exceeds vex.archives.MAX_INDEX_SIZE")
             raw = row[:length].split(b"\0", 1)[0]
             offset, length_, = struct.unpack_from("<QQ", row, length)
             md5 = row[length + 16:length + 32]
@@ -170,7 +170,7 @@ class PckArchive(Archive):
             self.notes.append(f"{removals} entries are removal markers of a patch pack")
         if fmt == 3:
             self._read_only(
-                "pack format 3 (Godot 4.5+) is read-only in binspect: listing and "
+                "pack format 3 (Godot 4.5+) is read-only in vex: listing and "
                 "extraction work, repacking is not implemented")
         self._finish()
 

@@ -1,6 +1,6 @@
 """Differential tests for the native C edition's asset-pack and engine support.
 
-The C program (c/binspect) is built and then checked, command by command,
+The C program (c/vex) is built and then checked, command by command,
 against the Python edition that is this repository's oracle: the same packs
 (assembled by the builders in test_archives.py / test_engines.py) are fed to
 both and their --json output, exit codes, extracted bytes and repacked files
@@ -27,8 +27,8 @@ from conftest import fixture_bytes
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CDIR = REPO / "c"
-BIN = CDIR / "build" / "binspect"
-ASAN = CDIR / "build" / "binspect-asan"
+BIN = CDIR / "build" / "vex"
+ASAN = CDIR / "build" / "vex-asan"
 
 
 def _have(cmd):
@@ -64,7 +64,7 @@ def run_c(binary, args):
 
 
 def run_py(args):
-    return subprocess.run([sys.executable, "-m", "binspect"] + args,
+    return subprocess.run([sys.executable, "-m", "vex"] + args,
                           capture_output=True, cwd=str(REPO))
 
 
@@ -487,4 +487,4 @@ def test_hostile_input_is_safe_under_asan(asan, tmp_path):
 def test_windows_build_succeeds():
     r = subprocess.run(["make", "-C", str(CDIR), "windows"], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert (CDIR / "build" / "binspect.exe").exists()
+    assert (CDIR / "build" / "vex.exe").exists()

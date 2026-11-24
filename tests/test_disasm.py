@@ -4,8 +4,8 @@ import sys
 
 import pytest
 
-import binspect
-from binspect.disasm import Disassembler
+import vex
+from vex.disasm import Disassembler
 from conftest import fixture_bytes
 
 
@@ -107,14 +107,14 @@ def test_arm64_branch_and_address_materialisation(load_fixture):
 def test_undecodable_bytes_are_shown_as_data_and_decoding_continues():
     data = bytearray(fixture_bytes("hello_elf64"))
     data[0x11C9] = 0x06                 # PUSH ES: invalid in 64-bit mode
-    dis = Disassembler(binspect.load_bytes(bytes(data)))
+    dis = Disassembler(vex.load_bytes(bytes(data)))
     first, second = dis.disassemble(0x11C9, count=2)
     assert (first.mnemonic, first.operands, first.size) == (".byte", "0x06", 1)
     assert second.address == 0x11CA
 
 
 def test_address_outside_the_file_is_an_error(elf):
-    with pytest.raises(binspect.LocationError):
+    with pytest.raises(vex.LocationError):
         elf.disassemble(0x900000, count=4)
 
 
@@ -139,28 +139,28 @@ def test_sweep_covers_all_executable_code_once(elf):
 
 def test_missing_capstone_is_reported_clearly(load_fixture, monkeypatch):
     monkeypatch.setitem(sys.modules, "capstone", None)
-    with pytest.raises(binspect.MissingDependencyError, match="pip install capstone"):
+    with pytest.raises(vex.MissingDependencyError, match="pip install capstone"):
         Disassembler(load_fixture("hello_elf64"))
 
 
 def test_unknown_cpu_is_reported_clearly(load_fixture):
     data = bytearray(fixture_bytes("hello_elf64"))
     data[0x12:0x14] = (0x1234).to_bytes(2, "little")      # e_machine
-    with pytest.raises(binspect.UnsupportedError):
-        Disassembler(binspect.load_bytes(bytes(data)))
+    with pytest.raises(vex.UnsupportedError):
+        Disassembler(vex.load_bytes(bytes(data)))
 
 
 def test_string_preview_reads_data_but_never_code(elf):
     assert elf.string_at(0x2004) == '"s3cr3t-fixture-key"'
     data = bytearray(fixture_bytes("hello_elf64"))
     data[0x11C9:0x11CE] = b"ABCD\0"        # printable bytes inside .text
-    assert Disassembler(binspect.load_bytes(bytes(data))).string_at(0x11C9) is None
+    assert Disassembler(vex.load_bytes(bytes(data))).string_at(0x11C9) is None
 
 
 def test_long_strings_are_truncated_in_previews(load_fixture):
     dis = Disassembler(load_fixture("hello_pe64.exe"))
     data = bytearray(fixture_bytes("hello_pe64.exe"))
     data[0x630:0x630 + 80] = b"A" * 79 + b"\0"
-    long = Disassembler(binspect.load_bytes(bytes(data)))
+    long = Disassembler(vex.load_bytes(bytes(data)))
     assert long.string_at(0x140002030) == '"' + "A" * 60 + '..."'
     assert dis.string_at(0x140002000) == '"Wide fixture string"'      # UTF-16

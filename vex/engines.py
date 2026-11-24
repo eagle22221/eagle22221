@@ -7,9 +7,9 @@ means for getting at its assets.
 Detection uses cheap evidence only: the names of neighbouring files and
 folders, the signature of asset containers found there, and a capped scan of
 the executable for marker strings. Nothing is executed and no file is read
-in full. The advice says what binspect itself can do with the assets (see
-binspect.archives) and names the established community tool for everything
-it cannot; binspect never decrypts anything, so encrypted assets are only
+in full. The advice says what vex itself can do with the assets (see
+vex.archives) and names the established community tool for everything
+it cannot; vex never decrypts anything, so encrypted assets are only
 reported.
 """
 from __future__ import annotations
@@ -306,24 +306,24 @@ class _Case:
 
 
 def _archive_advice(tree: _Tree, relative: str, what: str) -> Tuple[bool, str]:
-    """(binspect can open it, advice saying exactly what it can do). The
+    """(vex can open it, advice saying exactly what it can do). The
     text is shown to end users as is, so it speaks of the Assets view and the
     command line, and it is only ever claimed after the container was
     actually opened."""
     shown = tree.report(relative)
     archive, reason = tree.archive(relative)
     if archive is None:
-        return False, f"binspect cannot open {shown}: {reason.rstrip('.')}."
+        return False, f"vex cannot open {shown}: {reason.rstrip('.')}."
     if archive.writable:
         return True, (
-            f"binspect can browse, extract and repack {what} ({shown}): open it in the "
-            "Assets view, or run `binspect assets list PACK`, `binspect assets extract "
-            "PACK FOLDER`, `binspect assets replace PACK NAME NEWFILE -o NEWPACK`. "
+            f"vex can browse, extract and repack {what} ({shown}): open it in the "
+            "Assets view, or run `vex assets list PACK`, `vex assets extract "
+            "PACK FOLDER`, `vex assets replace PACK NAME NEWFILE -o NEWPACK`. "
             "Repacking always writes a new file, so keep the original as a backup.")
     why = "; ".join(n for n in archive.notes if "repack" in n or "encrypted" in n)
     return True, (
-        f"binspect can browse and extract {what} ({shown}) in the Assets view or with "
-        "`binspect assets list PACK` and `binspect assets extract PACK FOLDER`, but "
+        f"vex can browse and extract {what} ({shown}) in the Assets view or with "
+        "`vex assets list PACK` and `vex assets extract PACK FOLDER`, but "
         f"cannot repack it: {why.rstrip('.') or 'not supported for this pack'}.")
 
 
@@ -376,13 +376,13 @@ def _unity(tree: _Tree) -> _Case:
         "*_data/streamingassets/*.bundle", "*_data/streamingassets/*/*.bundle",
         "*_data/streamingassets/*.unity3d")
     case.advice.append(
-        "binspect cannot open Unity's serialized files (.assets, level*, "
+        "vex cannot open Unity's serialized files (.assets, level*, "
         "globalgamemanagers) or asset bundles / UnityFS (data.unity3d, *.bundle). Use "
         "AssetStudio or AssetRipper to browse and export assets, and UABEA to edit or "
         "replace them.")
     if case.details.get("scripting") == "IL2CPP":
         case.advice.append(
-            "Game code is compiled to native code (IL2CPP) in GameAssembly: binspect can "
+            "Game code is compiled to native code (IL2CPP) in GameAssembly: vex can "
             "disassemble it like any native binary, but recovering class and method names "
             "needs Il2CppDumper or Cpp2IL together with il2cpp_data/Metadata/"
             "global-metadata.dat.")
@@ -390,12 +390,12 @@ def _unity(tree: _Tree) -> _Case:
         if metadata and tree.head(metadata[0], 4) not in (b"", b"\xaf\x1b\xb1\xfa"):
             case.advice.append(
                 f"{tree.report(metadata[0])} does not start with the IL2CPP metadata "
-                "signature: it is probably encrypted or obfuscated. binspect does not "
+                "signature: it is probably encrypted or obfuscated. vex does not "
                 "decrypt it.")
     elif case.details.get("scripting") == "Mono":
         case.advice.append(
             f"Game code is .NET IL in {tree.report(managed[0])}: decompile and edit it "
-            "with ILSpy or dnSpy (dnSpyEx). binspect only reads the PE headers of .NET "
+            "with ILSpy or dnSpy (dnSpyEx). vex only reads the PE headers of .NET "
             "assemblies; it does not decompile IL.")
     return case
 
@@ -447,7 +447,7 @@ def _unreal(tree: _Tree) -> _Case:
             case.details["pak_index_encrypted"] = "yes"
         break
     case.advice.append(
-        "binspect cannot open Unreal .pak or IoStore (.utoc/.ucas) containers, nor the "
+        "vex cannot open Unreal .pak or IoStore (.utoc/.ucas) containers, nor the "
         ".uasset/.umap packages inside. Use FModel or UE Viewer (umodel) to browse and "
         "export assets, and UnrealPak or repak to build paks.")
     case.advice.append(
@@ -456,7 +456,7 @@ def _unreal(tree: _Tree) -> _Case:
         "own pak.")
     if encrypted:
         case.advice.append(
-            "The pak index is encrypted (AES): those tools need the game's key. binspect "
+            "The pak index is encrypted (AES): those tools need the game's key. vex "
             "does not decrypt paks and does not recover keys.")
     return case
 
@@ -516,7 +516,7 @@ def _godot(tree: _Tree) -> _Case:
         case.advice.append(_archive_advice(tree, pack, "this Godot pack")[1])
     if encrypted:
         case.advice.append(
-            "The pack's index is encrypted with a key compiled into the game. binspect "
+            "The pack's index is encrypted with a key compiled into the game. vex "
             "reports this but does not decrypt the pack or recover the key.")
     if packs:
         case.advice.append(
@@ -551,12 +551,12 @@ def _gamemaker(tree: _Tree) -> _Case:
         return case
     case.assets = data_files + tree.glob("audiogroup*.dat", "*/audiogroup*.dat")
     case.advice.append(
-        "binspect cannot open data.win / game.unx (GameMaker's IFF-style 'FORM' data "
+        "vex cannot open data.win / game.unx (GameMaker's IFF-style 'FORM' data "
         "file holding sprites, sounds, rooms and code). Use UndertaleModTool to browse "
         "and edit it.")
     case.advice.append(
         "Games built with the YYC compiler have their code compiled into the executable "
-        "instead of bytecode in the data file; binspect can disassemble that as native "
+        "instead of bytecode in the data file; vex can disassemble that as native "
         "code but cannot recover GML.")
     return case
 
@@ -598,7 +598,7 @@ def _renpy(tree: _Tree) -> _Case:
         "a changed image, sound or script can simply be placed in game/ under the same "
         "path; repacking is rarely necessary.")
     case.advice.append(
-        ".rpyc files are compiled scripts: binspect does not decompile them; use unrpyc "
+        ".rpyc files are compiled scripts: vex does not decompile them; use unrpyc "
         "to get .rpy sources back.")
     return case
 
@@ -643,7 +643,7 @@ def _rpg_maker(tree: _Tree) -> _Case:
             case.assets += scrambled
             case.advice.append(
                 "Images and/or audio were deployed with RPG Maker's built-in asset "
-                "encryption (.rpgmvp/.rpgmvo/.rpgmvm, or .png_/.ogg_/.m4a_ in MZ). binspect "
+                "encryption (.rpgmvp/.rpgmvo/.rpgmvm, or .png_/.ogg_/.m4a_ in MZ). vex "
                 "reports this but does not decrypt them.")
         else:
             case.advice.append(
@@ -654,12 +654,12 @@ def _rpg_maker(tree: _Tree) -> _Case:
             "that can be edited directly.")
     if rgss:
         case.advice.append(
-            f"{rgss[0]} is an RGSS archive, which is always encrypted: binspect cannot "
+            f"{rgss[0]} is an RGSS archive, which is always encrypted: vex cannot "
             "open it and does not decrypt it.")
     if case.details.get("version") == "2000/2003":
         case.advice.append(
             "RPG Maker 2000/2003 keeps assets as loose files in folders next to "
-            "RPG_RT.exe (some in the proprietary XYZ image format); binspect has no "
+            "RPG_RT.exe (some in the proprietary XYZ image format); vex has no "
             "special support for its .ldb/.lmu databases. EasyRPG's tools can read them.")
     return case
 
@@ -697,7 +697,7 @@ def _electron(tree: _Tree) -> _Case:
         case.advice.append(
             "If the app enables Electron's ASAR integrity validation, a modified "
             "app.asar is rejected unless the hash stored in the executable is updated "
-            "as well; binspect does not do that.")
+            "as well; vex does not do that.")
     elif tree.file("resources/app/package.json"):
         case.advice.append(
             "The application is not packed: its JavaScript, HTML and CSS are plain "
@@ -705,8 +705,8 @@ def _electron(tree: _Tree) -> _Case:
     else:
         case.advice.append(
             "No resources/app.asar was found next to this executable; if the app keeps "
-            "one elsewhere, binspect can browse, extract and repack it (Assets view, or "
-            "`binspect assets list PACK`).")
+            "one elsewhere, vex can browse, extract and repack it (Assets view, or "
+            "`vex assets list PACK`).")
     return case
 
 
@@ -754,7 +754,7 @@ def _love(tree: _Tree) -> _Case:
             tree, containers[0], "the game archive (a plain ZIP)")[1])
     case.advice.append(
         "A LÖVE game is Lua source plus loose images and sounds. Scripts are normally "
-        "plain text; if they were precompiled to LuaJIT bytecode, binspect does not "
+        "plain text; if they were precompiled to LuaJIT bytecode, vex does not "
         "decompile them.")
     return case
 
@@ -791,7 +791,7 @@ def _source(tree: _Tree) -> _Case:
         return case
     case.assets = vpks
     case.advice.append(
-        "binspect cannot open Valve VPK pack files. Use VPKEdit or GCFScape to browse "
+        "vex cannot open Valve VPK pack files. Use VPKEdit or GCFScape to browse "
         "and extract them, and Valve's vpk tool (shipped in the game's bin folder) to "
         "build new ones.")
     case.advice.append(
@@ -820,7 +820,7 @@ def _goldsrc(tree: _Tree) -> _Case:
     if texture_wads:
         case.advice.append(
             f"{tree.report(texture_wads[0])} and the other .wad files are Half-Life "
-            "texture WADs (WAD3), a different format from Doom's IWAD/PWAD: binspect "
+            "texture WADs (WAD3), a different format from Doom's IWAD/PWAD: vex "
             "cannot open them. Use a WAD3 editor such as Wally.")
     case.advice.append(
         "GoldSrc loads loose files from the game folder (and its _addon/_hd variants) "
@@ -873,7 +873,7 @@ def _id_tech(tree: _Tree) -> _Case:
     if iwads or pwads:
         case.advice.append(
             "WAD lumps are in Doom's own formats (patches, flats, maps, DMX sounds): "
-            "binspect extracts and replaces the raw lumps; use SLADE to view, convert "
+            "vex extracts and replaces the raw lumps; use SLADE to view, convert "
             "and edit them.")
     return case
 
@@ -919,7 +919,7 @@ def _java(tree: _Tree) -> _Case:
             tree, preferred or jars[0], "JAR files (they are ZIP archives)")[1])
         case.advice.append(
             "Images, sounds and data inside a JAR are ordinary files. .class files are "
-            "JVM bytecode, which binspect does not decompile: use a Java decompiler "
+            "JVM bytecode, which vex does not decompile: use a Java decompiler "
             "such as CFR, Vineflower or JD-GUI, or Recaf to edit classes.")
         case.advice.append(
             "A signed JAR (META-INF/*.SF) fails verification once changed: remove the "
@@ -927,7 +927,7 @@ def _java(tree: _Tree) -> _Case:
     else:
         case.advice.append(
             "The executable looks like a Java launcher but no JAR was found next to "
-            "it; JAR files are ZIP archives that binspect can browse, extract and repack.")
+            "it; JAR files are ZIP archives that vex can browse, extract and repack.")
     return case
 
 
@@ -953,11 +953,11 @@ def _monogame(tree: _Tree) -> _Case:
         return case
     case.assets = content
     case.advice.append(
-        "binspect cannot open .xnb files (XNA's compiled content, usually LZX or LZ4 "
+        "vex cannot open .xnb files (XNA's compiled content, usually LZX or LZ4 "
         "compressed). Use an XNB tool such as xnbcli to unpack and repack them.")
     case.advice.append(
         "The game code is .NET: decompile and edit the game's .exe and .dll assemblies "
-        "with ILSpy or dnSpy. binspect only reads their PE headers.")
+        "with ILSpy or dnSpy. vex only reads their PE headers.")
     return case
 
 

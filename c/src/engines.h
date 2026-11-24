@@ -1,7 +1,7 @@
 /* Game-engine detection and nearby asset packs (the C counterpart of
  * engines.py and views.engine()). */
-#ifndef BINSPECT_ENGINES_H
-#define BINSPECT_ENGINES_H
+#ifndef VEX_ENGINES_H
+#define VEX_ENGINES_H
 
 #include "json.h"
 

@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>binspect user guide</title>
+<title>vex user guide</title>
 <style>
-@font-face { font-family: "Barlow"; font-weight: 400; src: url("../../binspect/web/fonts/barlow-latin-400-normal.woff2") format("woff2"); }
-@font-face { font-family: "Barlow"; font-weight: 500; src: url("../../binspect/web/fonts/barlow-latin-500-normal.woff2") format("woff2"); }
-@font-face { font-family: "Barlow"; font-weight: 600; src: url("../../binspect/web/fonts/barlow-latin-600-normal.woff2") format("woff2"); }
-@font-face { font-family: "Barlow Semi Condensed"; font-weight: 600; src: url("../../binspect/web/fonts/barlow-semi-condensed-latin-600-normal.woff2") format("woff2"); }
-@font-face { font-family: "IBM Plex Mono"; font-weight: 400; src: url("../../binspect/web/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 400; src: url("../../vex/web/fonts/barlow-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 500; src: url("../../vex/web/fonts/barlow-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 600; src: url("../../vex/web/fonts/barlow-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Semi Condensed"; font-weight: 600; src: url("../../vex/web/fonts/barlow-semi-condensed-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; src: url("../../vex/web/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); }
 
 @page { size: A4; margin: 18mm 18mm 20mm; }
 :root { --ink: #132238; --ink-2: #4A5D78; --line: #C5D0DC; --accent: #0F56D9; --wash: #EEF3FA;
@@ -78,7 +78,7 @@ td code { white-space: nowrap; }
 <section class="cover">
   <div class="brand">
     <svg viewBox="0 0 28 28"><rect x="1.5" y="1.5" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.5 9.5h25M9.5 9.5v17M9.5 17.5h17" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 26.5l14.5-9M16.5 26.5l10-6.2M21.5 26.5l5-3.1" fill="none" stroke="currentColor" stroke-width="1"/></svg>
-    binspect
+    vex
   </div>
   <div class="cover-main">
     <h1>User guide and<br>first lessons</h1>
@@ -89,14 +89,14 @@ td code { white-space: nowrap; }
       <div class="dt" style="flex:22"><span>data</span></div>
       <div class="mt" style="flex:14"><span>tables</span></div>
     </div>
-    <div class="strip-note">Every program is laid out in parts like these. binspect draws them to scale.</div>
+    <div class="strip-note">Every program is laid out in parts like these. vex draws them to scale.</div>
   </div>
-  <div class="cover-foot"><span>For binspect 0.1 on Linux and Windows</span><span>About 30 minutes with the exercises</span></div>
+  <div class="cover-foot"><span>For vex 0.1 on Linux and Windows</span><span>About 30 minutes with the exercises</span></div>
 </section>
 
 <section class="contents">
   <h2>What is in this guide</h2>
-  <p>Each lesson takes about five minutes. The practice files come with binspect, so you can follow every step exactly as written.</p>
+  <p>Each lesson takes about five minutes. The practice files come with vex, so you can follow every step exactly as written.</p>
   <ol>
     <li><span class="n">Start here</span><span class="t">Install and open the interface</span><span class="d">Two commands, then a browser tab.</span></li>
     <li><span class="n">Lesson 1</span><span class="t">The overview</span><span class="d">What kind of program is this?</span></li>
@@ -111,9 +111,9 @@ td code { white-space: nowrap; }
   <div class="box">
     <h3>Three things to know first</h3>
     <ul>
-      <li><b>binspect never runs the file you open.</b> It only reads it.</li>
+      <li><b>vex never runs the file you open.</b> It only reads it.</li>
       <li><b>Your original files are not changed.</b> Anything you modify is saved as a new file.</li>
-      <li><b>Use it on software you have the right to study and change.</b> binspect leaves encrypted and protected content alone.</li>
+      <li><b>Use it on software you have the right to study and change.</b> vex leaves encrypted and protected content alone.</li>
     </ul>
   </div>
 </section>
@@ -123,14 +123,14 @@ td code { white-space: nowrap; }
   <h2>Install and open the interface</h2>
   <p class="goal">You need Python 3.9 or newer. Everything else is installed for you.</p>
   <ol>
-    <li>Open a terminal (on Windows: PowerShell) in the binspect folder.</li>
+    <li>Open a terminal (on Windows: PowerShell) in the vex folder.</li>
     <li>Install it:
       <pre><code>pip install .</code></pre></li>
     <li>Start the interface:
-      <pre><code>binspect gui</code></pre>
+      <pre><code>vex gui</code></pre>
       Your browser opens a page served from your own computer. If it does not open by itself, copy the link the terminal prints. Keep the terminal open while you work, and press Ctrl+C in it when you are done.</li>
   </ol>
-  <figure><img src="img/welcome.png" alt="The binspect start page"><figcaption>The start page. Drop a file anywhere on it, or choose <b>Open file or folder</b>.</figcaption></figure>
+  <figure><img src="img/welcome.png" alt="The vex start page"><figcaption>The start page. Drop a file anywhere on it, or choose <b>Open file or folder</b>.</figcaption></figure>
   <h3>The practice files</h3>
   <p>The folder <code>tests/fixtures/bin</code> holds small programs made for practising. The lessons use <code>hello_pe64.exe</code>, a tiny Windows program that prints two lines of text. Linux programs such as <code>libsample.so</code> in the same folder work in exactly the same way, and you can open either kind on either system.</p>
 </section>
@@ -194,8 +194,8 @@ td code { white-space: nowrap; }
   <ol>
     <li>Choose <b>Strings</b>.</li>
     <li>Type <code>fixture</code> in the search box. The list narrows as you type.</li>
-    <li>Tick <b>Only links, addresses and paths</b> to keep just the strings binspect recognises as web addresses, IP addresses, e-mail addresses, file paths or registry keys. Untick it again.</li>
-    <li>On the row that starts with "Hello from", choose <b>Find uses</b>. binspect answers with the function that reads this text.</li>
+    <li>Tick <b>Only links, addresses and paths</b> to keep just the strings vex recognises as web addresses, IP addresses, e-mail addresses, file paths or registry keys. Untick it again.</li>
+    <li>On the row that starts with "Hello from", choose <b>Find uses</b>. vex answers with the function that reads this text.</li>
     <li>Click the answer to see that function in the <b>Code</b> view.</li>
   </ol>
   <figure><img src="img/strings.png" alt="The Strings view"><figcaption>The Strings view. <b>Find uses</b> connects a piece of text to the function that reads it.</figcaption></figure>
@@ -206,7 +206,7 @@ td code { white-space: nowrap; }
   <div class="lesson-no">Lesson 4</div>
   <h2>Code</h2>
   <p class="goal">Goal: follow what a function does without knowing every instruction.</p>
-  <p>The <b>Code</b> view has three columns: the functions binspect found, the instructions of the one you chose, and <b>Used by</b>, which lists the places that call it.</p>
+  <p>The <b>Code</b> view has three columns: the functions vex found, the instructions of the one you chose, and <b>Used by</b>, which lists the places that call it.</p>
   <ol>
     <li>Choose <b>Code</b>, then <code>print</code> in the function list.</li>
     <li>Read the green lines first. Those are calls, and the note after the semicolon names what is called. Here the function calls <code>text_length</code>, then two Windows functions, <code>GetStdHandle</code> and <code>WriteFile</code>.</li>
@@ -254,13 +254,13 @@ td code { white-space: nowrap; }
   <div class="lesson-no">Lesson 6</div>
   <h2>Games and asset packs</h2>
   <p class="goal">Goal: find out which engine a game uses, look inside an asset pack, and swap one file for your own.</p>
-  <p>Games keep their pictures, sounds and scripts in packs. binspect can open the common open formats: ZIP-based packs (<code>.zip</code>, <code>.pk3</code>, <code>.love</code>, <code>.jar</code>), Quake <code>.pak</code>, Doom <code>.wad</code>, Godot <code>.pck</code>, Electron <code>.asar</code> and Ren'Py <code>.rpa</code>.</p>
+  <p>Games keep their pictures, sounds and scripts in packs. vex can open the common open formats: ZIP-based packs (<code>.zip</code>, <code>.pk3</code>, <code>.love</code>, <code>.jar</code>), Quake <code>.pak</code>, Doom <code>.wad</code>, Godot <code>.pck</code>, Electron <code>.asar</code> and Ren'Py <code>.rpa</code>.</p>
   <ol>
-    <li>Choose <b>Open file or folder</b>, go to the game's folder and choose <b>Open this folder as a game</b>. To practise, use <code>examples/demo_game</code>, a pretend game that comes with binspect.</li>
+    <li>Choose <b>Open file or folder</b>, go to the game's folder and choose <b>Open this folder as a game</b>. To practise, use <code>examples/demo_game</code>, a pretend game that comes with vex.</li>
     <li>The <b>Assets</b> view names the engine if it recognises one, explains why, and lists the packs it found.</li>
     <li>Click a pack. Its files appear in a list. Select one to preview it: pictures are shown, text is displayed, anything else is shown as bytes.</li>
     <li>To take everything out, choose <b>Extract everything to a folder</b>.</li>
-    <li>To change a file, select it, choose <b>Replace with my file</b>, pick your file, and give a name for the new pack. binspect writes a complete new pack with your file in place of the old one.</li>
+    <li>To change a file, select it, choose <b>Replace with my file</b>, pick your file, and give a name for the new pack. vex writes a complete new pack with your file in place of the old one.</li>
   </ol>
   <figure class="crop-tall"><img src="img/assets.png" alt="The Assets view with a pack open"><figcaption>The Assets view: engine at the top, packs below, and the contents of the pack you opened with a preview.</figcaption></figure>
   <div class="box">
@@ -268,7 +268,7 @@ td code { white-space: nowrap; }
     <ul>
       <li>The original pack stays as it was. To try your version, keep a copy of the original and put the new pack in its place.</li>
       <li>Encrypted packs are shown as encrypted and are not opened.</li>
-      <li>Some engines use formats binspect does not rebuild. In that case the Assets view names the community tool made for that engine.</li>
+      <li>Some engines use formats vex does not rebuild. In that case the Assets view names the community tool made for that engine.</li>
       <li>Windows programs can also carry icons and version details inside them. They appear in the same view under <b>Built-in resources</b>.</li>
     </ul>
   </div>
@@ -278,29 +278,29 @@ td code { white-space: nowrap; }
 <section class="lesson">
   <div class="lesson-no">Reference</div>
   <h2>Command line</h2>
-  <p>Everything in the lessons is also available as a command. Put <code>--json</code> right after <code>binspect</code> to get output other tools can read.</p>
+  <p>Everything in the lessons is also available as a command. Put <code>--json</code> right after <code>vex</code> to get output other tools can read.</p>
   <table>
     <tr><th>Command</th><th>Shows</th></tr>
-    <tr><td><code>binspect gui [PATH]</code></td><td>Opens the graphical interface</td></tr>
-    <tr><td><code>binspect info FILE</code></td><td>The overview (lesson 1)</td></tr>
-    <tr><td><code>binspect report FILE</code></td><td>Overview, sections, imports, notable strings and functions together</td></tr>
-    <tr><td><code>binspect sections FILE</code></td><td>The section table (lesson 2)</td></tr>
-    <tr><td><code>binspect hexdump FILE 0x2000</code></td><td>Bytes at an address</td></tr>
-    <tr><td><code>binspect strings FILE --grep TEXT</code></td><td>Strings containing TEXT (lesson 3)</td></tr>
-    <tr><td><code>binspect strings FILE --tagged</code></td><td>Only links, addresses and paths</td></tr>
-    <tr><td><code>binspect functions FILE</code></td><td>The function list (lesson 4)</td></tr>
-    <tr><td><code>binspect disasm FILE NAME</code></td><td>The instructions of one function</td></tr>
-    <tr><td><code>binspect xrefs FILE NAME</code></td><td>Where a function or import is used</td></tr>
-    <tr><td><code>binspect xrefs FILE --string TEXT</code></td><td>Where a string is used</td></tr>
-    <tr><td><code>binspect imports FILE</code></td><td>Imported functions (lesson 5)</td></tr>
-    <tr><td><code>binspect exports FILE</code></td><td>Functions a library offers</td></tr>
-    <tr><td><code>binspect engine FOLDER</code></td><td>The game engine and its packs (lesson 6)</td></tr>
-    <tr><td><code>binspect assets list PACK</code></td><td>Files in a pack</td></tr>
-    <tr><td><code>binspect assets extract PACK FOLDER</code></td><td>Unpacks a pack</td></tr>
-    <tr><td><code>binspect assets replace PACK NAME FILE -o NEW</code></td><td>Writes a new pack with one file swapped</td></tr>
-    <tr><td><code>binspect resources list FILE</code></td><td>Icons and version details in a Windows program</td></tr>
+    <tr><td><code>vex gui [PATH]</code></td><td>Opens the graphical interface</td></tr>
+    <tr><td><code>vex info FILE</code></td><td>The overview (lesson 1)</td></tr>
+    <tr><td><code>vex report FILE</code></td><td>Overview, sections, imports, notable strings and functions together</td></tr>
+    <tr><td><code>vex sections FILE</code></td><td>The section table (lesson 2)</td></tr>
+    <tr><td><code>vex hexdump FILE 0x2000</code></td><td>Bytes at an address</td></tr>
+    <tr><td><code>vex strings FILE --grep TEXT</code></td><td>Strings containing TEXT (lesson 3)</td></tr>
+    <tr><td><code>vex strings FILE --tagged</code></td><td>Only links, addresses and paths</td></tr>
+    <tr><td><code>vex functions FILE</code></td><td>The function list (lesson 4)</td></tr>
+    <tr><td><code>vex disasm FILE NAME</code></td><td>The instructions of one function</td></tr>
+    <tr><td><code>vex xrefs FILE NAME</code></td><td>Where a function or import is used</td></tr>
+    <tr><td><code>vex xrefs FILE --string TEXT</code></td><td>Where a string is used</td></tr>
+    <tr><td><code>vex imports FILE</code></td><td>Imported functions (lesson 5)</td></tr>
+    <tr><td><code>vex exports FILE</code></td><td>Functions a library offers</td></tr>
+    <tr><td><code>vex engine FOLDER</code></td><td>The game engine and its packs (lesson 6)</td></tr>
+    <tr><td><code>vex assets list PACK</code></td><td>Files in a pack</td></tr>
+    <tr><td><code>vex assets extract PACK FOLDER</code></td><td>Unpacks a pack</td></tr>
+    <tr><td><code>vex assets replace PACK NAME FILE -o NEW</code></td><td>Writes a new pack with one file swapped</td></tr>
+    <tr><td><code>vex resources list FILE</code></td><td>Icons and version details in a Windows program</td></tr>
   </table>
-  <p>For any command, <code>binspect COMMAND --help</code> lists its options.</p>
+  <p>For any command, <code>vex COMMAND --help</code> lists its options.</p>
 
   <h2 style="break-before:page">Glossary</h2>
   <table>

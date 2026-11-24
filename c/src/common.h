@@ -1,7 +1,7 @@
-/* Shared basics for every binspect source file: integer types, memory,
+/* Shared basics for every vex source file: integer types, memory,
  * strings and the error mechanism. Must be the first include everywhere. */
-#ifndef BINSPECT_COMMON_H
-#define BINSPECT_COMMON_H
+#ifndef VEX_COMMON_H
+#define VEX_COMMON_H
 
 /* MinGW: use the C99 printf family (%zu, %llu) instead of msvcrt's. */
 #ifndef __USE_MINGW_ANSI_STDIO
@@ -18,19 +18,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BINSPECT_VERSION "0.1.0"
+#define VEX_VERSION "0.1.0"
 
 /* The Python reference computes file offsets with unbounded integers, so a
  * hostile header can produce sums above 2**64 or below zero and they must
  * still compare (and print) correctly instead of wrapping around to a valid
  * offset. `big` holds every such intermediate value exactly. It is the one
- * compiler extension binspect relies on; gcc, clang and MinGW-w64 provide it
+ * compiler extension vex relies on; gcc, clang and MinGW-w64 provide it
  * on all 64-bit targets. */
 #if defined(__SIZEOF_INT128__)
 __extension__ typedef __int128 big;
 __extension__ typedef unsigned __int128 ubig;
 #else
-#error "binspect needs a 128-bit integer type (gcc, clang or MinGW-w64, 64-bit target)"
+#error "vex needs a 128-bit integer type (gcc, clang or MinGW-w64, 64-bit target)"
 #endif
 
 #if defined(__MINGW32__)
@@ -156,7 +156,7 @@ typedef enum {
     ERR_LOCATION,           /* LocationError: unresolvable name/address */
     ERR_UNSUPPORTED,        /* UnsupportedError */
     ERR_NO_DISASSEMBLER,    /* MissingDependencyError */
-    ERR_OTHER,              /* plain BinspectError */
+    ERR_OTHER,              /* plain VexError */
     ERR_OS,                 /* file could not be read or written */
     ERR_USAGE               /* bad command line (exit status 2) */
 } ErrKind;

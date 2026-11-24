@@ -18,10 +18,10 @@ import stat
 
 import pytest
 
-import binspect
-from binspect import patch
-from binspect.errors import BinspectError, LocationError, UnsupportedError
-from binspect.model import Binary
+import vex
+from vex import patch
+from vex.errors import VexError, LocationError, UnsupportedError
+from vex.model import Binary
 from conftest import fixture_bytes, fixture_path
 
 
@@ -327,7 +327,7 @@ def test_zero_and_negative_lengths(load_fixture):
 
 def test_nops_can_be_applied_as_a_patch(tmp_path):
     # bare_arm64: first instruction at offset 0x174 (vaddr 0x210174) is 09 00 40 39.
-    b = binspect.load(fixture_path("bare_arm64"))
+    b = vex.load(fixture_path("bare_arm64"))
     out = tmp_path / "out"
     result = patch.apply_patch(fixture_path("bare_arm64"), out, patch.nop_bytes(b, 4),
                                vaddr=0x210174)
@@ -425,7 +425,7 @@ def test_text_that_cannot_be_encoded_is_refused(elf, tmp_path):
 
 
 def test_unknown_encoding_is_refused(elf, tmp_path):
-    with pytest.raises(BinspectError):
+    with pytest.raises(VexError):
         patch.replace_string(elf, tmp_path / "out", "s3cr3t-fixture-key", "x", encoding="utf8")
     assert not (tmp_path / "out").exists()
 

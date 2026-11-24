@@ -1,12 +1,12 @@
-"""The native C web server (binspect gui) against the Python one (server.py).
+"""The native C web server (vex gui) against the Python one (server.py).
 
 The Python package is the reference. For every implemented endpoint the C
 server must return the same status and the same decoded JSON on the same
 input. The rest covers the access-control rules, static-file serving, hostile
 requests under AddressSanitizer/UBSan, and the Windows build.
 
-The C server is started as a subprocess (`binspect gui --no-browser --port 0`);
-the Python server runs in-process (binspect.server.create_server). Both are
+The C server is started as a subprocess (`vex gui --no-browser --port 0`);
+the Python server runs in-process (vex.server.create_server). Both are
 spoken to over HTTP with http.client.
 """
 import http.client
@@ -23,12 +23,12 @@ from urllib.parse import quote
 
 import pytest
 
-import binspect
-from binspect import server
+import vex
+from vex import server
 from conftest import FIXTURES, fixture_bytes, fixture_path
 
 C_DIR = Path(__file__).resolve().parent.parent / "c"
-WEB_DIR = Path(binspect.__file__).resolve().parent / "web"
+WEB_DIR = Path(vex.__file__).resolve().parent / "web"
 MAKE = shutil.which("make")
 COMPILER = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
 MINGW = shutil.which("x86_64-w64-mingw32-gcc")
@@ -66,7 +66,7 @@ class Client:
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
         h = dict(headers or {})
         if token:
-            h["X-Binspect-Token"] = self.token if token is True else token
+            h["X-Vex-Token"] = self.token if token is True else token
         conn.request(method, url, body=body, headers=h)
         resp = conn.getresponse()
         data = resp.read()
@@ -105,7 +105,7 @@ def _start_c_server(binary):
 @pytest.fixture(scope="module")
 def c_client():
     _make("all")
-    proc, client = _start_c_server(C_DIR / "build" / "binspect")
+    proc, client = _start_c_server(C_DIR / "build" / "vex")
     yield client
     proc.terminate()
     try:
@@ -364,7 +364,7 @@ def test_responses_do_not_grant_cross_origin_access(c_client):
     elf = quote(str(fixture_path("hello_elf64")))
     conn = http.client.HTTPConnection("127.0.0.1", c_client.port, timeout=10)
     conn.request("GET", f"/api/info?path={elf}",
-                 headers={"X-Binspect-Token": c_client.token, "Origin": "http://evil.example"})
+                 headers={"X-Vex-Token": c_client.token, "Origin": "http://evil.example"})
     resp = conn.getresponse()
     resp.read()
     assert resp.getheader("Access-Control-Allow-Origin") is None
@@ -387,7 +387,7 @@ def test_security_headers_are_present(c_client):
 
 def test_index_page_is_served(c_client):
     status, _, body = c_client.request("GET", "/", token=False)
-    assert status == 200 and b"<title>binspect" in body
+    assert status == 200 and b"<title>vex" in body
     assert c_client.request("GET", "/index.html", token=False)[0] == 200
 
 
@@ -416,7 +416,7 @@ def test_static_path_cannot_escape_the_web_directory(c_client):
 
 def test_survives_hostile_requests(tmp_path):
     _make("asan")
-    proc, client = _start_c_server(C_DIR / "build" / "binspect-asan")
+    proc, client = _start_c_server(C_DIR / "build" / "vex-asan")
     port = client.port
     host = f"127.0.0.1:{port}".encode()
     token = client.token.encode()
@@ -439,26 +439,26 @@ def test_survives_hostile_requests(tmp_path):
         b"X" * 70000,                                                    # oversized garbage
         b"GET / HTTP/1.1\r\nHost: " + host,                             # no terminating CRLF
         b"POST /api/upload?name=x HTTP/1.1\r\nHost: " + host +
-        b"\r\nX-Binspect-Token: " + token +
+        b"\r\nX-Vex-Token: " + token +
         b"\r\nContent-Length: 999999999\r\n\r\nshort",                  # lying length, truncated
         b"POST /api/upload?name=x HTTP/1.1\r\nHost: " + host +
         b"\r\nContent-Length: not-a-number\r\n\r\n",                    # bad Content-Length
         b"GET /api/info?path=%ZZ%2%2f%%% HTTP/1.1\r\nHost: " + host +
-        b"\r\nX-Binspect-Token: " + token + b"\r\n\r\n",                # malformed escapes
+        b"\r\nX-Vex-Token: " + token + b"\r\n\r\n",                # malformed escapes
         bytes(range(256)) * 8,                                          # binary garbage
         b"GET /static/../../../../etc/passwd HTTP/1.1\r\nHost: " + host + b"\r\n\r\n",
         b"\r\n\r\n\r\n",
         b"GET",
         b"GET " + b"/" * 50000 + b" HTTP/1.1\r\nHost: " + host + b"\r\n\r\n",
         b"POST /api/patch/bytes?path=/etc/hostname&offset=0&hex=zz&out=/tmp/z HTTP/1.1\r\n"
-        b"Host: " + host + b"\r\nX-Binspect-Token: " + token + b"\r\n\r\n",
+        b"Host: " + host + b"\r\nX-Vex-Token: " + token + b"\r\n\r\n",
     ]
     try:
         for data in hostiles:
             raw(data)                               # must not crash or hang the server
         # the server is still up and answering
         status, _, body = client.request("GET", "/", token=False)
-        assert status == 200 and b"<title>binspect" in body
+        assert status == 200 and b"<title>vex" in body
         # and a token-authenticated API call still works
         status, data = client.get("info", path=str(fixture_path("hello_elf64")))
         assert status == 200 and data["format"] == "ELF"
@@ -478,9 +478,9 @@ def test_survives_hostile_requests(tmp_path):
 @pytest.mark.skipif(not MINGW, reason="the Windows build needs x86_64-w64-mingw32-gcc")
 def test_windows_build_is_a_console_exe():
     _make("windows")
-    exe = C_DIR / "build" / "binspect.exe"
+    exe = C_DIR / "build" / "vex.exe"
     assert exe.is_file()
-    info = binspect.views.info(binspect.load(str(exe)))
+    info = vex.views.info(vex.load(str(exe)))
     assert info["format"] == "PE"
     assert info["bits"] == 64
     assert info["kind"] == "executable"

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from binspect.cli import main as python_main
+from vex.cli import main as python_main
 from conftest import FIXTURES, fixture_path
 
 C_DIR = Path(__file__).resolve().parent.parent / "c"
@@ -32,7 +32,7 @@ def c_binary():
     proc = subprocess.run([MAKE, "-C", str(C_DIR), "all"], capture_output=True, text=True)
     if proc.returncode != 0:
         pytest.fail(f"make all failed:\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}")
-    return C_DIR / "build" / "binspect"
+    return C_DIR / "build" / "vex"
 
 
 def c_techniques(c_binary, path):

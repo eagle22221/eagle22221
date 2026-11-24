@@ -1,4 +1,4 @@
-/* Raw DEFLATE (RFC 1951) decompression and CRC-32, written for binspect: no
+/* Raw DEFLATE (RFC 1951) decompression and CRC-32, written for vex: no
  * zlib dependency.
  *
  * The decoder is a streaming one with the calling convention of zlib's
@@ -16,8 +16,8 @@
  * writes beyond next_out + avail_out; back-references are served from its
  * own 32 KiB window and are refused when they point before the start of
  * the output. */
-#ifndef BINSPECT_INFLATE_H
-#define BINSPECT_INFLATE_H
+#ifndef VEX_INFLATE_H
+#define VEX_INFLATE_H
 
 #include "common.h"
 

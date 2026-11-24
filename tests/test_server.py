@@ -1,4 +1,4 @@
-"""The local web server behind `binspect gui`: API behaviour and the
+"""The local web server behind `vex gui`: API behaviour and the
 protections that stop other web pages from driving it."""
 import http.client
 import json
@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import pytest
 
-from binspect import server
+from vex import server
 from conftest import FIXTURES, fixture_bytes, fixture_path
 
 ELF = str(fixture_path("hello_elf64"))
@@ -23,7 +23,7 @@ class Client:
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         h = dict(headers or {})
         if token:
-            h["X-Binspect-Token"] = self.token if token is True else token
+            h["X-Vex-Token"] = self.token if token is True else token
         conn.request(method, url, body=body, headers=h)
         resp = conn.getresponse()
         data = resp.read()
@@ -56,7 +56,7 @@ def client():
 
 def test_index_page_is_served(client):
     status, body = client.get("/", token=False)
-    assert status == 200 and b"<title>binspect" in body
+    assert status == 200 and b"<title>vex" in body
 
 
 def test_fonts_are_served_from_the_package(client):
@@ -86,7 +86,7 @@ def test_requests_for_another_host_name_are_refused(client):
 def test_responses_do_not_grant_cross_origin_access(client):
     conn = http.client.HTTPConnection("127.0.0.1", client.port, timeout=10)
     conn.request("GET", f"/api/info?path={quote(ELF)}",
-                 headers={"X-Binspect-Token": client.token, "Origin": "http://evil.example"})
+                 headers={"X-Vex-Token": client.token, "Origin": "http://evil.example"})
     resp = conn.getresponse()
     resp.read()
     assert resp.getheader("Access-Control-Allow-Origin") is None
