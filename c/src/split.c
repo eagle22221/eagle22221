@@ -57,6 +57,21 @@ typedef struct {
     uint64_t start, eocd, end;
 } ZipEnd;
 
+/* Results of walks that were already made, by where the walk stood.
+ *
+ * A PNG is a chain of chunks and a GIF a chain of blocks, and where a chain
+ * leads depends only on where it stands, not on where it began. A hostile
+ * file can start very many images that all run into one long chain; walking
+ * it again for each would take time quadratic in the file size. So a long
+ * walk leaves a mark every WALK_STRIDE steps, with its outcome, and a later
+ * walk that reaches a mark stops there. That changes no result. */
+typedef struct {
+    uint64_t *keys, *values;        /* keys are stored + 1; 0 is an empty slot */
+    size_t cap, count;
+} Memo;
+
+enum { WALK_STRIDE = 32 };
+
 typedef struct {
     const uint8_t *data;
     uint64_t size;
@@ -64,104 +79,163 @@ typedef struct {
     bool zip_ready;
     ZipEnd *zip_ends;               /* sorted by start, then by eocd */
     size_t nzip_ends;
+    Memo png, gif;
+    VEC(uint64_t) marks;            /* of the walk in progress */
+    VEC(uint64_t) mark_images;      /* GIF: images seen before each mark */
 } Carver;
 
-static uint64_t png_length(const Carver *c, uint64_t o) {
-    static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
-    const uint8_t *d = c->data;
-    uint64_t n = c->size;
-    if (n - o < 8 || memcmp(d + o, signature, 8) != 0)
-        return 0;
-    uint64_t p = o + 8;
-    bool first = true;
-    for (;;) {
-        /* length (4), type (4), data, crc (4) */
-        if (n - p < 12)
-            return 0;
-        uint64_t length = be32(d + p);
-        if (length > n - p - 12)
-            return 0;
-        const uint8_t *type = d + p + 4;
-        if (first) {
-            if (length != 13 || memcmp(type, "IHDR", 4) != 0)
-                return 0;
-            if (crc32_of(type, 4 + 13) != be32(type + 4 + 13))
-                return 0;
-            first = false;
-        }
-        p += 12 + length;
-        if (memcmp(type, "IEND", 4) == 0)
-            return p - o;
-    }
+static size_t memo_slot(const Memo *m, uint64_t key) {
+    size_t i = (size_t)((key * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & (m->cap - 1);
+    while (m->keys[i] != 0 && m->keys[i] != key + 1)
+        i = (i + 1) & (m->cap - 1);
+    return i;
 }
 
-/* Skips GIF data sub-blocks (a size byte and that many bytes, ended by a
- * zero size). False when the file ends first. */
-static bool gif_sub_blocks(const Carver *c, uint64_t *at) {
-    uint64_t p = *at, n = c->size;
-    for (;;) {
-        if (p >= n)
-            return false;
-        uint64_t size = c->data[p];
-        p++;
-        if (size == 0)
-            break;
-        if (size > n - p)
-            return false;
-        p += size;
-    }
-    *at = p;
+static bool memo_get(const Memo *m, uint64_t key, uint64_t *value) {
+    if (m->cap == 0)
+        return false;
+    size_t i = memo_slot(m, key);
+    if (m->keys[i] == 0)
+        return false;
+    *value = m->values[i];
     return true;
 }
 
-static uint64_t gif_length(const Carver *c, uint64_t o) {
+static void memo_put(Arena *a, Memo *m, uint64_t key, uint64_t value) {
+    if ((m->count + 1) * 2 > m->cap) {
+        Memo grown = {0};
+        grown.cap = m->cap ? m->cap * 2 : 256;
+        grown.keys = arena_array(a, grown.cap, sizeof *grown.keys);
+        grown.values = arena_array(a, grown.cap, sizeof *grown.values);
+        for (size_t i = 0; i < m->cap; i++) {
+            if (m->keys[i] == 0)
+                continue;
+            size_t slot = memo_slot(&grown, m->keys[i] - 1);
+            grown.keys[slot] = m->keys[i];
+            grown.values[slot] = m->values[i];
+        }
+        grown.count = m->count;
+        *m = grown;
+    }
+    size_t i = memo_slot(m, key);
+    if (m->keys[i] == 0) {
+        m->keys[i] = key + 1;
+        m->count++;
+    }
+    m->values[i] = value;
+}
+
+static uint64_t png_length(Carver *c, uint64_t o) {
+    static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
     const uint8_t *d = c->data;
     uint64_t n = c->size;
-    if (n - o < 13 || (memcmp(d + o, "GIF87a", 6) != 0 && memcmp(d + o, "GIF89a", 6) != 0))
+    /* signature, then IHDR: length (4), type (4), data (13), crc (4) */
+    if (n - o < 8 + 25 || memcmp(d + o, signature, 8) != 0)
         return 0;
-    uint64_t p = o + 13;
-    uint8_t packed = d[o + 10];
-    if (packed & 0x80) {
-        uint64_t table = (uint64_t)3 << ((packed & 7) + 1);
-        if (table > n - p)
-            return 0;
-        p += table;
-    }
-    bool image = false;
-    for (;;) {
-        if (p >= n)
-            return 0;
-        uint8_t block = d[p];
-        if (block == 0x3B)
-            return image ? p + 1 - o : 0;
-        if (block == 0x2C) {
-            /* image descriptor: 0x2C, position and size (8), packed (1) */
-            if (n - p < 10)
-                return 0;
-            packed = d[p + 9];
-            p += 10;
-            if (packed & 0x80) {
-                uint64_t table = (uint64_t)3 << ((packed & 7) + 1);
-                if (table > n - p)
-                    return 0;
-                p += table;
-            }
-            if (p >= n)
-                return 0;
-            p++;                        /* LZW minimum code size */
-            if (!gif_sub_blocks(c, &p))
-                return 0;
-            image = true;
-        } else if (block == 0x21) {
-            if (n - p < 2)
-                return 0;
-            p += 2;                     /* 0x21 and the extension label */
-            if (!gif_sub_blocks(c, &p))
-                return 0;
-        } else {
-            return 0;
+    const uint8_t *header = d + o + 8;
+    if (be32(header) != 13 || memcmp(header + 4, "IHDR", 4) != 0 ||
+        crc32_of(header + 4, 4 + 13) != be32(header + 21))
+        return 0;
+    uint64_t p = o + 8 + 25, end = 0;       /* end: one past IEND, 0 when there is none */
+    c->marks.n = 0;
+    for (size_t steps = 0;; steps++) {
+        if (steps >= WALK_STRIDE) {
+            if (memo_get(&c->png, p, &end))
+                break;
+            if (steps % WALK_STRIDE == 0)
+                *VEC_PUSH(c->arena, c->marks) = p;
+        }
+        if (n - p < 12)
+            break;
+        uint64_t length = be32(d + p);
+        if (length > n - p - 12)
+            break;
+        const uint8_t *type = d + p + 4;
+        p += 12 + length;
+        if (memcmp(type, "IEND", 4) == 0) {
+            end = p;
+            break;
         }
     }
+    for (size_t i = 0; i < c->marks.n; i++)
+        memo_put(c->arena, &c->png, c->marks.v[i], end);
+    return end ? end - o : 0;
+}
+
+/* The size of a GIF colour table, given the packed byte that announces it. */
+static uint64_t gif_table(uint8_t packed) {
+    return packed & 0x80 ? (uint64_t)3 << ((packed & 7) + 1) : 0;
+}
+
+static uint64_t gif_length(Carver *c, uint64_t o) {
+    const uint8_t *d = c->data;
+    uint64_t n = c->size;
+    /* signature (6), logical screen descriptor (7) */
+    if (n - o < 13 || (memcmp(d + o, "GIF87a", 6) != 0 && memcmp(d + o, "GIF89a", 6) != 0))
+        return 0;
+    uint64_t table = gif_table(d[o + 10]);
+    if (table > n - o - 13)
+        return 0;
+    /* The walk stands either before a block or before a data sub-block (a
+     * size byte and that many bytes; a zero size ends the run). */
+    uint64_t p = o + 13 + table, end = 0, images = 0;
+    bool in_data = false, later_image = false;
+    c->marks.n = 0;
+    c->mark_images.n = 0;
+    for (size_t steps = 0;; steps++) {
+        if (steps >= WALK_STRIDE) {
+            uint64_t known;
+            if (memo_get(&c->gif, p << 1 | in_data, &known)) {
+                end = known >> 1;
+                later_image = known & 1;
+                break;
+            }
+            if (steps % WALK_STRIDE == 0) {
+                *VEC_PUSH(c->arena, c->marks) = p << 1 | in_data;
+                *VEC_PUSH(c->arena, c->mark_images) = images;
+            }
+        }
+        if (p >= n)
+            break;
+        if (in_data) {
+            uint64_t size = d[p];
+            p++;
+            if (size == 0)
+                in_data = false;
+            else if (size > n - p)
+                break;
+            else
+                p += size;
+        } else if (d[p] == 0x3B) {
+            end = p + 1;
+            break;
+        } else if (d[p] == 0x2C) {
+            /* image descriptor: 0x2C, position and size (8), packed (1); an
+             * optional colour table; the LZW minimum code size (1) */
+            if (n - p < 10)
+                break;
+            table = gif_table(d[p + 9]);
+            p += 10;
+            if (table > n - p || n - p - table < 1)
+                break;
+            p += table + 1;
+            images++;
+            in_data = true;
+        } else if (d[p] == 0x21) {
+            /* extension: 0x21, label (1) */
+            if (n - p < 2)
+                break;
+            p += 2;
+            in_data = true;
+        } else {
+            break;
+        }
+    }
+    for (size_t i = 0; i < c->marks.n; i++) {
+        bool image = later_image || images > c->mark_images.v[i];
+        memo_put(c->arena, &c->gif, c->marks.v[i], end ? end << 1 | image : 0);
+    }
+    return end && (images > 0 || later_image) ? end - o : 0;
 }
 
 /* RIFF containers: the extension for a form type, or NULL. */
@@ -440,7 +514,11 @@ static void add_parts(Arena *a, const Binary *b, Pieces *pieces) {
 }
 
 static void add_embedded(Arena *a, const Binary *b, Pieces *pieces) {
-    Carver carver = {b->data, b->size, a, false, NULL, 0};
+    Carver carver;
+    memset(&carver, 0, sizeof carver);
+    carver.data = b->data;
+    carver.size = b->size;
+    carver.arena = a;
     size_t nparts = pieces->n, part = 0, counter = 0;
     uint64_t o = 1;
     while (o < b->size) {
@@ -540,24 +618,25 @@ Str split_index(Arena *a, const Split *split) {
 
 /* --- writing -------------------------------------------------------------------- */
 
-/* os.makedirs(path, exist_ok=True) */
+/* os.makedirs(path, exist_ok=True): the folder, after any missing parents. */
 static bool make_folders(Arena *a, const char *path) {
+    if (fs_mkdir(path) || fs_kind(path, true) == FS_DIR)
+        return true;
+    int code = errno;
     size_t n = strlen(path);
-    char *partial = arena_alloc(a, n + 1);
-    memcpy(partial, path, n + 1);
-    for (size_t i = 1; i <= n; i++) {
-        if (i < n && !fs_is_separator(partial[i]))
-            continue;
-        char saved = partial[i];
-        partial[i] = '\0';
-        bool drive = i == 2 && partial[1] == ':';       /* "C:" is not a folder to make */
-        if (!drive && !fs_is_separator(partial[i - 1]) && !fs_mkdir(partial) &&
-            fs_kind(partial, true) != FS_DIR) {
-            return false;
-        }
-        partial[i] = saved;
+    while (n > 0 && fs_is_separator(path[n - 1]))
+        n--;
+    while (n > 0 && !fs_is_separator(path[n - 1]))
+        n--;
+    while (n > 0 && fs_is_separator(path[n - 1]))
+        n--;
+    if (n == 0) {                       /* no parent left to make */
+        errno = code;
+        return false;
     }
-    return true;
+    if (!make_folders(a, str_copy(a, path, n).p))
+        return false;
+    return fs_mkdir(path) || fs_kind(path, true) == FS_DIR;
 }
 
 static void write_file(Err *err, const char *path, const uint8_t *data, uint64_t size) {
