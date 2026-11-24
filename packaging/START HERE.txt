@@ -9,13 +9,20 @@ It is one file: nothing to install, and it does not need Python.
 The quickest start
 ------------------
 
-Drag any .exe or .dll onto binspect.exe.
+Double-click binspect.exe. It opens a graphical interface in your web
+browser, served from your own computer (nothing is uploaded, and the
+file you look at is never run). Choose "Open file or folder" and pick a
+program, or drag any .exe or .dll onto binspect.exe to open it straight
+away. Try it with practice\hello_pe64.exe.
 
-A window opens with a report: what kind of program it is, how it is
-protected, its sections, the system functions it uses, and the links,
-addresses and file paths found inside it. Press Enter to close it.
+The interface has an Overview (what the file is and how it is protected),
+Code (the instructions, grouped into functions), Strings, Imports,
+Sections, a Bytes view, Assets (game asset packs), and Modify.
 
-Try it with practice\hello_pe64.exe.
+Prefer the terminal? Everything is also a command (see below), including
+a report you can read without the browser:
+
+    .\binspect.exe report practice\hello_pe64.exe
 
 
 Using commands
@@ -43,6 +50,15 @@ an empty part of the folder and choose "Open PowerShell window here" (or
     disasm FILE NAME                     the instructions of one function
     xrefs FILE NAME                      where a function or import is used
     xrefs FILE --string TEXT             where a piece of text is used
+    techniques FILE                      packing, anti-debug, anti-VM,
+                                         injection, hooking, driver checks
+                                         (useful for cheats and anti-cheat)
+    engine FOLDER                        a game's engine and its asset packs
+    assets list PACK                     files in a .pk3/.pak/.wad/.pck pack
+    assets extract PACK FOLDER           unpack a pack
+    assets replace PACK NAME FILE -o NEW write a new pack with one file swapped
+    patch bytes FILE 0x1400.. "90 90"    change bytes (into a copy)
+    gui                                  open the browser interface
 
 Add --json right after binspect.exe to get output other tools can read:
 
@@ -91,13 +107,14 @@ Good to know
 - Windows may warn about binspect.exe the first time ("unknown publisher"),
   because the file is not digitally signed. Choose "More info", then
   "Run anyway" if you trust where you got it.
-- practice\sample.dll and practice\libsample.so (a Linux library) are there
-  to try "exports" on.
-- This binspect.exe does the analysis and patching commands above, all built
-  into one native file. The Python edition of binspect adds more: a browser
-  interface, opening and repacking game asset packs, editing icons and other
-  resources inside Windows programs, a "techniques" scan that flags anti-debug,
-  anti-VM, injection, hooking and packing in a program (useful for looking at
-  cheats and anti-cheat), and an illustrated PDF guide.
+- The practice folder has more to try: sample.dll and libsample.so (a Linux
+  library) for "exports"; evasion_pe64.exe, a harmless sample that trips every
+  check, for "techniques"; and demo_game\ (a pretend game) for "engine" and the
+  Assets view, e.g.  .\binspect.exe engine practice\demo_game
+- This one binspect.exe does everything above - the browser interface, the
+  analysis and disassembly, the techniques scan, game asset packs and patching -
+  with nothing to install. The Python edition of binspect adds a few extras:
+  editing icons and other resources inside Windows programs, Electron (.asar)
+  and Ren'Py (.rpa) packs, and an illustrated PDF guide.
 - The disassembler inside binspect is Capstone (BSD licence); its licence
   text is in the licences folder.
