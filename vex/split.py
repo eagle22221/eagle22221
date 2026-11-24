@@ -92,7 +92,7 @@ class _Carver:
             found = self._probes[self.data[at]](at)
             if found:                       # (extension, length), inside the file
                 out.append((at, found[1], found[0]))
-                at += 1
+                at += found[1]
             else:
                 at += 1
 
