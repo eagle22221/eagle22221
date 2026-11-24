@@ -8,10 +8,10 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1120, height: 640 }, deviceScaleFactor: 2 });
-  await page.emulateMedia({ colorScheme: 'light' });
+  await page.emulateMedia({ colorScheme: 'dark' });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  const nav = async (label) => { await page.click(`nav button:text-is("${label}")`); await page.waitForTimeout(900); };
+  const nav = async (label) => { await page.click(`nav button:has-text("${label}")`); await page.waitForTimeout(900); };
 
   await page.goto(`${base}/#token=${token}`);
   await page.waitForSelector('.welcome');
@@ -29,7 +29,7 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
   await nav('Strings');
   await page.fill('input[placeholder="Search text"]', 'fixture');
   await page.waitForTimeout(700);
-  await page.click('tr:has-text("Hello from") button:text-is("Find uses")');
+  await page.click('tr:has-text("Hello from") button:has-text("Find uses")');
   await page.waitForTimeout(900);
   await page.screenshot({ path: out('strings') });
 
@@ -39,7 +39,7 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
   await page.screenshot({ path: out('code') });
 
   await nav('Imports');
-  await page.click('tr:has-text("WriteFile") button:text-is("Find uses")');
+  await page.click('tr:has-text("WriteFile") button:has-text("Find uses")');
   await page.waitForTimeout(900);
   await page.screenshot({ path: out('imports') });
 
