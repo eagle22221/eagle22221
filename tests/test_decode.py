@@ -128,6 +128,7 @@ def _zero_bomb(make):
 
 
 def test_decompression_bomb_is_refused_quickly():
+    import time
     # ~70 MiB of zeros, compressed one MiB at a time (never materialised whole).
     co = zlib.compressobj()
     parts = []
@@ -136,14 +137,18 @@ def test_decompression_bomb_is_refused_quickly():
     parts.append(co.flush())
     bomb = b"".join(parts)
     assert len(bomb) < (1 << 20)        # the compressed form really is tiny
+    start = time.perf_counter()
     with pytest.raises(DecodeError) as exc:
         op("zlib-inflate", bomb)
     assert "too large" in str(exc.value)
+    assert time.perf_counter() - start < 10.0       # refused, not expanded for ages
 
     # gzip, bz2 and xz bombs are guarded the same way.
-    gz = gzip.compress(b"\x00" * (70 << 20))
-    with pytest.raises(DecodeError):
-        op("gunzip", gz)
+    for name, blob in (("gunzip", gzip.compress(b"\x00" * (70 << 20))),
+                       ("bunzip2", bz2.compress(b"\x00" * (70 << 20))),
+                       ("unxz", lzma.compress(b"\x00" * (70 << 20), format=lzma.FORMAT_XZ))):
+        with pytest.raises(DecodeError):
+            op(name, blob)
 
 
 # --- classic ciphers against known vectors ----------------------------------
@@ -361,6 +366,43 @@ def test_parse_recipe_rejects_unknown_op_and_param():
         decode.parse_recipe("rot-n:n")        # malformed k=v
 
 
+# --- adversarial-input robustness -------------------------------------------
+
+# Minimal valid params so every op can be exercised, including those with a
+# required parameter.
+_FUZZ_PARAMS = {
+    "vigenere": {"key": "LEMON"}, "railfence": {"rails": "3"},
+    "substitution": {"map": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+    "xor": {"key_text": "k"},
+    "aes": {"key": "00112233445566778899aabbccddeeff", "mode": "cbc", "iv": "00" * 16},
+    "chacha20": {"key": "00" * 32, "nonce": "00" * 12},
+    "rc4": {"key_text": "k"},
+    "des": {"key": "0123456789abcdef", "mode": "cbc", "iv": "00" * 8},
+    "3des": {"key": "0123456789abcdef0123456789abcdef0123456789abcdef", "mode": "cbc",
+             "iv": "00" * 8},
+}
+
+
+def test_no_op_raises_anything_but_decode_error_on_hostile_bytes():
+    import random
+    rng = random.Random(1234)
+    samples = [b"", b"\x00", b"\xff" * 33, bytes(range(256)),
+               b"====", b"not hex at all", b"\x1f\x8bcorruptgzip",
+               b"BZhcorrupt", b"\xfd7zXZ\x00bad", bytes.fromhex("789c00ff"),
+               os.urandom(64), os.urandom(257)]
+    for _ in range(40):
+        samples.append(bytes(rng.randrange(256) for _ in range(rng.randrange(0, 80))))
+    for name in decode.REGISTRY:
+        params = _FUZZ_PARAMS.get(name, {})
+        for data in samples:
+            try:
+                out = decode.apply_op(name, params, data)
+            except DecodeError:
+                pass
+            else:
+                assert isinstance(out, bytes)
+
+
 # --- the operation catalogue ------------------------------------------------
 
 def test_ops_catalogue_shape():
@@ -391,44 +433,116 @@ def test_catalogue_marks_symmetric_availability_from_crypto():
     assert by_name["rot13"]["available"] is True
 
 
-# --- symmetric ops (skip when crypto has not landed) ------------------------
+# --- symmetric ops against public test vectors ------------------------------
+#
+# vex/crypto.py has landed with AVAILABLE covering every primitive, so these
+# run real vectors through the decode pipeline. If a build ever ships without a
+# primitive, the op must report "<op> is not available in this build" instead;
+# test_symmetric_op_reports_unavailable_when_missing covers that path.
 
-def test_rc4_matches_crypto_or_reports_unavailable():
-    data, key = b"attack at dawn", bytes.fromhex("0102030405")
-    if _has("rc4"):
-        expect = _crypto.rc4(data, key)
-        assert op("rc4", data, key="0102030405") == expect
-        assert op("rc4", expect, key="0102030405") == data
-    else:
-        with pytest.raises(DecodeError) as e:
-            op("rc4", data, key="0102030405")
-        assert "not available in this build" in str(e.value)
-
-
-def test_chacha20_matches_crypto_or_reports_unavailable():
-    data = b"nineteen byte message!!"
-    key = bytes(range(32)).hex()
-    nonce = bytes(range(12)).hex()
-    if _has("chacha20"):
-        expect = _crypto.chacha20(data, bytes.fromhex(key), bytes.fromhex(nonce), 1)
-        assert op("chacha20", data, key=key, nonce=nonce) == expect
-    else:
-        with pytest.raises(DecodeError) as e:
-            op("chacha20", data, key=key, nonce=nonce)
-        assert "not available in this build" in str(e.value)
+def test_aes128_fips197_single_block():
+    # NIST FIPS-197 Appendix B / C.1 AES-128 ECB.
+    key = "000102030405060708090a0b0c0d0e0f"
+    plain = bytes.fromhex("00112233445566778899aabbccddeeff")
+    cipher = bytes.fromhex("69c4e0d86a7b0430d8cdb78070b4c55a")
+    assert op("aes", plain, key=key, mode="ecb", op="encrypt", unpad="none") == cipher
+    assert op("aes", cipher, key=key, mode="ecb", op="decrypt", unpad="none") == plain
 
 
-def test_aes_matches_crypto_or_reports_unavailable():
-    key = (b"\x00" * 16).hex()
-    block = b"\x11" * 16
-    if _has("aes"):
-        ct = _crypto.aes(block, bytes.fromhex(key), "ecb", op="encrypt", unpad="none")
-        got = op("aes", ct, key=key, mode="ecb", op="decrypt", unpad="none")
-        assert got == block
-    else:
-        with pytest.raises(DecodeError) as e:
-            op("aes", block, key=key, mode="ecb", op="decrypt", unpad="none")
-        assert "not available in this build" in str(e.value)
+def test_rc4_known_vector():
+    # RC4 key "Key", plaintext "Plaintext" -> bbf316e8d940af0ad3.
+    out = op("rc4", b"Plaintext", key_text="Key")
+    assert out == bytes.fromhex("bbf316e8d940af0ad3")
+    assert op("rc4", out, key_text="Key") == b"Plaintext"        # self-inverse
+
+
+def test_chacha20_rfc8439_vector():
+    # RFC 8439 section 2.4.2.
+    key = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    nonce = "000000000000004a00000000"
+    plain = (b"Ladies and Gentlemen of the class of '99: If I could offer you "
+             b"only one tip for the future, sunscreen would be it.")
+    cipher = bytes.fromhex(
+        "6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0b"
+        "f91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d8"
+        "07ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab7793736"
+        "5af90bbf74a35be6b40b8eedf2785e42874d")
+    assert op("chacha20", plain, key=key, nonce=nonce) == cipher    # counter defaults to 1
+    assert op("chacha20", cipher, key=key, nonce=nonce) == plain    # self-inverse
+
+
+def test_des_fips_vector():
+    # FIPS-46 / NBS known-answer DES.
+    key = "0123456789abcdef"
+    plain = bytes.fromhex("4e6f772069732074")
+    cipher = bytes.fromhex("3fa40e8a984d4815")
+    assert op("des", plain, key=key, mode="ecb", op="encrypt") == cipher
+    assert op("des", cipher, key=key, mode="ecb", op="decrypt") == plain
+
+
+def test_symmetric_error_paths_become_decode_errors():
+    with pytest.raises(DecodeError):                # wrong key length
+        op("aes", b"\x00" * 16, key="00", mode="ecb", op="decrypt", unpad="none")
+    with pytest.raises(DecodeError):                # not a block multiple
+        op("aes", b"\x00" * 10, key="00" * 16, mode="ecb", op="decrypt", unpad="none")
+    with pytest.raises(DecodeError):                # GCM tag mismatch
+        op("aes", b"\x00" * 16, key="00" * 16, mode="gcm", op="decrypt",
+           nonce="00" * 12, tag="00" * 16)
+    with pytest.raises(DecodeError):                # wrong nonce length
+        op("chacha20", b"hi", key="00" * 32, nonce="00" * 8)
+    with pytest.raises(DecodeError):                # no key supplied
+        op("rc4", b"hi")
+
+
+def test_symmetric_op_reports_unavailable_when_missing(monkeypatch):
+    # Simulate a build whose crypto lacks a primitive: the op must refuse clearly.
+    monkeypatch.setattr(decode, "crypto", type("C", (), {"AVAILABLE": set()}))
+    with pytest.raises(DecodeError) as e:
+        op("rc4", b"hi", key_text="k")
+    assert "rc4 is not available in this build" in str(e.value)
+
+
+def test_aes_gcm_needs_aes_gcm_primitive(monkeypatch):
+    monkeypatch.setattr(decode, "crypto", type("C", (), {"AVAILABLE": {"aes"}}))
+    with pytest.raises(DecodeError) as e:
+        op("aes", b"\x00" * 16, key="00" * 16, mode="gcm", nonce="00" * 12, tag="00" * 16)
+    assert "aes-gcm is not available in this build" in str(e.value)
+
+
+# --- the bundled practice puzzles ------------------------------------------
+
+def _practice_puzzles():
+    """(encoded, recipe) pairs parsed from the committed practice file."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    text = (repo_root / "examples" / "decode_sample" / "secrets.txt").read_text()
+    pairs, encoded = [], None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("encoded:"):
+            encoded = s[len("encoded:"):].strip()
+        elif s.startswith("recipe:") and encoded is not None:
+            pairs.append((encoded, s[len("recipe:"):].strip()))
+            encoded = None
+    return pairs
+
+
+PRACTICE_PLAINTEXTS = [
+    "Hello from the vex decode workbench -- happy decoding!",
+    "vex changelog: the decode workbench now chains operations into recipes.",
+    "Well done -- you turned every letter back the right way round.",
+    "Tip: chain small steps and a repeating-key XOR comes right undone.",
+    "Congratulations -- you solved the last puzzle with the key and the nonce!",
+]
+
+
+def test_every_practice_recipe_decodes_to_its_plaintext():
+    puzzles = _practice_puzzles()
+    assert len(puzzles) == len(PRACTICE_PLAINTEXTS) == 5
+    for (encoded, recipe), expected in zip(puzzles, PRACTICE_PLAINTEXTS):
+        result = run(encoded.encode(), decode.parse_recipe(recipe))
+        assert result["ok"], f"{recipe!r}: {result['error']}"
+        assert result["text"] == expected, recipe
 
 
 # --- CLI --------------------------------------------------------------------
@@ -476,8 +590,7 @@ def test_cli_unknown_param_exits_2(capsys):
 
 
 def test_cli_solve(capsys):
-    cipher = op("xor", ENGLISH, key="2a").decode("latin-1")
-    # pass as hex source so the raw bytes survive
+    # pass the ciphertext as a hex source so the raw bytes survive the shell
     result = cli_json(capsys, "decode", "--hex", op("xor", ENGLISH, key="2a").hex(),
                       "--solve", "xor-single")
     assert result["ok"]

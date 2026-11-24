@@ -1225,6 +1225,14 @@ function decodeDefaultSource() {
   return { kind: 'text', value: '', offset: 0, length: (state.info && state.info.size) || 0 };
 }
 
+// A step parameter's starting value: its catalogue default, else the first
+// choice for a select, else blank. Keeps a required choice from storing "".
+function decodeInitParam(p) {
+  if (p.default !== undefined && p.default !== null) return String(p.default);
+  if (p.choices && p.choices.length) return String(p.choices[0]);
+  return '';
+}
+
 // Open the workbench pre-filled from another view (Strings text, a Bytes range).
 function openInDecode(source) {
   state.decode = { source: Object.assign(decodeDefaultSource(), source), recipe: [], hexdump: false };
@@ -1305,7 +1313,7 @@ async function renderDecode(box) {
     const out = {};
     for (const [k, v] of Object.entries(step.params || {})) {
       if (v === '' || v === null || v === undefined) continue;
-      out[k] = types[k] === 'number' ? Number(v) : v;
+      out[k] = (types[k] === 'number' || types[k] === 'int') ? Number(v) : v;
     }
     return out;
   }
@@ -1384,13 +1392,13 @@ async function renderDecode(box) {
 
   function paramField(step, p) {
     const key = p.name;
-    if (step.params[key] === undefined) step.params[key] = (p.default !== undefined && p.default !== null) ? String(p.default) : '';
-    const choices = p.choices || (p.type === 'select' ? [] : null);
+    if (step.params[key] === undefined) step.params[key] = decodeInitParam(p);
+    const choices = p.choices || ((p.type === 'choice' || p.type === 'select') ? [] : null);
     let input;
     if (choices) {
       input = h('select', { onchange: (e) => { step.params[key] = e.target.value; schedule(); } },
         choices.map((c) => h('option', { value: String(c), text: String(c), selected: String(step.params[key]) === String(c) })));
-    } else if (p.type === 'number') {
+    } else if (p.type === 'number' || p.type === 'int') {
       input = h('input', { type: 'number', value: step.params[key], oninput: (e) => { step.params[key] = e.target.value; schedule(); } });
     } else {
       input = h('input', { type: 'text', class: 'mono-input', value: step.params[key], placeholder: p.type || 'text', spellcheck: false,
@@ -1428,7 +1436,7 @@ async function renderDecode(box) {
 
   function addStep(op) {
     const params = {};
-    for (const p of op.params || []) params[p.name] = (p.default !== undefined && p.default !== null) ? String(p.default) : '';
+    for (const p of op.params || []) params[p.name] = decodeInitParam(p);
     D.recipe.push({ op: op.name, params });
     renderRecipe();
     runDecode();
@@ -1467,7 +1475,7 @@ async function renderDecode(box) {
     const opName = DECODE_SOLVER_OP[solver] || solver;
     const op = opIndex[opName];
     const params = {};
-    if (op) for (const p of op.params || []) params[p.name] = (p.default !== undefined && p.default !== null) ? String(p.default) : '';
+    if (op) for (const p of op.params || []) params[p.name] = decodeInitParam(p);
     for (const [k, v] of Object.entries(candidate.params || {})) params[k] = String(v);
     D.recipe.push({ op: opName, params });
     renderRecipe();
