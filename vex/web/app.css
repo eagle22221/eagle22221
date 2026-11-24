@@ -427,7 +427,7 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .log li:last-child { border-bottom: 0; }
 
 /* --- split -------------------------------------------------------------- */
-.pieces .legend-item { white-space: nowrap; }
+.pieces .legend-item, .pieces td.num { white-space: nowrap; }
 /* names and paths wrap between words first; the card scrolls on narrow screens */
 .pieces td:first-child { min-width: 9em; }
 .pieces td:last-child { min-width: 22em; }

@@ -124,10 +124,11 @@ game_parts/
 ```
 
 - **`parts/`** — the file cut along the same lines as the file map: headers, code, data, tables,
-  and any data appended after the program. Each name starts with the part's position in the file.
+  and any data appended after the program. The number at the start of each name gives the order.
 - **`embedded/`** — complete files that sit inside the program: PNG and GIF pictures, WAV, AVI and
   WebP files, ZIP archives, and other Windows or Linux programs. Each name carries the offset the
-  file was found at. These are extra copies; the same bytes are also in the part that contains them.
+  file was found at. These are extra copies: the same bytes are also in the part that contains
+  them.
 - **`resources/`** — for Windows programs, every resource (icons, version info, manifests), named
   the same way as by `vex resources extract`.
 - **`index.txt`** — the source file's name, size and SHA-256, then one line per piece: offset,
@@ -137,8 +138,9 @@ What to expect:
 
 - **The original is not changed, and nothing is run.** `split` only reads the file.
 - **The parts add up to the original.** Joining the files in `parts/` in order gives back the
-  original file exactly. The only pieces left out are stretches of padding that are all zero
-  bytes; `index.txt` lists each of them with its size and the note `zero padding, not saved`.
+  original file exactly. Only padding that is all zero bytes is left out: `index.txt` lists each
+  such stretch with its size and the note `zero padding, not saved`, so put that many zero bytes
+  in its place when joining.
 - **It copies, it does not convert.** Nothing is unpacked, decrypted or decompressed. Packed or
   encrypted content comes out exactly as it is stored, and a ZIP archive is saved as one `.zip`
   file.

@@ -577,6 +577,26 @@ void render_report(Arena *a, const Style *st, const JVal *d, Lines *out) {
     }
 }
 
+/* The piece table of `vex split`, then the "Saved N files" line. */
+void render_split(Arena *a, const Style *st, const JVal *d, Lines *out) {
+    static const char *const headers[] = {"Offset", "Size", "Kind", "Saved as", "Name", "Note"};
+    Table t;
+    table_init(&t, a, headers, 6, 1u << 0 | 1u << 1);
+    const JVal *pieces = j_get(d, "pieces");
+    for (size_t i = 0; i < j_len(pieces); i++) {
+        const JVal *p = j_at(pieces, i);
+        Str path = j_text(j_get(p, "path"));
+        table_cell(&t, hex_number(a, j_number(j_get(p, "offset"))));
+        table_cell(&t, dec_number(a, j_number(j_get(p, "size"))));
+        table_cell(&t, j_text(j_get(p, "kind")));
+        table_cell(&t, path.n ? path : str_c("-"));
+        table_cell(&t, j_text(j_get(p, "name")));
+        table_cell(&t, j_text(j_get(p, "note")));
+    }
+    table_render(&t, st, out);
+    add(a, out, styled(a, st, j_text(j_get(d, "message")), GREEN ";" BOLD));
+}
+
 void render_done(Arena *a, const Style *st, const JVal *d, Lines *out) {
     const JVal *patches = j_get(d, "patches");
     for (size_t i = 0; i < j_len(patches); i++) {

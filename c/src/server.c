@@ -60,6 +60,7 @@ typedef int socket_t;
 #include "engines.h"
 #include "model.h"
 #include "platform.h"
+#include "split.h"
 #include "strings.h"
 #include "views.h"
 
@@ -1168,6 +1169,21 @@ static void h_archive_replace(Req *req) {
     req->result = d;
 }
 
+/* --- split: preview (GET) and perform (POST) ---------------------------------- */
+
+static void h_split_preview(Req *req) {
+    const Binary *b = load_binary(req, "path", NULL);
+    req->result = split_view(req->a, split_plan(req->a, b), NULL);
+}
+
+static void h_split(Req *req) {
+    const Binary *b = load_binary(req, "path", NULL);
+    const char *dest = abspath_param(req, "dest");
+    const Split *split = split_plan(req->a, b);
+    split_write(req->a, req->err, split, dest, dest);
+    req->result = split_view(req->a, split, dest);
+}
+
 /* --- POST: patching ---------------------------------------------------------- */
 /* A faithful re-implementation of the subset of patch.py the web API uses, so
  * the bytes written and the JSON returned match the Python server exactly. */
@@ -1590,6 +1606,7 @@ static const Route ROUTES[] = {
     {"GET", "archive/list", h_archive_list}, {"GET", "archive/file", h_archive_file},
     {"GET", "resources", h_resources}, {"GET", "resource/data", h_resource_unavailable},
     {"GET", "resource/icon", h_resource_unavailable},
+    {"GET", "split", h_split_preview}, {"POST", "split", h_split},
     {"POST", "upload", h_upload}, {"POST", "archive/extract", h_archive_extract},
     {"POST", "archive/replace", h_archive_replace},
     {"POST", "resource/replace", h_resource_unavailable},

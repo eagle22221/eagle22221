@@ -60,6 +60,7 @@ figure { margin: 9pt 0 10pt; break-inside: avoid; }
 figure img { width: 100%; border: .8pt solid var(--ink); display: block; }
 figure.crop img { height: 72mm; object-fit: cover; object-position: top left; }
 figure.crop-tall img { height: 70mm; object-fit: cover; object-position: 0 88%; }
+figure.crop-short img { height: 60mm; object-fit: cover; object-position: top left; }
 figcaption { font-size: 9pt; color: var(--ink-2); margin-top: 3.5pt; }
 .box { border: .8pt solid var(--ink); padding: 8pt 10pt; margin: 8pt 0 10pt; break-inside: avoid; background: var(--paper); }
 .box h3 { margin-top: 0; }
@@ -105,6 +106,7 @@ td code { white-space: nowrap; }
     <li><span class="n">Lesson 4</span><span class="t">Code</span><span class="d">Functions, calls and a small vocabulary.</span></li>
     <li><span class="n">Lesson 5</span><span class="t">Imports</span><span class="d">What the program asks the system to do.</span></li>
     <li><span class="n">Lesson 6</span><span class="t">Games and asset packs</span><span class="d">Find the engine, browse a pack, swap in your own file.</span></li>
+    <li><span class="n">Lesson 7</span><span class="t">Split a program into its parts</span><span class="d">Save each part as its own file in a folder.</span></li>
     <li><span class="n">Reference</span><span class="t">Command line and glossary</span><span class="d">The same features, typed instead of clicked.</span></li>
   </ol>
 
@@ -276,6 +278,35 @@ td code { white-space: nowrap; }
 </section>
 
 <section class="lesson">
+  <div class="lesson-no">Lesson 7</div>
+  <h2>Split a program into its parts</h2>
+  <p class="goal">Goal: save the parts of a program as separate files, and know what each file is.</p>
+  <p>Lesson 2 showed the parts of a program on the file map. <b>Split</b> saves each part as its own file, together with a copy of every complete file it finds inside the program, such as a picture, a sound or a ZIP archive. The program itself is not changed, and nothing is run.</p>
+  <ol>
+    <li>Open <code>bundle_pe64.exe</code> from <code>tests/fixtures/bin</code>: a small practice program with a picture, a sound and a ZIP archive attached to its end.</li>
+    <li>Choose <b>Split</b> on the left. The table lists every piece and the file it will become. Nothing is written yet.</li>
+    <li>Choose <b>Split into a folder…</b> and type a name for a new or empty folder.</li>
+    <li>Open the folder and read <code>index.txt</code> first.</li>
+  </ol>
+  <figure class="crop-short"><img src="img/split.png" alt="The Split view"><figcaption>The Split view lists every piece before anything is saved: first the parts in file order, then the files found inside.</figcaption></figure>
+  <table>
+    <tr><th>In the folder</th><th>What it holds</th></tr>
+    <tr><td><code>parts/</code></td><td>The program cut into its parts, in file order: headers, code, data, tables and anything attached after the program. Put back together in order, they give the original file, byte for byte.</td></tr>
+    <tr><td><code>embedded/</code></td><td>Complete files found inside the program: PNG and GIF pictures, WAV, AVI and WebP files, ZIP archives, and other Windows or Linux programs.</td></tr>
+    <tr><td><code>resources/</code></td><td>The icons, version details and other built-in resources of a Windows program, if it has any.</td></tr>
+    <tr><td><code>index.txt</code></td><td>The original's name, size and SHA-256 fingerprint, then one line per piece. Empty filler between parts (zero bytes only) is listed here with its size and is not saved as a file.</td></tr>
+  </table>
+  <div class="box">
+    <h3>What Split does not do</h3>
+    <ul>
+      <li>It only copies what is already there. Nothing is unpacked, decrypted or decompressed, so packed or encrypted content comes out exactly as it is stored.</li>
+      <li>It cannot turn a program back into source files. The code part holds the same instructions you read in lesson 4.</li>
+    </ul>
+  </div>
+  <p class="learned"><b>You learned:</b> how to save a program as separate pieces, each an exact copy of what the file holds.</p>
+</section>
+
+<section class="lesson">
   <div class="lesson-no">Reference</div>
   <h2>Command line</h2>
   <p>Everything in the lessons is also available as a command. Put <code>--json</code> right after <code>vex</code> to get output other tools can read.</p>
@@ -299,6 +330,7 @@ td code { white-space: nowrap; }
     <tr><td><code>vex assets extract PACK FOLDER</code></td><td>Unpacks a pack</td></tr>
     <tr><td><code>vex assets replace PACK NAME FILE -o NEW</code></td><td>Writes a new pack with one file swapped</td></tr>
     <tr><td><code>vex resources list FILE</code></td><td>Icons and version details in a Windows program</td></tr>
+    <tr><td><code>vex split FILE FOLDER</code></td><td>Saves the parts of a program as files in a folder (lesson 7)</td></tr>
   </table>
   <p>For any command, <code>vex COMMAND --help</code> lists its options.</p>
 

@@ -1,8 +1,10 @@
 // Captures the screenshots used in the guide from a running vex server.
-// Usage: node screenshots.js BASE_URL TOKEN PRACTICE_EXE [GAME_FOLDER]
+// Usage: node screenshots.js BASE_URL TOKEN PRACTICE_EXE [GAME_FOLDER] [BUNDLE_EXE]
+// BUNDLE_EXE is the practice program with files attached (bundle_pe64.exe), shown in the
+// Split view; without it the Split view is captured on PRACTICE_EXE. Pass "" to skip GAME_FOLDER.
 const { chromium } = require('playwright');
 const path = require('path');
-const [, , base, token, exe, game] = process.argv;
+const [, , base, token, exe, game, bundle] = process.argv;
 const out = (name) => path.join(__dirname, 'img', name + '.png');
 
 (async () => {
@@ -42,6 +44,18 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
   await page.click('tr:has-text("WriteFile") button:has-text("Find uses")');
   await page.waitForTimeout(900);
   await page.screenshot({ path: out('imports') });
+
+  if (bundle) {
+    await page.goto(`${base}/#token=${token}&open=${encodeURIComponent(bundle)}`);
+    await page.reload();
+    await page.waitForSelector('.titleblock');
+    await page.waitForTimeout(900);
+  }
+  await nav('Split');
+  // the list of pieces arrives after the view itself
+  await page.waitForSelector('.table-wrap table', { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: out('split') });
 
   if (game) {
     await page.setViewportSize({ width: 1120, height: 700 });

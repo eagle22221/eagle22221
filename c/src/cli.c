@@ -7,6 +7,7 @@
 #include "engines.h"
 #include "platform.h"
 #include "server.h"
+#include "split.h"
 #include "techniques.h"
 
 /* --- usage errors ------------------------------------------------------------- */
@@ -44,6 +45,8 @@ static const char HELP[] =
     "  techniques FILE           protection and evasion techniques: packing,\n"
     "                            anti-debug, anti-VM, injection, hooking, drivers\n"
     "  report FILE               everything at a glance\n"
+    "  split FILE FOLDER         save the parts of the file (headers, sections,\n"
+    "                            embedded files) as separate files in a new folder\n"
     "  patch bytes FILE LOCATION HEX [--offset] (-o OUT | --in-place)\n"
     "  patch nop FILE LOCATION BYTES [--offset] (-o OUT | --in-place)\n"
     "  patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)\n"
@@ -325,6 +328,20 @@ static void cmd_report(Session *s) {
     cli_emit(s, d, render_report);
 }
 
+/* Port of cli.py's split command: the pieces are worked out first, so a
+ * file that cannot be read leaves no folder behind. */
+static void cmd_split(Session *s) {
+    const char *folder = s->positional[1];
+    const Binary *b = cli_load(s, s->positional[0]);
+    const Split *split = split_plan(s->a, b);
+    split_write(s->a, s->err, split, folder, folder);
+    JVal *d = split_view(s->a, split, platform_abspath(s->a, folder));
+    if (!s->json)
+        j_set(s->a, d, "message", j_str(s->a, str_printf(s->a, "Saved %" PRIu64 " files to %s",
+                                                         split->count, folder)));
+    cli_emit(s, d, render_split);
+}
+
 /* --- modding commands (engine / assets) --------------------------------------- */
 
 static void add_line(Arena *a, Lines *out, Str line) {
@@ -542,6 +559,7 @@ static const Command COMMANDS[] = {
     {"hexdump", NULL, 1, 2, "FILE", HEXDUMP_OPTIONS, 2, cmd_hexdump},
     {"layout", NULL, 1, 1, "FILE", NULL, 0, cmd_layout},
     {"report", NULL, 1, 1, "FILE", NULL, 0, cmd_report},
+    {"split", NULL, 2, 2, "FILE, FOLDER", NULL, 0, cmd_split},
     {"patch", "bytes", 3, 3, "FILE, LOCATION, HEX", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "nop", 3, 3, "FILE, LOCATION, BYTES", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "string", 3, 3, "FILE, OLD, NEW", PATCH_STRING_OPTIONS, 3, cmd_patch},
