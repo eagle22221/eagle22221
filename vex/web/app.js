@@ -47,6 +47,7 @@ const state = {
   bytes: { offset: 0 },
   archivePath: null,
   modify: {},
+  split: null,
 };
 
 // --- server calls -----------------------------------------------------------
@@ -151,6 +152,7 @@ const VIEWS = {
   sections: { label: 'Sections', render: renderSections, kinds: ['binary'], icon: 'sections' },
   bytes: { label: 'Bytes', render: renderBytes, kinds: ['binary'], icon: 'bytes' },
   assets: { label: 'Assets', render: renderAssets, kinds: ['binary', 'archive', 'folder'], icon: 'assets' },
+  split: { label: 'Split', render: renderSplit, kinds: ['binary'], icon: 'split' },
   modify: { label: 'Modify', render: renderModify, kinds: ['binary'], icon: 'modify' },
 };
 
@@ -207,6 +209,7 @@ async function openPath(path) {
   state.bytes = { offset: 0 };
   state.archivePath = opened.kind === 'archive' ? opened.path : null;
   state.modify = {};
+  state.split = null;
   const name = opened.path.split(/[\\/]/).filter(Boolean).pop() || opened.path;
   $('file-name').textContent = name;
   $('file-path').textContent = opened.path;
@@ -1038,6 +1041,104 @@ async function renderAssets(box) {
   if (state.kind === 'binary' && state.info.format === 'PE') await renderResources(stack);
   add(stack, archiveBox);
   if (state.archivePath) await renderArchive(archiveBox, state.archivePath);
+}
+
+// --- split ------------------------------------------------------------------
+
+const SPLIT_GROUPS = [
+  { id: 'parts', title: 'Parts' },
+  { id: 'embedded', title: 'Embedded files' },
+  { id: 'resource', title: 'Resources' },
+];
+const SPLIT_KIND_NAMES = { embedded: 'Embedded file', resource: 'Resource' };
+const SPLIT_COLUMNS = ['Piece', 'Kind', 'File offset', 'Size', 'Address', 'Saved as'];
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+function splitRow(piece) {
+  // only the kinds drawn in the file map have a swatch
+  const mapped = own(KIND_NAMES, piece.kind);
+  const kindName = mapped ? KIND_NAMES[piece.kind] : own(SPLIT_KIND_NAMES, piece.kind) ? SPLIT_KIND_NAMES[piece.kind] : piece.kind;
+  return h('tr', { class: piece.path ? null : 'is-unsaved' },
+    h('td', { class: 'mono wrap' }, piece.name || '(unnamed)',
+      piece.path && piece.note ? h('span', { class: 'piece-note', text: piece.note }) : null),
+    h('td', {}, h('span', { class: 'legend-item' },
+      mapped ? h('span', { class: `swatch kind-${piece.kind}` }) : null, kindName)),
+    h('td', { class: 'num mono' }, h('button', {
+      class: 'link', type: 'button', text: hex(piece.offset), title: 'Show the bytes at this offset',
+      onclick: () => { state.bytes = { offset: piece.offset }; show('bytes'); },
+    })),
+    h('td', { class: 'num mono', text: bytesText(piece.size), title: `${piece.size} bytes` }),
+    h('td', { class: 'mono', text: piece.address || '' }),
+    h('td', { class: 'mono wrap' }, piece.path || h('span', { class: 'muted', text: piece.note || 'not saved' })));
+}
+
+function splitTable(pieces) {
+  const rows = [];
+  for (const group of SPLIT_GROUPS) {
+    const members = pieces.filter((p) => (own(SPLIT_KIND_NAMES, p.kind) ? p.kind : 'parts') === group.id);
+    if (!members.length) continue;
+    rows.push(h('tr', {}, h('th', { colSpan: SPLIT_COLUMNS.length, scope: 'colgroup', text: `${group.title} (${members.length})` })));
+    rows.push(...members.map(splitRow));
+  }
+  return h('div', { class: 'table-wrap' }, h('table', { class: 'pieces' },
+    h('thead', {}, h('tr', {}, SPLIT_COLUMNS.map((t, i) =>
+      h('th', { scope: 'col', text: t, class: i === 2 || i === 3 ? 'num' : '' })))),
+    h('tbody', {}, rows)));
+}
+
+async function renderSplit(box) {
+  const path = state.path;
+  const summary = h('span', { class: 'count', hidden: true });
+  const result = h('div', { role: 'status', 'aria-live': 'polite' });
+  const body = h('div', {}, busy('Looking for parts and embedded files…'));
+  const button = h('button', { type: 'button', class: 'btn btn-primary', text: 'Split into a folder…', disabled: true });
+
+  function showDone(done) {
+    fill(result, h('p', { class: 'notice is-ok split-result' },
+      h('strong', { text: `Saved ${plural(done.count, 'file')} ` }), `(${bytesText(done.bytes)}) to `,
+      h('span', { class: 'mono', text: done.dest }),
+      `. ${done.index || 'index.txt'} in that folder lists every piece.`));
+  }
+
+  button.addEventListener('click', async () => {
+    const dest = await ask('Split into a folder', 'Folder to save the pieces into. It is created if it does not exist; an existing folder must be empty.', path + '_split', 'Split');
+    if (!dest) return;
+    button.disabled = true;
+    fill(result, busy('Saving the pieces…'));
+    try {
+      const done = await api('split', { path, dest }, { method: 'POST' });
+      state.split = { path, done };
+      showDone(done);
+    } catch (error) {
+      fill(result, h('p', { class: 'notice is-error split-result', text: error.message }));
+    }
+    button.disabled = false;
+  });
+
+  add(box,
+    h('div', { class: 'view-head' }, h('h2', { text: 'Split into files' }),
+      h('p', { text: 'Saves the parts of this program as separate files in a folder. The program itself is not changed and nothing is run.' })),
+    h('div', { class: 'toolbar' }, button, summary),
+    result,
+    body);
+  if (state.split && state.split.path === path) showDone(state.split.done);
+
+  // the preview scans the whole file, so the page is shown before it arrives
+  api('split', { path }).then((preview) => {
+    if (!preview.pieces.length) {
+      fill(body, h('p', { class: 'muted', text: 'vex found nothing in this file that it can save separately.' }));
+      return;
+    }
+    summary.textContent = `${plural(preview.count, 'file')}, ${bytesText(preview.bytes)} in total`;
+    summary.hidden = false;
+    button.disabled = !preview.count;
+    fill(body, splitTable(preview.pieces),
+      h('p', { class: 'muted split-foot', text: 'An index.txt listing every piece is saved next to them.' }));
+  }).catch((error) => {
+    fill(body, h('p', { class: 'notice is-error split-result', text: error.message }));
+  });
 }
 
 // --- modify -----------------------------------------------------------------

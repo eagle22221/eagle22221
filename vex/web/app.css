@@ -426,6 +426,13 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .log li { padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .log li:last-child { border-bottom: 0; }
 
+/* --- split -------------------------------------------------------------- */
+.pieces .legend-item { white-space: nowrap; }
+.pieces tr.is-unsaved td { color: var(--ink-2); }
+.piece-note { display: block; margin-top: 2px; font: 400 12px/1.4 var(--ui); color: var(--ink-2); }
+.split-result { overflow-wrap: anywhere; }
+.split-foot { margin: 12px 0 0; font-size: 13px; }
+
 /* --- open dialog -------------------------------------------------------- */
 .dialog { width: min(760px, 94vw); border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--surface); color: var(--ink); padding: 0; box-shadow: var(--shadow-lg); }
 .dialog::backdrop { background: rgba(4, 6, 10, .6); backdrop-filter: blur(2px); }
