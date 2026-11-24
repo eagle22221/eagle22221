@@ -423,6 +423,60 @@ def _api_patch_string(ws, p, body):
     return {"out": out, "patches": [views.patch_result(out, r) for r in results]}
 
 
+# --- decode & cipher workbench ---------------------------------------------------
+
+def _json_body(body) -> dict:
+    """Parse a POST request body as a JSON object; a malformed body is 400."""
+    try:
+        parsed = json.loads(body.read() or b"{}")
+    except (json.JSONDecodeError, ValueError):
+        raise ApiError(400, "request body must be JSON") from None
+    if not isinstance(parsed, dict):
+        raise ApiError(400, "request body must be a JSON object")
+    return parsed
+
+
+def _decode_source(ws, source) -> Callable:
+    """A callable producing the source bytes. A `file` source resolves against
+    the open workspace program, bounded to the file (as other POST routes do)."""
+    from . import decode
+    if not isinstance(source, dict):
+        raise ApiError(400, "source must be an object")
+    kind = source.get("kind")
+    if kind in ("text", "hex", "base64"):
+        value = source.get("value") or ""
+        return lambda: decode.source_bytes(kind, value)
+    if kind == "file":
+        path = source.get("path")
+        if not path:
+            raise ApiError(400, "a file source needs a path")
+        data = ws.binary(path).data
+        offset, length = source.get("offset") or 0, source.get("length")
+        return lambda: decode.source_bytes("file", data=data, offset=offset, length=length)
+    raise ApiError(400, "source kind must be text, hex, base64 or file")
+
+
+def _api_decode_ops(ws, p, body):
+    from . import decode
+    return decode.ops()
+
+
+def _api_decode(ws, p, body):
+    from . import decode
+    req = _json_body(body)
+    get_source = _decode_source(ws, req.get("source"))
+    recipe = [(str(step.get("op")), step.get("params") or {})
+              for step in (req.get("recipe") or []) if isinstance(step, dict)]
+    return decode.run(get_source, recipe)
+
+
+def _api_decode_solve(ws, p, body):
+    from . import decode
+    req = _json_body(body)
+    get_source = _decode_source(ws, req.get("source"))
+    return decode.solve(str(req.get("name")), get_source)
+
+
 def _split_plan(ws, p):
     from . import split
     path = p.need("path")
@@ -450,13 +504,14 @@ GET_ROUTES: Dict[str, Callable] = {
     "engine": _api_engine, "archive/list": _api_archive_list,
     "archive/file": _api_archive_file, "resources": _api_resources,
     "resource/data": _api_resource_data, "resource/icon": _api_resource_icon,
-    "split": _api_split_preview,
+    "split": _api_split_preview, "decode/ops": _api_decode_ops,
 }
 POST_ROUTES: Dict[str, Callable] = {
     "upload": _api_upload, "archive/extract": _api_archive_extract,
     "archive/replace": _api_archive_replace, "resource/replace": _api_resource_replace,
     "patch/bytes": _api_patch_bytes, "patch/nop": _api_patch_nop,
     "patch/string": _api_patch_string, "split": _api_split,
+    "decode": _api_decode, "decode/solve": _api_decode_solve,
 }
 
 

@@ -82,9 +82,10 @@ def test_base85_round_trips_against_stdlib():
     raw = b"base85 sample data 1234"
     assert op("to-base85", raw) == base64.a85encode(raw)
     assert op("from-base85", base64.a85encode(raw)) == raw
-    z = base64.z85encode(raw)           # length already a multiple of 4
-    assert op("to-base85", raw, variant="z85") == z
-    assert op("from-base85", z, variant="z85") == raw
+    aligned = b"z85 payload aligned!"       # 20 bytes: a multiple of 4
+    z = base64.z85encode(aligned)
+    assert op("to-base85", aligned, variant="z85") == z
+    assert op("from-base85", z, variant="z85") == aligned
 
 
 def test_url_and_quoted_printable_match_stdlib():

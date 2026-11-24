@@ -777,13 +777,45 @@ def _hamming(a: bytes, b: bytes) -> int:
     return sum(bin(x ^ y).count("1") for x, y in zip(a, b))
 
 
+# Space-aware English weights for single-byte key recovery. The plain chi-square
+# in _score ignores spaces (the commonest character in English), which is too
+# weak on the short, space-heavy columns a repeating key splits text into.
+_RECOVERY_WEIGHT = dict(_ENGLISH_FREQ)
+_RECOVERY_WEIGHT[" "] = 0.19
+
+
+def _recovery_score(data: bytes) -> float:
+    total = 0.0
+    for c in data:
+        if c == 0x20:
+            total += 0.19
+        elif 65 <= c <= 90:
+            total += _ENGLISH_FREQ[chr(c + 32)]
+        elif 97 <= c <= 122:
+            total += _ENGLISH_FREQ[chr(c)]
+        elif c in (0x09, 0x0A, 0x0D) or 0x21 <= c <= 0x7E:
+            total += 0.0
+        else:
+            total -= 0.5                # control / non-printable: unlikely in text
+    return total
+
+
 def _best_single_byte(column: bytes) -> int:
-    best_b, best_score = 0, -1.0
+    best_b, best_score = 0, float("-inf")
     for b in range(256):
-        s = _score(bytes(c ^ b for c in column))
+        s = _recovery_score(bytes(c ^ b for c in column))
         if s > best_score:
             best_score, best_b = s, b
     return best_b
+
+
+def _minimal_period(key: bytes) -> bytes:
+    """Collapse a key that is a whole-number repeat of a shorter one."""
+    n = len(key)
+    for p in range(1, n):
+        if n % p == 0 and key == key[:p] * (n // p):
+            return key[:p]
+    return key
 
 
 def _solve_xor_keylen(data: bytes) -> List[dict]:
@@ -801,12 +833,16 @@ def _solve_xor_keylen(data: bytes) -> List[dict]:
         scored.append((dist, L))
     scored.sort()
     lengths = [L for _, L in scored[:4]] or [1]
-    out = []
+    out, seen = [], set()
     for L in lengths:
-        key = bytes(_best_single_byte(data[col::L]) for col in range(L))
+        key = _minimal_period(bytes(_best_single_byte(data[col::L]) for col in range(L)))
+        if key in seen:
+            continue
+        seen.add(key)
         dec = _xor_with(data, key) if key else data
-        out.append(_candidate({"key": key.hex(), "keylen": L}, dec))
-    out.sort(key=lambda c: c["score"], reverse=True)
+        out.append(_candidate({"key": key.hex(), "keylen": len(key)}, dec))
+    # Best decode first; on a tie, the shorter key is the canonical answer.
+    out.sort(key=lambda c: (-c["score"], c["params"]["keylen"]))
     return out[:20]
 
 

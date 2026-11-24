@@ -466,6 +466,136 @@ def _cmd_gui(args, st):
     raise SystemExit(server.serve(args.file, args.port, not args.no_browser))
 
 
+# --- decode & cipher workbench --------------------------------------------------
+
+def _decode_hexdump(data: bytes, st: Style, limit: int = 256) -> List[str]:
+    shown = data[:limit]
+    lines = []
+    for i in range(0, len(shown), 16):
+        chunk = shown[i:i + 16]
+        hexpart = " ".join(f"{c:02x}" for c in chunk)
+        text = "".join(chr(c) if 0x20 <= c <= 0x7E else "." for c in chunk)
+        lines.append(f"{st(format(i, '08x'), 'dim')}  {hexpart:<47}  |{text}|")
+    if len(data) > limit:
+        lines.append(st(f"... {len(data) - limit} more bytes", "dim"))
+    return lines
+
+
+def _fmt_param(p: dict) -> str:
+    value = "|".join(p["choices"]) if p.get("choices") else p["type"].upper()
+    text = f"{p['name']}={value}"
+    return text if p["required"] else f"[{text}]"
+
+
+def _render_decode_ops(d: dict, st: Style) -> List[str]:
+    out: List[str] = []
+    for group in d["groups"]:
+        out += _heading(group["name"], st)
+        for o in group["ops"]:
+            params = " ".join(_fmt_param(p) for p in o["params"])
+            tag = "" if o["available"] else st("  (unavailable in this build)", "dim")
+            out.append(f"  {st(o['name'], 'bold')} {params}".rstrip() +
+                       f"  {st('- ' + o['summary'], 'dim')}{tag}")
+    out += _heading("Solvers", st)
+    for s in d["solvers"]:
+        out.append(f"  {st(s['name'], 'bold')}  {st('- ' + s['summary'], 'dim')}")
+    return out
+
+
+def _render_decode_solve(d: dict, st: Style) -> List[str]:
+    if not d["ok"]:
+        return [st(f"error: {d['error']}", "red")]
+    if not d["candidates"]:
+        return ["(no candidates)"]
+    out = []
+    for i, c in enumerate(d["candidates"], 1):
+        params = ", ".join(f"{k}={v}" for k, v in c["params"].items())
+        preview = c["text"].replace("\n", " ").replace("\r", " ")[:60]
+        score = st(f"{c['score']:.2f}", "bold")
+        out.append(f"{i:2}. {score}  {params:<20}  {preview}")
+    return out
+
+
+def _render_decode(result: dict, raw: bytes, out_msg: Optional[str],
+                   st: Style) -> List[str]:
+    if out_msg is not None:
+        return [st(out_msg, "green", "bold")]
+    out: List[str] = []
+    if result["steps"]:
+        out.append(st("steps: " + " -> ".join(s["op"] for s in result["steps"]), "dim"))
+    if not result["ok"]:
+        out.append(st(f"error: {result['error']}", "red"))
+    out.append(result["text"])
+    out += _decode_hexdump(raw, st)
+    out.append(f"{result['size']} bytes · looks like {result['looks_like']}")
+    return out
+
+
+def _decode_source(args):
+    from . import decode
+    if args.file is not None:
+        data = _read_file(args.file)
+        return lambda: decode.source_bytes("file", data=data, offset=args.offset,
+                                           length=args.length)
+    if args.text is not None:
+        return lambda: decode.source_bytes("text", args.text)
+    if args.hex is not None:
+        return lambda: decode.source_bytes("hex", args.hex)
+    if args.base64 is not None:
+        return lambda: decode.source_bytes("base64", args.base64)
+    if args.source is not None:
+        return lambda: decode.source_bytes("text", args.source)
+    raise VexError("give a source: --text, --hex, --base64, --file, or a bare TEXT argument")
+
+
+def _cmd_decode(args, st):
+    from . import decode
+    if args.list:
+        return decode.ops(), _render_decode_ops
+    get_source = _decode_source(args)
+    if args.solve:
+        return decode.solve(args.solve, get_source), _render_decode_solve
+    try:
+        recipe = decode.parse_recipe(args.recipe)
+    except decode.RecipeError as exc:
+        print(f"vex: error: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    if args.out and os.path.exists(args.out):
+        raise VexError(f"{args.out} exists")
+    er = decode.execute(get_source, recipe)
+    result = decode.result_object(er)
+    out_msg = None
+    if args.out and er.ok:
+        with open(args.out, "wb") as f:
+            f.write(er.data)
+        out_msg = f"wrote {len(er.data)} bytes to {os.path.abspath(args.out)}"
+    return result, lambda d, s: _render_decode(d, er.data, out_msg, s)
+
+
+def _add_decode(sub) -> None:
+    sp = sub.add_parser(
+        "decode", help="decode, decrypt and chain transforms (a local CyberChef)",
+        description="Apply reversible transforms and supplied-key decryptions to data "
+                    "you provide or select, and chain them into a recipe.")
+    src = sp.add_mutually_exclusive_group()
+    src.add_argument("--text", metavar="S", help="UTF-8 text")
+    src.add_argument("--hex", metavar="S", help="a hex blob (spaces, 0x, : and , ignored)")
+    src.add_argument("--base64", metavar="S", help="a base64 blob")
+    src.add_argument("--file", metavar="PATH", help="bytes from a file")
+    sp.add_argument("source", nargs="?", metavar="TEXT", help="text to decode (same as --text)")
+    sp.add_argument("--offset", type=_int, default=0, metavar="O",
+                    help="start offset for --file (default 0)")
+    sp.add_argument("--length", type=_int, default=None, metavar="N",
+                    help="bytes to read for --file (default: to the end)")
+    sp.add_argument("--recipe", metavar="SPEC", default="",
+                    help='operations to apply, e.g. "from-base64|gunzip|xor:key_text=KEY"')
+    sp.add_argument("--solve", metavar="NAME",
+                    help="run a solver: caesar, xor-single, xor-keylen, substitution")
+    sp.add_argument("--out", metavar="FILE", help="write the raw output bytes (never overwrites)")
+    sp.add_argument("--list", action="store_true", help="list available operations and solvers")
+    sp.set_defaults(func=_cmd_decode)
+
+
 def _add_modding(sub) -> None:
     sp = sub.add_parser("engine", help="identify a game's engine and find its asset packs")
     sp.add_argument("file", metavar="PATH", help="a game folder or its executable")
@@ -597,6 +727,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("split", _cmd_split, "save the parts of a program as separate files: its "
              "sections, files embedded in it and its resources")
     sp.add_argument("dest", metavar="FOLDER", help="new or empty folder to save into")
+    _add_decode(sub)
     _add_modding(sub)
     return p
 
