@@ -61,6 +61,7 @@ figure img { width: 100%; border: .8pt solid var(--ink); display: block; }
 figure.crop img { height: 72mm; object-fit: cover; object-position: top left; }
 figure.crop-tall img { height: 70mm; object-fit: cover; object-position: 0 88%; }
 figure.crop-short img { height: 58mm; object-fit: cover; object-position: 0 42%; }
+figure.crop-decode img { height: 100mm; object-fit: cover; object-position: 0 34%; }
 figcaption { font-size: 9pt; color: var(--ink-2); margin-top: 3.5pt; }
 .box { border: .8pt solid var(--ink); padding: 8pt 10pt; margin: 8pt 0 10pt; break-inside: avoid; background: var(--paper); }
 .box h3 { margin-top: 0; }
@@ -311,24 +312,24 @@ td code { white-space: nowrap; }
   <div class="lesson-no">Lesson 8</div>
   <h2>Decode and decipher data</h2>
   <p class="goal">Goal: turn encoded or encrypted data back into something readable, one step at a time.</p>
-  <p>Data is not always stored in the clear. A piece of text might be base64, a lump of bytes might be gzipped, and a string from a file might be scrambled with a cipher. The <b>Decode</b> view is a small workbench for turning such data back into something you can read — a little like having CyberChef built into vex. It works only on data you give it: some text you type, a hex or base64 blob you paste, or a range of the program you have open.</p>
+  <p>Data is not always stored in the clear. A piece of text might be base64, a lump of bytes might be gzipped, and a string from a file might be scrambled with a cipher. The <b>Decode</b> view is a small workbench for turning such data back into something you can read. It works only on data you give it: some text you type, a hex or base64 blob you paste, or a range of the program you have open.</p>
   <ol>
     <li>Choose <b>Decode</b> on the left.</li>
     <li>Say where the data comes from. Type or paste some text, paste a <b>hex</b> or <b>base64</b> blob, or pick a range of the open program by its offset and length. For a quick try, choose <b>Base64</b> and paste <code>H4sIAAAAAAAC/8tIzcnJV0grys9VKEut4AIA4cVYqQ8AAAA=</code>.</li>
-    <li>Build a <b>recipe</b> by adding operations one after another; vex applies them in order, top to bottom. For the blob above, add <b>Gunzip</b> — it was a gzipped message. (Starting instead from plain text, you would add <b>From Base64</b> first, then <b>Gunzip</b>.)</li>
-    <li>Read the result on the right: the data as text at the top, the raw bytes below, the size, and a short guess of what it is — <code>printable text</code>, <code>PNG image</code>, <code>gzip</code>, and so on. Here it reads <code>hello from vex</code>.</li>
-    <li>To decrypt, add a cipher step and type in the key you already have: for example <b>XOR</b> with its key, <b>AES</b> with its key and starting value (IV), or <b>ChaCha20</b> with its key and nonce. Steps the edition you are running cannot do are greyed out.</li>
+    <li>Build a <b>recipe</b> by adding operations one after another; vex applies them in order, top to bottom. For the blob above, add <code>gunzip</code> — it was a gzipped message. (Starting instead from <b>Text</b>, you would add <code>from-base64</code> first, then <code>gunzip</code>.)</li>
+    <li>Read the result under <b>Output</b>: the data as text (tick <b>Hex dump</b> for the raw bytes), the size, and a short guess of what it is — <code>printable text</code>, <code>PNG image</code>, <code>gzip</code>, and so on. Here it reads <code>hello from vex</code>.</li>
+    <li>To decrypt, add a cipher step and type in the key you already have: for example <code>xor</code> with its key, <code>aes</code> with its key and starting value (IV), or <code>chacha20</code> with its key and nonce. Steps the edition you are running cannot do are greyed out. The file <code>examples/decode_sample/secrets.txt</code> has five small puzzles to practise on, each with a hint.</li>
   </ol>
-  <figure class="crop-short"><img src="img/decode.png" alt="The Decode view"><figcaption>The Decode view: choose a source, stack up a recipe of steps, and read the result as text and bytes with a guess of the file type.</figcaption></figure>
+  <figure class="crop-decode"><img src="img/decode.png" alt="The Decode view"><figcaption>The Decode view: the input at the top, the operations you can add on the left, and the result on the right with the steps that produced it.</figcaption></figure>
   <table>
     <tr><th>Group</th><th>What it does</th></tr>
-    <tr><td>Text encodings</td><td>Turn base64, base32, hex, base85, URL or quoted-printable text back into bytes; also ROT13, reverse, and reading one character set as another.</td></tr>
+    <tr><td>Encoding</td><td>Turn base64, base32, hex, base85, URL or quoted-printable text back into bytes; also ROT13, reverse, and reading one character set as another.</td></tr>
     <tr><td>Decompress</td><td>Expand zlib, gzip, bzip2 or xz data.</td></tr>
-    <tr><td>Classic ciphers</td><td>Caesar (ROT-N), Atbash, Vigenère, rail fence, substitution and repeating-key XOR.</td></tr>
-    <tr><td>With your key</td><td>AES, ChaCha20 and RC4 — decrypted only with the key you supply.</td></tr>
-    <tr><td>Digest</td><td>The MD5, SHA-1, SHA-256 or CRC32 of the data (one way, for checking — not a way to decode).</td></tr>
+    <tr><td>Classic cipher</td><td>Caesar (ROT-N), Atbash, Vigenère, rail fence, substitution and repeating-key XOR.</td></tr>
+    <tr><td>Symmetric</td><td>AES, ChaCha20, RC4, DES and Triple DES — decrypted only with the key you supply.</td></tr>
+    <tr><td>Hash</td><td>The MD5, SHA-1, SHA-256 or CRC32 of the data (one way, for checking — not a way to decode).</td></tr>
   </table>
-  <p>There are also a few search tools (<b>Solve</b>) that try every Caesar shift or a short repeating-XOR key and rank the results by how English-like they look. They help with a simple puzzle; they are not an attack on real encryption, and they only ever work on the data you give them.</p>
+  <p><b>Auto-solve</b> tries every Caesar shift, every single-byte XOR key or a short repeating XOR key, and ranks the results by how much they read like English. They help with a simple puzzle; they are not an attack on real encryption, and they only ever work on the data you give them.</p>
   <div class="box">
     <h3>What decode does not do</h3>
     <ul>

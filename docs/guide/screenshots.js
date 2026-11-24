@@ -47,7 +47,17 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
 
   // the decode & cipher workbench, captured on the open practice program
   await nav('Decode');
+  await page.waitForSelector('.op-chip');
+  await page.click('.seg-btn:has-text("Base64")');
+  await page.fill('textarea.decode-input', 'H4sIAAAAAAAC/8tIzcnJV0grys9VKEut4AIA4cVYqQ8AAAA=');
+  await page.click('.op-chip:has-text("gunzip")');
+  await page.waitForSelector('.decode-pre');
+  await page.waitForTimeout(600);
+  await page.setViewportSize({ width: 1120, height: 1180 });   // input, operations, recipe and output
+  await page.evaluate(() => document.querySelectorAll('*').forEach((e) => { if (e.scrollTop) e.scrollTop = 0; }));
+  await page.waitForTimeout(300);
   await page.screenshot({ path: out('decode') });
+  await page.setViewportSize({ width: 1120, height: 640 });
 
   if (bundle) {
     await page.goto(`${base}/#token=${token}&open=${encodeURIComponent(bundle)}`);
