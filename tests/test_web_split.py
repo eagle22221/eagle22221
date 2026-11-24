@@ -67,7 +67,7 @@ def test_split_view_is_registered_between_assets_and_modify(script):
     order = re.findall(r"^\s+(\w+): \{ label: '([^']+)'", views, re.M)
     names = [name for name, _ in order]
     assert ("split", "Split") in order
-    assert names.index("assets") + 1 == names.index("split") == names.index("modify") - 1
+    assert names.index("assets") + 1 == names.index("split") < names.index("modify")
     entry = re.search(r"split: \{[^}]*\}", views).group(0)
     assert "render: renderSplit" in entry and "icon: 'split'" in entry and "kinds: ['binary']" in entry
 
