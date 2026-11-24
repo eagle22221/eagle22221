@@ -14,6 +14,7 @@ CC       ?= cc
 AR       ?= ar
 MINGW    ?= x86_64-w64-mingw32-gcc
 MINGW_AR ?= x86_64-w64-mingw32-ar
+PYTHON   ?= python3
 OPT      ?= -O2
 WARN      = -std=c11 -Wall -Wextra -Werror
 # -ffp-contract=off: entropy must round exactly like the Python version.
@@ -21,8 +22,23 @@ CFLAGS    = $(OPT) $(WARN) -ffp-contract=off
 SANITIZE  = -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
 BUILD     = build
-CORE      = util hash model elf pe strings json views techniques render platform patch cli main
+CORE      = util hash model elf pe strings json views techniques render platform patch cli main server
 HEADERS   = $(wildcard src/*.h)
+
+# --- web interface (binspect gui) -----------------------------------------------
+# tools/embed_web.py compiles binspect/web into a C source served from memory.
+WEB_DIR    = ../binspect/web
+WEB_FILES  = $(shell find $(WEB_DIR) -type f 2>/dev/null)
+GEN_SRC    = $(BUILD)/gen/web_assets.c
+web_object = $(BUILD)/$(1)/web_assets.o
+
+# Asset packs and game-engine detection: the real implementation when both
+# parts are present, otherwise the stub that reports the feature unavailable.
+ifneq ($(and $(wildcard src/archives.c),$(wildcard src/engines.c)),)
+ARCHIVES = archives engines fswalk inflate
+else
+ARCHIVES = archives_stub
+endif
 
 # --- Capstone (third-party) -----------------------------------------------------
 CS_VERSION = 5.0.9
@@ -39,11 +55,11 @@ CS_SOURCES = $(wildcard $(CS_DIR)/*.c) $(foreach arch,$(CS_ARCHS),$(wildcard $(C
 cs_objects = $(patsubst $(CS_DIR)/%.c,$(BUILD)/$(1)/capstone-$(CS_VERSION)/%.o,$(CS_SOURCES))
 
 ifeq ($(CAPSTONE),1)
-SOURCES     = $(CORE) disasm analysis
+SOURCES     = $(CORE) $(ARCHIVES) disasm analysis
 CS_USE      = -isystem $(CS_DIR)/include -isystem $(CS_DIR)
 cs_library  = $(BUILD)/$(1)/libcapstone.a
 else
-SOURCES     = $(CORE) analysis_stub
+SOURCES     = $(CORE) $(ARCHIVES) analysis_stub
 CS_USE      =
 cs_library  =
 endif
@@ -55,14 +71,14 @@ all: $(BUILD)/binspect
 windows: $(BUILD)/binspect.exe
 asan: $(BUILD)/binspect-asan
 
-$(BUILD)/binspect: $(call objects,native) $(call cs_library,native)
+$(BUILD)/binspect: $(call objects,native) $(call web_object,native) $(call cs_library,native)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
-$(BUILD)/binspect-asan: $(call objects,asan) $(call cs_library,asan)
+$(BUILD)/binspect-asan: $(call objects,asan) $(call web_object,asan) $(call cs_library,asan)
 	$(CC) $(CFLAGS) -O1 $(SANITIZE) -o $@ $^ -lm
 
-$(BUILD)/binspect.exe: $(call objects,windows) $(call cs_library,windows)
-	$(MINGW) $(CFLAGS) -static -s -o $@ $^
+$(BUILD)/binspect.exe: $(call objects,windows) $(call web_object,windows) $(call cs_library,windows)
+	$(MINGW) $(CFLAGS) -static -s -o $@ $^ -lws2_32 -lshell32
 
 $(BUILD)/native/%.o: src/%.c $(HEADERS)
 	@mkdir -p $(@D)
@@ -75,6 +91,24 @@ $(BUILD)/asan/%.o: src/%.c $(HEADERS)
 $(BUILD)/windows/%.o: src/%.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(MINGW) $(CFLAGS) $(CS_USE) -c -o $@ $<
+
+# The embedded web interface: generated from binspect/web, then compiled like
+# any other source (-Isrc so the generated file finds server.h).
+$(GEN_SRC): tools/embed_web.py $(WEB_FILES)
+	@mkdir -p $(@D)
+	$(PYTHON) $< $(WEB_DIR) $@
+
+$(BUILD)/native/web_assets.o: $(GEN_SRC) $(HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -Isrc -c -o $@ $<
+
+$(BUILD)/asan/web_assets.o: $(GEN_SRC) $(HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -O1 $(SANITIZE) -Isrc -c -o $@ $<
+
+$(BUILD)/windows/web_assets.o: $(GEN_SRC) $(HEADERS)
+	@mkdir -p $(@D)
+	$(MINGW) $(CFLAGS) -Isrc -c -o $@ $<
 
 # Capstone objects and one static library per target. The sanitizer build
 # checks Capstone's memory accesses too (AddressSanitizer only: undefined-

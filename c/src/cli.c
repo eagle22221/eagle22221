@@ -3,7 +3,10 @@
 
 #include <errno.h>
 
+#include "archives.h"
+#include "engines.h"
 #include "platform.h"
+#include "server.h"
 #include "techniques.h"
 
 /* --- usage errors ------------------------------------------------------------- */
@@ -46,6 +49,14 @@ static const char HELP[] =
     "  patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)\n"
     "                            overwrite bytes, instructions or text; --in-place\n"
     "                            keeps the original as FILE.bak\n"
+    "  gui [FILE] [--port N] [--no-browser]\n"
+    "                            open the graphical interface in a web browser\n"
+    "  engine PATH               identify a game's engine and find its asset packs\n"
+    "  assets list PACK [--grep TEXT]\n"
+    "  assets extract PACK FOLDER [NAME...]\n"
+    "  assets replace PACK NAME NEWFILE -o OUT\n"
+    "  assets add PACK NAME NEWFILE -o OUT\n"
+    "                            list, extract, replace or add files in an asset pack\n"
     "\n"
     "LOCATION and TARGET are a 0x address, a function, symbol or import name\n"
     "(optionally library!name), or 'entry'.\n"
@@ -314,6 +325,193 @@ static void cmd_report(Session *s) {
     cli_emit(s, d, render_report);
 }
 
+/* --- modding commands (engine / assets) --------------------------------------- */
+
+static void add_line(Arena *a, Lines *out, Str line) {
+    *VEC_PUSH(a, *out) = line;
+}
+
+/* Port of cli.py's _render_engine. */
+static void render_engine(Arena *a, const Style *st, const JVal *d, Lines *out) {
+    (void)st;
+    add_line(a, out, str_printf(a, "Looked in %s", j_text(j_get(d, "root")).p));
+    const JVal *matches = j_get(d, "matches");
+    if (j_len(matches) == 0)
+        add_line(a, out, str_c("No known game engine recognised."));
+    for (size_t i = 0; i < j_len(matches); i++) {
+        const JVal *m = j_at(matches, i);
+        Buf det;
+        buf_init(&det, a);
+        const JVal *details = j_get(m, "details");
+        for (size_t k = 0; k < j_len(details); k++) {
+            /* details is a dict: iterate members */
+        }
+        /* details is a J_DICT; render key: value pairs in order */
+        if (details && details->kind == J_DICT) {
+            bool first = true;
+            for (size_t k = 0; k < details->u.dict.n; k++) {
+                buf_printf(&det, "%s%s: %s", first ? "" : ", ", details->u.dict.v[k].key,
+                           j_text(details->u.dict.v[k].value).p);
+                first = false;
+            }
+        }
+        add_line(a, out, str_c(""));
+        Str dline = buf_str(&det);
+        add_line(a, out, str_printf(a, "%s  (%s confidence%s%s)", j_text(j_get(m, "engine")).p,
+                                    j_text(j_get(m, "confidence")).p, dline.n ? "; " : "",
+                                    dline.p));
+        const JVal *ev = j_get(m, "evidence");
+        for (size_t k = 0; k < j_len(ev); k++)
+            add_line(a, out, str_printf(a, "  why: %s", j_text(j_at(ev, k)).p));
+        const JVal *adv = j_get(m, "advice");
+        for (size_t k = 0; k < j_len(adv); k++)
+            add_line(a, out, str_printf(a, "  next: %s", j_text(j_at(adv, k)).p));
+    }
+    add_line(a, out, str_c(""));
+    add_line(a, out, str_c("== Asset packs binspect can open =="));
+    const JVal *packs = j_get(d, "packs");
+    if (j_len(packs) == 0)
+        add_line(a, out, str_c("  (none found)"));
+    for (size_t i = 0; i < j_len(packs); i++) {
+        const JVal *p = j_at(packs, i);
+        char nb[44];
+        add_line(a, out, str_printf(a, "  %s  (%s bytes)", j_text(j_get(p, "relative")).p,
+                                    dec_big(nb, j_number(j_get(p, "size")))));
+    }
+}
+
+/* Port of cli.py's _render_archive. */
+static void render_archive(Arena *a, const Style *st, const JVal *d, Lines *out) {
+    (void)st;
+    char nb[44];
+    bool writable = j_truthy(j_get(d, "writable"));
+    add_line(a, out, str_printf(a, "%s pack, %s files%s", j_text(j_get(d, "format")).p,
+                                dec_big(nb, j_number(j_get(d, "count"))),
+                                writable ? "" : " (read-only)"));
+    const JVal *notes = j_get(d, "notes");
+    for (size_t i = 0; i < j_len(notes); i++)
+        add_line(a, out, str_printf(a, "! %s", j_text(j_at(notes, i)).p));
+    const JVal *items = j_get(d, "items");
+    /* column widths */
+    size_t wname = 4, wsize = 4;        /* "Name", "Size" */
+    for (size_t i = 0; i < j_len(items); i++) {
+        const JVal *e = j_at(items, i);
+        size_t ln = utf8_length(j_text(j_get(e, "name")));
+        if (ln > wname) wname = ln;
+        size_t ls = strlen(dec_big(nb, j_number(j_get(e, "size"))));
+        if (ls > wsize) wsize = ls;
+    }
+    Buf hdr;
+    buf_init(&hdr, a);
+    buf_printf(&hdr, "%-*s  %*s  %s", (int)wname, "Name", (int)wsize, "Size", "Stored");
+    add_line(a, out, buf_str(&hdr));
+    for (size_t i = 0; i < j_len(items); i++) {
+        const JVal *e = j_at(items, i);
+        Str name = j_text(j_get(e, "name"));
+        const char *sizes = dec_big(nb, j_number(j_get(e, "size")));
+        Buf flags;
+        buf_init(&flags, a);
+        bool first = true;
+        if (j_truthy(j_get(e, "compressed"))) { buf_printf(&flags, "compressed"); first = false; }
+        if (j_truthy(j_get(e, "encrypted"))) { buf_printf(&flags, "%sencrypted", first ? "" : ", "); }
+        Buf row;
+        buf_init(&row, a);
+        buf_adds(&row, name);
+        for (size_t k = utf8_length(name); k < wname; k++) buf_addch(&row, ' ');
+        buf_printf(&row, "  %*s  %s", (int)wsize, sizes, buf_str(&flags).p);
+        add_line(a, out, buf_str(&row));
+    }
+}
+
+static void close_archive(void *p) {
+    bs_archive_close((BsArchive *)p);
+}
+
+static void cmd_engine(Session *s) {
+    char err[1024];
+    JVal *d = bs_engine_view(s->a, s->positional[0], err, sizeof err);
+    if (d == NULL)
+        err_throw(s->err, ERR_OS, "cannot read %s: No such file or directory", s->positional[0]);
+    cli_emit(s, d, render_engine);
+}
+
+static void cmd_assets(Session *s) {
+    Arena *a = s->a;
+    const char *action = s->command->action;
+    const char *pack = s->positional[0];
+    char err[1024];
+    BsArchive *ar = bs_archive_open(pack, err, sizeof err);
+    if (ar == NULL)
+        err_throw(s->err, ERR_OTHER, "%s", err);
+    arena_on_release(a, close_archive, ar);
+
+    if (strcmp(action, "list") == 0) {
+        const char *grep = cli_option(s, "grep");
+        Str needle = str_c(grep ? grep : "");
+        JVal *d = j_dict(a);
+        j_set(a, d, "format", j_cstr(a, bs_archive_format(ar)));
+        j_set(a, d, "writable", j_bool(a, bs_archive_writable(ar)));
+        JVal *notes = j_list(a);
+        for (size_t i = 0; i < bs_archive_note_count(ar); i++)
+            j_push(a, notes, j_cstr(a, bs_archive_note(ar, i)));
+        j_set(a, d, "notes", notes);
+        j_set(a, d, "count", j_int(a, (big)bs_archive_count(ar)));
+        JVal *items = j_list(a);
+        for (size_t i = 0; i < bs_archive_count(ar); i++) {
+            const BsArchiveEntry *e = bs_archive_entry(ar, i);
+            if (grep && !str_contains(str_c(e->name), needle))
+                continue;
+            JVal *it = j_dict(a);
+            j_set(a, it, "name", j_cstr(a, e->name));
+            j_set(a, it, "size", j_int(a, (big)e->size));
+            j_set(a, it, "compressed", j_bool(a, e->compressed));
+            j_set(a, it, "encrypted", j_bool(a, e->encrypted));
+            j_push(a, items, it);
+        }
+        j_set(a, d, "items", items);
+        cli_emit(s, d, render_archive);
+        return;
+    }
+
+    if (strcmp(action, "extract") == 0) {
+        const char *dest = s->positional[1];
+        size_t n_names = s->npositional > 2 ? s->npositional - 2 : 0;
+        const char **names = n_names ? (const char **)&s->positional[2] : NULL;
+        size_t written = 0;
+        if (!bs_archive_extract(ar, dest, names, n_names, &written, err, sizeof err))
+            err_throw(s->err, ERR_OTHER, "%s", err);
+        JVal *d = j_dict(a);
+        j_set(a, d, "dest", j_cstr(a, platform_abspath(a, dest)));
+        j_set(a, d, "count", j_int(a, (big)written));
+        j_set(a, d, "message", j_cstr(a, str_printf(a, "Extracted %zu files to %s", written,
+                                                    dest).p));
+        cli_emit(s, d, render_done);
+        return;
+    }
+
+    /* replace / add */
+    const char *name = s->positional[1];
+    const char *newfile = s->positional[2];
+    const char *out = cli_option(s, "output");
+    if (out == NULL)
+        cli_usage_error(s, "the following arguments are required: -o/--output");
+    uint64_t newsize = 0;
+    /* Python reports a failure to read NEWFILE against args.file (the pack). */
+    FILE *probe = platform_fopen(newfile, "rb");
+    if (probe == NULL)
+        err_throw(s->err, ERR_OS, "cannot read %s: %s", pack, strerror(errno));
+    fclose(probe);
+    const uint8_t *data = cli_read_file(s, newfile, &newsize);
+    bool add = strcmp(action, "add") == 0;
+    if (!bs_archive_repack(ar, out, name, data, (size_t)newsize, add, err, sizeof err))
+        err_throw(s->err, ERR_OTHER, "%s", err);
+    JVal *d = j_dict(a);
+    j_set(a, d, "out", j_cstr(a, platform_abspath(a, out)));
+    j_set(a, d, "message", j_cstr(a, str_printf(a, "%s %s; saved %s", add ? "Added" : "Replaced",
+                                                name, out).p));
+    cli_emit(s, d, render_done);
+}
+
 /* --- command table ------------------------------------------------------------ */
 
 static const OptSpec GREP_OPTION[] = {{"grep", 0, true}};
@@ -326,6 +524,8 @@ static const OptSpec PATCH_OPTIONS[] = {
     {"offset", 0, false}, {"output", 'o', true}, {"in-place", 0, false}};
 static const OptSpec PATCH_STRING_OPTIONS[] = {
     {"encoding", 'e', true}, {"output", 'o', true}, {"in-place", 0, false}};
+static const OptSpec GUI_OPTIONS[] = {{"port", 0, true}, {"no-browser", 0, false}};
+static const OptSpec ASSETS_OUTPUT[] = {{"output", 'o', true}};
 
 static const Command COMMANDS[] = {
     {"info", NULL, 1, 1, "FILE", NULL, 0, cmd_info},
@@ -345,10 +545,16 @@ static const Command COMMANDS[] = {
     {"patch", "bytes", 3, 3, "FILE, LOCATION, HEX", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "nop", 3, 3, "FILE, LOCATION, BYTES", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "string", 3, 3, "FILE, OLD, NEW", PATCH_STRING_OPTIONS, 3, cmd_patch},
+    {"gui", NULL, 0, 1, "FILE", GUI_OPTIONS, 2, cmd_gui},
+    {"engine", NULL, 1, 1, "PATH", NULL, 0, cmd_engine},
+    {"assets", "list", 1, 1, "PACK", GREP_OPTION, 1, cmd_assets},
+    {"assets", "extract", 2, 64, "PACK, FOLDER", NULL, 0, cmd_assets},
+    {"assets", "replace", 3, 3, "PACK, NAME, NEWFILE", ASSETS_OUTPUT, 1, cmd_assets},
+    {"assets", "add", 3, 3, "PACK, NAME, NEWFILE", ASSETS_OUTPUT, 1, cmd_assets},
 };
 
 /* Commands of the Python version that the native program does not have. */
-static const char *const PYTHON_ONLY[] = {"engine", "assets", "resources", "gui"};
+static const char *const PYTHON_ONLY[] = {"resources"};
 
 static const Command *find_command(const char *name, const char *action) {
     for (size_t i = 0; i < ARRAY_LEN(COMMANDS); i++) {
@@ -359,6 +565,27 @@ static const Command *find_command(const char *name, const char *action) {
             return c;
     }
     return NULL;
+}
+
+/* A command whose first word selects an ACTION (patch, assets). */
+static bool is_group_command(const char *name) {
+    for (size_t i = 0; i < ARRAY_LEN(COMMANDS); i++)
+        if (strcmp(COMMANDS[i].name, name) == 0 && COMMANDS[i].action != NULL)
+            return true;
+    return false;
+}
+
+/* The ", "-joined quoted list of a group command's actions, for usage errors. */
+static const char *group_choices(Session *s, const char *name) {
+    Buf b;
+    buf_init(&b, s->a);
+    bool first = true;
+    for (size_t i = 0; i < ARRAY_LEN(COMMANDS); i++)
+        if (strcmp(COMMANDS[i].name, name) == 0 && COMMANDS[i].action != NULL) {
+            buf_printf(&b, "%s'%s'", first ? "" : ", ", COMMANDS[i].action);
+            first = false;
+        }
+    return buf_str(&b).p;
 }
 
 /* --- argument parsing --------------------------------------------------------- */
@@ -474,7 +701,13 @@ found:
 static void parse_arguments(Session *s, int argc, char **argv, bool *want_help) {
     ArgCursor cur = {s, argc, argv, 1};
     bool options_ended = false;
-    const char *pending_patch = NULL;       /* "patch" seen, action still to come */
+    const char *pending_group = NULL;       /* "patch"/"assets" seen, action to come */
+    /* On Windows, a bare double-click (no arguments, the program owns its own
+     * console window) opens the graphical interface. */
+    if (argc < 2 && gui_started_from_desktop()) {
+        s->command = find_command("gui", NULL);
+        return;
+    }
     for (; cur.at < argc; cur.at++) {
         const char *arg = argv[cur.at];
         if (!options_ended && strcmp(arg, "--") == 0) {
@@ -487,9 +720,9 @@ static void parse_arguments(Session *s, int argc, char **argv, bool *want_help) 
                 return;
             continue;
         }
-        if (s->command == NULL && pending_patch == NULL) {
-            if (strcmp(arg, "patch") == 0) {
-                pending_patch = arg;
+        if (s->command == NULL && pending_group == NULL) {
+            if (is_group_command(arg)) {
+                pending_group = arg;
                 continue;
             }
             s->command = find_command(arg, NULL);
@@ -499,23 +732,29 @@ static void parse_arguments(Session *s, int argc, char **argv, bool *want_help) 
                 if (strcmp(PYTHON_ONLY[i], arg) == 0)
                     cli_usage_error(s, "the '%s' command is only available in the Python "
                                        "version of binspect", arg);
-            if (!platform_is_file(arg))
-                cli_usage_error(s, "argument COMMAND: invalid choice: '%s' (see binspect "
-                                   "--help)", arg);
-            /* Just a file, e.g. dropped onto the program: show the report. */
-            s->command = find_command("report", NULL);
+            if (gui_started_from_desktop() && gui_can_open(arg)) {
+                /* A file or folder dropped on the program's icon: open the
+                 * graphical interface on it. */
+                s->command = find_command("gui", NULL);
+            } else {
+                if (!platform_is_file(arg))
+                    cli_usage_error(s, "argument COMMAND: invalid choice: '%s' (see binspect "
+                                       "--help)", arg);
+                /* Just a file on the command line: show the report. */
+                s->command = find_command("report", NULL);
+            }
         } else if (s->command == NULL) {
-            s->command = find_command("patch", arg);
+            s->command = find_command(pending_group, arg);
             if (s->command == NULL)
-                cli_usage_error(s, "argument ACTION: invalid choice: '%s' (choose from "
-                                   "'bytes', 'nop', 'string')", arg);
+                cli_usage_error(s, "argument ACTION: invalid choice: '%s' (choose from %s)",
+                                arg, group_choices(s, pending_group));
             continue;
         }
         if (s->npositional >= (size_t)s->command->max_positional)
             cli_usage_error(s, "unrecognized arguments: %s", arg);
         s->positional[s->npositional++] = arg;
     }
-    if (pending_patch != NULL && s->command == NULL)
+    if (pending_group != NULL && s->command == NULL)
         cli_usage_error(s, "the following arguments are required: ACTION");
     if (s->command == NULL)
         cli_usage_error(s, "the following arguments are required: COMMAND");
@@ -564,7 +803,7 @@ int cli_main(int argc, char **argv) {
 
     /* Large outputs are written in big pieces, not line by line. */
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
-    if (argc < 2) {
+    if (argc < 2 && !gui_started_from_desktop()) {
         fputs(USAGE, stderr);
         fputs(HELP, stderr);
         fputs("\nbinspect: error: the following arguments are required: COMMAND\n", stderr);

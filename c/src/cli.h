@@ -33,7 +33,7 @@ struct Session {
     bool want_version;
     Style style;
     const Command *command;
-    const char *positional[4];
+    const char *positional[64];     /* PACK, FOLDER then entry names for `assets extract` */
     size_t npositional;
     const char *option_value[8];    /* parallel to command->options */
     bool option_seen[8];
