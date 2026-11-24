@@ -48,6 +48,7 @@ const state = {
   archivePath: null,
   modify: {},
   split: null,
+  decode: null,
 };
 
 // --- server calls -----------------------------------------------------------
@@ -153,6 +154,7 @@ const VIEWS = {
   bytes: { label: 'Bytes', render: renderBytes, kinds: ['binary'], icon: 'bytes' },
   assets: { label: 'Assets', render: renderAssets, kinds: ['binary', 'archive', 'folder'], icon: 'assets' },
   split: { label: 'Split', render: renderSplit, kinds: ['binary'], icon: 'split' },
+  decode: { label: 'Decode', render: renderDecode, kinds: ['binary'], icon: 'decode' },
   modify: { label: 'Modify', render: renderModify, kinds: ['binary'], icon: 'modify' },
 };
 
@@ -210,6 +212,7 @@ async function openPath(path) {
   state.archivePath = opened.kind === 'archive' ? opened.path : null;
   state.modify = {};
   state.split = null;
+  state.decode = null;
   const name = opened.path.split(/[\\/]/).filter(Boolean).pop() || opened.path;
   $('file-name').textContent = name;
   $('file-path').textContent = opened.path;
@@ -609,7 +612,8 @@ async function renderStrings(box) {
             ? h('button', { class: 'link', type: 'button', text: s.address, onclick: () => { state.bytes = { address: s.address }; show('bytes'); } })
             : h('span', { class: 'muted', text: 'file ' + hex(s.offset) })),
           h('td', { class: 'mono', text: s.section || '' }),
-          h('td', { class: 'mono wrap' }, s.text, s.encoding === 'utf16' ? h('span', { class: 'muted', text: '  (wide)' }) : null),
+          h('td', { class: 'mono wrap' }, s.text, s.encoding === 'utf16' ? h('span', { class: 'muted', text: '  (wide)' }) : null,
+            h('button', { class: 'link str-decode', type: 'button', text: 'Decode', title: 'Open this text in the Decode workbench', onclick: () => openInDecode({ kind: 'text', value: s.text }) })),
           h('td', {}, s.tags.map((t) => h('span', { class: `tag tag-${t}`, text: t }))),
           uses);
       }));
@@ -819,7 +823,8 @@ async function renderBytes(box) {
       where, h('label', { class: 'check' }, useOffset, 'This is a file offset'),
       h('button', { class: 'btn btn-primary', text: 'Go' }),
       h('button', { type: 'button', class: 'btn', text: 'Previous page', onclick: () => step(-PAGE) }),
-      h('button', { type: 'button', class: 'btn', text: 'Next page', onclick: () => step(PAGE) })),
+      h('button', { type: 'button', class: 'btn', text: 'Next page', onclick: () => step(PAGE) }),
+      h('button', { type: 'button', class: 'btn', text: 'Open in Decode', title: 'Decode this range in the Decode workbench', onclick: () => openInDecode({ kind: 'file', offset: state.bytes.offset || 0, length: PAGE }) })),
     h('div', { class: 'pane' }, view));
   await load();
 }
@@ -1200,6 +1205,388 @@ async function renderModify(box) {
       h('div', { class: 'card' }, h('h3', { text: 'Changes made this session' }), log)));
   if (!log.children.length) add(log, h('li', { class: 'muted', text: 'Nothing yet.' }));
   state.modify = {};
+}
+
+// --- decode -----------------------------------------------------------------
+
+// The source kinds the Input panel offers. The operation catalogue itself is
+// never hard-coded here: it is fetched from GET /api/decode/ops at runtime, so
+// the C edition can serve this same page and grey out what it does not build.
+const DECODE_SOURCE_KINDS = [
+  { id: 'text', label: 'Text', hint: 'Type or paste text; sent as UTF-8.' },
+  { id: 'hex', label: 'Hex', hint: 'Hex digits. Spaces, newlines, 0x, commas and colons are ignored.' },
+  { id: 'base64', label: 'Base64', hint: 'Standard alphabet; padding optional.' },
+  { id: 'file', label: 'From this file', hint: 'A byte range of the open program. Nothing is written.' },
+];
+// Which operation a solver's recovered params belong to, when the names differ.
+const DECODE_SOLVER_OP = { caesar: 'rot-n', 'xor-single': 'xor', 'xor-keylen': 'xor', substitution: 'substitution' };
+
+function decodeDefaultSource() {
+  return { kind: 'text', value: '', offset: 0, length: (state.info && state.info.size) || 0 };
+}
+
+// Open the workbench pre-filled from another view (Strings text, a Bytes range).
+function openInDecode(source) {
+  state.decode = { source: Object.assign(decodeDefaultSource(), source), recipe: [], hexdump: false };
+  show('decode');
+}
+
+function decodeInputSize(src) {
+  if (src.kind === 'file') return Math.max(0, Number(src.length) || 0);
+  const v = src.value || '';
+  if (src.kind === 'hex') return Math.floor(v.replace(/[^0-9a-fA-F]/g, '').length / 2);
+  if (src.kind === 'base64') return Math.floor(v.replace(/[^A-Za-z0-9+/_-]/g, '').length * 3 / 4);
+  return new TextEncoder().encode(v).length;
+}
+
+function decodeSourceBody(src) {
+  if (src.kind === 'file') {
+    return { kind: 'file', path: state.path, offset: Number(src.offset) || 0, length: Number(src.length) || 0 };
+  }
+  return { kind: src.kind, value: src.value || '' };
+}
+
+function decodeParseOffset(text) {
+  text = (text || '').trim();
+  if (/^0x[0-9a-fA-F]+$/.test(text)) return parseInt(text, 16);
+  if (/^\d+$/.test(text)) return Number(text);
+  return 0;
+}
+
+function decodeHexdump(hexStr, capBytes) {
+  const bytes = [];
+  for (let i = 0; i + 1 < hexStr.length && bytes.length < capBytes; i += 2) bytes.push(parseInt(hexStr.slice(i, i + 2), 16));
+  const lines = [];
+  for (let i = 0; i < bytes.length; i += 16) {
+    const chunk = bytes.slice(i, i + 16);
+    lines.push(i.toString(16).padStart(8, '0') + '  ' +
+      chunk.map((c) => c.toString(16).padStart(2, '0')).join(' ').padEnd(47) + '  ' +
+      chunk.map((c) => (c >= 32 && c < 127 ? String.fromCharCode(c) : '.')).join(''));
+  }
+  return lines.join('\n');
+}
+
+async function renderDecode(box) {
+  if (!state.decode) state.decode = { source: decodeDefaultSource(), recipe: [], hexdump: false };
+  const D = state.decode;
+  if (D.source.kind === 'file' && !D.source.length) D.source.length = (state.info && state.info.size) || 0;
+
+  // The catalogue, fetched at runtime, and a name -> op index built from it.
+  let catalogue = { groups: [], solvers: [] };
+  const opIndex = {};
+
+  const segGroup = h('div', { class: 'seg-group' });
+  const sourceHint = h('p', { class: 'pane-note decode-hint' });
+  const sourceFields = h('div', { class: 'decode-source-fields' });
+  const sizeReadout = h('span', { class: 'count' });
+
+  const paletteBox = h('div', { class: 'palette' }, busy('Loading operations…'));
+  const recipeList = h('div', { class: 'recipe-list' });
+  const recipeClear = h('button', { type: 'button', class: 'btn btn-small', text: 'Clear', disabled: true,
+    onclick: () => { D.recipe = []; renderRecipe(); runDecode(); } });
+
+  const outMeta = h('div', { class: 'decode-out-meta' });
+  const outError = h('div');
+  const outBody = h('div', { class: 'decode-out-body' });
+  const outSteps = h('div', { class: 'decode-steps' });
+  const hexToggle = h('input', { type: 'checkbox', checked: D.hexdump,
+    onchange: (e) => { D.hexdump = e.target.checked; showResult(); } });
+  const solveBox = h('div', { class: 'solve' });
+
+  let stepNodes = [];
+  let lastResult = null;
+  const schedule = debounce(runDecode, 260);
+
+  function opParams(name) { const op = opIndex[name]; return (op && op.params) || []; }
+
+  function paramsOut(step) {
+    const types = {};
+    for (const p of opParams(step.op)) types[p.name] = p.type;
+    const out = {};
+    for (const [k, v] of Object.entries(step.params || {})) {
+      if (v === '' || v === null || v === undefined) continue;
+      out[k] = types[k] === 'number' ? Number(v) : v;
+    }
+    return out;
+  }
+
+  function recipeBody() { return D.recipe.map((s) => ({ op: s.op, params: paramsOut(s) })); }
+
+  async function runDecode() {
+    const serial = ++runDecode.serial;
+    let res;
+    try {
+      res = await api('decode', {}, { method: 'POST', body: JSON.stringify({ source: decodeSourceBody(D.source), recipe: recipeBody() }) });
+    } catch (error) {
+      if (serial !== runDecode.serial) return;
+      lastResult = null;
+      fill(outMeta);
+      fill(outBody);
+      fill(outSteps);
+      fill(outError, h('p', { class: 'notice is-error', text: error.message }));
+      return;
+    }
+    if (serial !== runDecode.serial) return;
+    lastResult = res;
+    showResult();
+  }
+  runDecode.serial = 0;
+
+  function showResult() {
+    for (const n of stepNodes) n.classList.remove('is-failed');
+    fill(outError);
+    const r = lastResult;
+    if (!r) {
+      fill(outMeta);
+      fill(outBody, h('p', { class: 'pane-note', text: 'Choose a source and add operations to see the result here.' }));
+      fill(outSteps);
+      return;
+    }
+    const failedAt = r.ok ? -1 : (r.steps || []).length;
+    fill(outMeta,
+      h('span', { class: 'count', text: `${r.size} ${r.size === 1 ? 'byte' : 'bytes'} out` }),
+      r.looks_like ? h('span', { class: 'count', text: 'looks like ' + r.looks_like }) : null,
+      h('label', { class: 'check' }, hexToggle, 'Hex dump'));
+
+    if (D.hexdump) {
+      const hexStr = r.hex || '';
+      const cap = 8192;
+      fill(outBody, h('pre', { class: 'decode-pre mono', text: decodeHexdump(hexStr, cap) || '(no bytes)' }),
+        hexStr.length / 2 > cap ? h('p', { class: 'pane-note', text: `Showing the first ${cap} of ${r.size} bytes.` }) : null);
+    } else {
+      const text = r.text || '';
+      const cap = 200000;
+      fill(outBody, h('pre', { class: 'decode-pre', text: text.slice(0, cap) || '(empty)' }),
+        text.length > cap ? h('p', { class: 'pane-note', text: `Showing the first ${cap} characters.` }) : null);
+    }
+
+    fill(outSteps);
+    if (D.recipe.length) {
+      add(outSteps, h('ol', { class: 'decode-steplist' }, D.recipe.map((s, i) => {
+        const done = r.steps && r.steps[i];
+        const failed = i === failedAt;
+        const note = failed ? 'failed' : done ? bytesText(done.size) : '—';
+        return h('li', { class: failed ? 'is-failed' : null },
+          h('span', { class: 'decode-step-i', text: String(i + 1) }),
+          h('span', { class: 'decode-step-op', text: s.op }),
+          h('span', { class: 'decode-step-sz mono', text: note }));
+      })));
+    }
+
+    if (!r.ok) {
+      if (stepNodes[failedAt]) stepNodes[failedAt].classList.add('is-failed');
+      const name = D.recipe[failedAt] ? D.recipe[failedAt].op : null;
+      fill(outError, h('p', { class: 'notice is-error' },
+        name ? h('strong', { text: `Step ${failedAt + 1} (${name}) failed. ` }) : h('strong', { text: 'This recipe failed. ' }),
+        r.error || 'Check the source and the operation parameters.'));
+    }
+  }
+
+  function paramField(step, p) {
+    const key = p.name;
+    if (step.params[key] === undefined) step.params[key] = (p.default !== undefined && p.default !== null) ? String(p.default) : '';
+    const choices = p.choices || (p.type === 'select' ? [] : null);
+    let input;
+    if (choices) {
+      input = h('select', { onchange: (e) => { step.params[key] = e.target.value; schedule(); } },
+        choices.map((c) => h('option', { value: String(c), text: String(c), selected: String(step.params[key]) === String(c) })));
+    } else if (p.type === 'number') {
+      input = h('input', { type: 'number', value: step.params[key], oninput: (e) => { step.params[key] = e.target.value; schedule(); } });
+    } else {
+      input = h('input', { type: 'text', class: 'mono-input', value: step.params[key], placeholder: p.type || 'text', spellcheck: false,
+        oninput: (e) => { step.params[key] = e.target.value; schedule(); } });
+    }
+    return h('label', { class: 'field decode-param' },
+      h('span', {}, p.name, p.required ? h('span', { class: 'req', text: ' *' }) : null), input);
+  }
+
+  function renderRecipe() {
+    stepNodes = [];
+    recipeClear.disabled = !D.recipe.length;
+    fill(recipeList);
+    if (!D.recipe.length) {
+      add(recipeList, h('p', { class: 'pane-note', text: 'No operations yet. Pick one from the list above to start a recipe.' }));
+      return;
+    }
+    D.recipe.forEach((step, i) => {
+      const op = opIndex[step.op];
+      const params = (op && op.params) || [];
+      const node = h('div', { class: 'recipe-step' },
+        h('div', { class: 'recipe-step-head' },
+          h('span', { class: 'recipe-step-n', text: String(i + 1) }),
+          h('span', { class: 'recipe-step-name', text: step.op }),
+          h('div', { class: 'recipe-step-ctl' },
+            h('button', { type: 'button', class: 'btn btn-small', text: 'Up', 'aria-label': `Move ${step.op} up`, disabled: i === 0, onclick: () => moveStep(i, -1) }),
+            h('button', { type: 'button', class: 'btn btn-small', text: 'Down', 'aria-label': `Move ${step.op} down`, disabled: i === D.recipe.length - 1, onclick: () => moveStep(i, 1) }),
+            h('button', { type: 'button', class: 'btn btn-small', text: 'Remove', 'aria-label': `Remove ${step.op}`, onclick: () => removeStep(i) }))),
+        op && op.summary ? h('p', { class: 'recipe-step-sum', text: op.summary }) : null,
+        params.length ? h('div', { class: 'recipe-params form-grid' }, params.map((p) => paramField(step, p))) : null);
+      stepNodes.push(node);
+      add(recipeList, node);
+    });
+  }
+
+  function addStep(op) {
+    const params = {};
+    for (const p of op.params || []) params[p.name] = (p.default !== undefined && p.default !== null) ? String(p.default) : '';
+    D.recipe.push({ op: op.name, params });
+    renderRecipe();
+    runDecode();
+  }
+  function moveStep(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= D.recipe.length) return;
+    const t = D.recipe[i]; D.recipe[i] = D.recipe[j]; D.recipe[j] = t;
+    renderRecipe();
+    runDecode();
+  }
+  function removeStep(i) { D.recipe.splice(i, 1); renderRecipe(); runDecode(); }
+
+  function renderPalette() {
+    fill(paletteBox);
+    if (!(catalogue.groups || []).length) {
+      add(paletteBox, h('p', { class: 'pane-note', text: 'No operations available.' }));
+      return;
+    }
+    for (const group of catalogue.groups) {
+      add(paletteBox, h('div', { class: 'palette-group' },
+        h('h4', { class: 'palette-group-title', text: group.name }),
+        h('div', { class: 'palette-chips' }, (group.ops || []).map((op) => {
+          const unavailable = op.available === false;
+          return h('button', {
+            type: 'button', class: 'op-chip' + (unavailable ? ' is-unavailable' : ''),
+            disabled: unavailable, 'aria-disabled': unavailable ? 'true' : null,
+            title: (op.summary || op.name) + (unavailable ? ' — not available in this build' : ''),
+            onclick: unavailable ? null : () => addStep(op),
+          }, h('span', { class: 'op-chip-name', text: op.name }), unavailable ? h('span', { class: 'op-chip-na', text: 'n/a' }) : null);
+        }))));
+    }
+  }
+
+  function loadCandidate(solver, candidate) {
+    const opName = DECODE_SOLVER_OP[solver] || solver;
+    const op = opIndex[opName];
+    const params = {};
+    if (op) for (const p of op.params || []) params[p.name] = (p.default !== undefined && p.default !== null) ? String(p.default) : '';
+    for (const [k, v] of Object.entries(candidate.params || {})) params[k] = String(v);
+    D.recipe.push({ op: opName, params });
+    renderRecipe();
+    runDecode();
+    toast(`Loaded ${opName} from the ${solver} solver into the recipe.`);
+  }
+
+  function showCandidates(target, solver, candidates) {
+    if (!candidates.length) { fill(target, h('p', { class: 'pane-note', text: 'No candidates found.' })); return; }
+    fill(target, h('ol', { class: 'candidate-list' }, candidates.map((c) => {
+      const pct = Math.round((Number(c.score) || 0) * 100);
+      const paramStr = Object.entries(c.params || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+      return h('li', { class: 'candidate' },
+        h('div', { class: 'candidate-head' },
+          h('span', { class: 'candidate-score', text: pct + '%' }),
+          h('span', { class: 'candidate-params mono', text: paramStr || '(no params)' }),
+          h('button', { type: 'button', class: 'btn btn-small', text: 'Load into recipe', onclick: () => loadCandidate(solver, c) })),
+        h('pre', { class: 'candidate-text', text: (c.text || '').slice(0, 160) }));
+    })));
+  }
+
+  function renderSolve() {
+    fill(solveBox);
+    const solvers = catalogue.solvers || [];
+    if (!solvers.length) { add(solveBox, h('p', { class: 'pane-note', text: 'No auto-solvers in this build.' })); return; }
+    const select = h('select', {}, solvers.map((s) => h('option', { value: s.name, text: s.name, title: s.summary || '' })));
+    const results = h('div', { class: 'candidates' });
+    const run = h('button', { type: 'button', class: 'btn btn-small btn-primary', text: 'Find candidates', onclick: async () => {
+      run.disabled = true;
+      fill(results, busy('Searching the supplied data…'));
+      try {
+        const res = await api('decode/solve', {}, { method: 'POST', body: JSON.stringify({ source: decodeSourceBody(D.source), name: select.value }) });
+        if (!res.ok) fill(results, h('p', { class: 'notice is-error', text: res.error || 'The solver failed.' }));
+        else showCandidates(results, select.value, res.candidates || []);
+      } catch (error) { fill(results, h('p', { class: 'notice is-error', text: error.message })); }
+      run.disabled = false;
+    } });
+    add(solveBox,
+      h('p', { class: 'pane-note', text: 'Searches keys for the current source and ranks the readable results. vex only searches data you supply; it never targets a protection.' }),
+      h('div', { class: 'toolbar decode-solve-bar' }, h('label', { class: 'field decode-param' }, h('span', { text: 'Solver' }), select), run),
+      results);
+  }
+
+  function updateSize() {
+    const n = decodeInputSize(D.source);
+    sizeReadout.textContent = `${n} ${n === 1 ? 'byte' : 'bytes'} in`;
+  }
+
+  function renderSource() {
+    fill(segGroup, ...DECODE_SOURCE_KINDS.map((k) => h('button', {
+      type: 'button', class: 'seg-btn', 'aria-pressed': D.source.kind === k.id ? 'true' : 'false',
+      onclick: () => { if (D.source.kind === k.id) return; D.source.kind = k.id; renderSource(); runDecode(); },
+    }, k.label)));
+    const def = DECODE_SOURCE_KINDS.find((k) => k.id === D.source.kind) || DECODE_SOURCE_KINDS[0];
+    sourceHint.textContent = def.hint;
+    fill(sourceFields);
+    if (D.source.kind === 'file') {
+      const offset = h('input', { type: 'text', class: 'mono-input', value: hex(Number(D.source.offset) || 0),
+        oninput: (e) => { D.source.offset = decodeParseOffset(e.target.value); updateSize(); schedule(); } });
+      const length = h('input', { type: 'number', min: 0, value: Number(D.source.length) || 0,
+        oninput: (e) => { D.source.length = Math.max(0, Number(e.target.value) || 0); updateSize(); schedule(); } });
+      add(sourceFields, h('div', { class: 'form-grid' },
+        h('label', { class: 'field decode-param' }, h('span', { text: 'File' }), h('input', { type: 'text', class: 'mono-input', value: (state.info && state.info.name) || state.path || '', disabled: true })),
+        h('label', { class: 'field decode-param' }, h('span', { text: 'Offset' }), offset),
+        h('label', { class: 'field decode-param' }, h('span', { text: 'Length (bytes)' }), length)));
+    } else {
+      add(sourceFields, h('textarea', {
+        class: 'decode-input' + (D.source.kind === 'text' ? '' : ' mono-input'), rows: 5, spellcheck: false,
+        placeholder: def.hint, value: D.source.value || '',
+        oninput: (e) => { D.source.value = e.target.value; updateSize(); schedule(); },
+      }));
+    }
+    updateSize();
+  }
+
+  add(box,
+    h('div', { class: 'view-head' },
+      h('h2', { text: 'Decode' }),
+      h('p', { text: 'A workbench for turning data you already have into something readable — decode and decompress it, or decrypt it with a key you supply, one step at a time. The program is never changed and nothing is run.' })),
+    h('section', { class: 'card decode-input-card' },
+      h('div', { class: 'decode-card-head' }, h('h3', { text: 'Input' }), sizeReadout),
+      h('div', { class: 'seg' }, segGroup),
+      sourceHint,
+      sourceFields),
+    h('div', { class: 'decode-grid' },
+      h('div', { class: 'stack' },
+        h('section', { class: 'card decode-ops-card' },
+          h('div', { class: 'decode-card-head' }, h('h3', { text: 'Operations' })),
+          paletteBox),
+        h('section', { class: 'card decode-recipe-card' },
+          h('div', { class: 'decode-card-head' }, h('h3', { text: 'Recipe' }), recipeClear),
+          recipeList)),
+      h('div', { class: 'stack' },
+        h('section', { class: 'card decode-output-card' },
+          h('div', { class: 'decode-card-head' }, h('h3', { text: 'Output' }), outMeta),
+          outError, outBody, outSteps),
+        h('section', { class: 'card decode-solve-card' },
+          h('div', { class: 'decode-card-head' }, h('h3', { text: 'Auto-solve' })),
+          solveBox))));
+
+  renderSource();
+  renderRecipe();
+  showResult();
+
+  // Build the palette and solvers from the catalogue — never from a hard-coded
+  // list — so the C edition's catalogue (with available:false on what it lacks)
+  // renders and greys out correctly here.
+  api('decode/ops', {}).then((cat) => {
+    catalogue = cat || { groups: [], solvers: [] };
+    for (const group of catalogue.groups || []) for (const op of group.ops || []) opIndex[op.name] = op;
+    renderPalette();
+    renderSolve();
+    renderRecipe();
+    runDecode();
+  }).catch((error) => {
+    fill(paletteBox, h('p', { class: 'notice is-error', text: error.message }));
+    fill(solveBox, h('p', { class: 'pane-note', text: 'Auto-solvers are unavailable.' }));
+    runDecode();
+  });
 }
 
 // --- start ------------------------------------------------------------------
