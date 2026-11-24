@@ -172,14 +172,17 @@ def test_numbering_counts_padding_regions_too():
 
 
 def test_zero_padding_is_not_saved_but_other_padding_is(tmp_path):
-    data = bytearray(fixture_bytes("hello_pe64.exe"))
-    assert not any(data[2803:])                 # the fixture's tail is all zero
+    data = bytearray(fixture_bytes("hello_elf64"))
+    assert not any(data[1880:4096]) and not any(data[4805:8192])    # two runs of zeros
     data[2900] = 0x41
-    result = split.split(vex.load_bytes(bytes(data), "x.exe"), str(tmp_path / "out"))
-    last = result["pieces"][5]
-    assert (last["path"], last["kind"], last["note"]) == \
-        ("parts/05_padding.bin", "padding", "")
-    assert (tmp_path / "out" / "parts" / "05_padding.bin").read_bytes() == bytes(data[2803:])
+    result = split.split(vex.load_bytes(bytes(data), "x"), str(tmp_path / "out"))
+    changed, untouched = result["pieces"][17], result["pieces"][26]
+    assert changed == {"path": "parts/17_padding.bin", "kind": "padding", "name": "padding",
+                       "offset": 1880, "size": 2216, "address": None, "note": ""}
+    assert (tmp_path / "out" / "parts" / "17_padding.bin").read_bytes() == data[1880:4096]
+    assert untouched == {"path": None, "kind": "padding", "name": "padding", "offset": 4805,
+                         "size": 3387, "address": None, "note": "zero padding, not saved"}
+    assert not [n for n in os.listdir(tmp_path / "out" / "parts") if n.startswith("26_")]
 
 
 def test_overlay_is_saved(tmp_path):
@@ -532,16 +535,16 @@ def test_index_aligns_each_group_on_its_own(tmp_path):
     split.split(vex.load(fixture_path("resdemo.exe")), str(with_resources))
     rows = (with_resources / "index.txt").read_text().splitlines()
     assert rows[1] == "0x00000000  1024  headers  parts/00_headers.bin       headers"
-    assert "0x00000d90    24  resource  resources/RCDATA_SETTINGS_1033.bin  " \
+    assert "0x00000d90   24  resource  resources/RCDATA_SETTINGS_1033.bin  " \
            "RCDATA SETTINGS  language 1033" in rows
 
 
 def test_index_stays_one_row_per_piece_whatever_the_names_contain(tmp_path):
-    data = fixture_bytes("hello_pe64.exe").replace(b".rdata\0\0", b"a\nb\x1b[1m\0\0")
+    data = fixture_bytes("hello_pe64.exe").replace(b".rdata\0\0", b"a\nb\x1b[1m\0")
     split.split(vex.load_bytes(data, "x.exe"), str(tmp_path / "out"))
     text = (tmp_path / "out" / "index.txt").read_bytes()
     assert text.count(b"\n") == 7 and b"\x1b" not in text
-    assert b"parts/02_a_b__1m.bin        a?b?[1m\n" in text
+    assert b"parts/02_a_b__1m.bin       a?b?[1m\n" in text
 
 
 # --- command line ----------------------------------------------------------------
@@ -853,7 +856,7 @@ def pe_trap(count: int, sections: int = 96) -> bytes:
     out = bytearray()
     for i in range(count):
         out += b"MZ" + bytes(58) + struct.pack("<I", stubs - i * 64)
-    out += b"PE\0\0" + struct.pack("<HHIIIHH", 0x8664, sections, 0, 0, 0, 0, 0)
+    out += b"PE\0\0" + struct.pack("<HHIIIHH", 0x8664, sections, 0, 0, 0, 64, 0)
     out += bytes(64)
     table = bytearray(40 * sections)
     for i in range(sections):
@@ -960,7 +963,7 @@ BIG = {
     "4 MB of zip local headers": lambda: b"PK\x03\x04" * (1 << 20),
     "4 MB of MZ": lambda: b"MZ" * (2 << 20),
     "4 MB of every signature": lambda: (
-        b"MZ\x7fELFRIFFPK\x03\x04GIF89a" + PNG_SIG + b"PK\x05\x06PE\0\0") * (4 << 20 // 36),
+        b"MZ\x7fELFRIFFPK\x03\x04GIF89a" + PNG_SIG + b"PK\x05\x06PE\0\0") * ((4 << 20) // 36),
     "4 MB of zip records that do not match": lambda: zip_trap((4 << 20) // 26),
     "2 MB png chain": lambda: png_trap((2 << 20) // 53, False),
     "2 MB gif chain": lambda: gif_trap((2 << 20) // 20, False, False),

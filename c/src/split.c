@@ -79,7 +79,7 @@ typedef struct {
     bool zip_ready;
     ZipEnd *zip_ends;               /* sorted by start, then by eocd */
     size_t nzip_ends;
-    Memo png, gif;
+    Memo png, gif, elf;
     VEC(uint64_t) marks;            /* of the walk in progress */
     VEC(uint64_t) mark_images;      /* GIF: images seen before each mark */
 } Carver;
@@ -330,94 +330,133 @@ static uint64_t pe_length(const Carver *c, uint64_t o, const char **ext) {
     if (left < 0x40 || d[o] != 'M' || d[o + 1] != 'Z')
         return 0;
     uint64_t pe = le32(d + o + 0x3C);
-    /* signature (4) and COFF header (20) */
-    if (pe > left || left - pe < 24)
+    /* signature (4), COFF header (20) and the optional header up to and
+     * including SizeOfHeaders, which is at offset 60 for PE32 and PE32+ */
+    if (pe > left || left - pe < 88)
         return 0;
     const uint8_t *h = d + o + pe;
     if (memcmp(h, "PE\0\0", 4) != 0)
         return 0;
-    unsigned sections = le16(h + 6);
-    if (sections < 1 || sections > 96)
+    uint64_t sections = le16(h + 6);
+    uint64_t table = pe + 24 + le16(h + 20);
+    if (sections < 1 || sections > 96 || table > left || left - table < sections * 40)
         return 0;
-    uint64_t optional_size = le16(h + 20);
-    unsigned characteristics = le16(h + 22);
-    uint64_t optional = pe + 24;
-    /* SizeOfHeaders is at offset 60 of the optional header (PE32 and PE32+). */
-    if (optional_size < 64 || left - optional < optional_size)
-        return 0;
-    uint64_t length = le32(d + o + optional + 60);
-    uint64_t table = optional + optional_size;
-    if (left - table < (uint64_t)sections * 40)
-        return 0;
-    for (unsigned i = 0; i < sections; i++) {
-        const uint8_t *s = d + o + table + (uint64_t)i * 40;
-        uint64_t raw_size = le32(s + 16), raw_pointer = le32(s + 20);
-        if (raw_pointer + raw_size > length)
-            length = raw_pointer + raw_size;
+    uint64_t length = le32(h + 24 + 60);
+    for (uint64_t i = 0; i < sections; i++) {
+        const uint8_t *s = d + o + table + i * 40;
+        uint64_t end = (uint64_t)le32(s + 16) + le32(s + 20);   /* raw size + raw pointer */
+        if (end > length)
+            length = end;
     }
     if (length < 512 || length > left)
         return 0;
-    *ext = characteristics & 0x2000 ? "dll" : "exe";
+    *ext = le16(h + 22) & 0x2000 ? "dll" : "exe";
     return length;
 }
 
-static uint64_t elf_length(const Carver *c, uint64_t o) {
-    const uint8_t *d = c->data;
+/* --- ELF tables -------------------------------------------------------------------
+ * An ELF's length needs the largest offset + size over its program and
+ * section headers, up to 65535 of each. Many ELF headers can point into one
+ * shared table, so the largest value of every aligned run of ELF_RUN entries
+ * is kept once it has been worked out; a header then costs a few hundred
+ * steps however long its tables are. */
+
+enum { ELF_RUN = 256 };
+
+typedef struct {
+    bool sections;                  /* section headers, else program headers */
+    bool wide, little;
+    uint64_t entry;                 /* bytes per table entry */
+} ElfTable;
+
+/* Where the bytes of one table entry end in the file: offset + size, or 0
+ * for a section that has none (SHT_NOBITS). Sums that do not fit in 64 bits
+ * come back as the largest value: either way, past the end of any file. */
+static uint64_t elf_entry_end(const uint8_t *p, const ElfTable *t) {
+    uint64_t offset, size;
+    if (t->sections) {
+        if (elf_field(p + 4, 4, t->little) == 8)
+            return 0;
+        offset = t->wide ? elf_field(p + 24, 8, t->little) : elf_field(p + 16, 4, t->little);
+        size = t->wide ? elf_field(p + 32, 8, t->little) : elf_field(p + 20, 4, t->little);
+    } else {
+        offset = t->wide ? elf_field(p + 8, 8, t->little) : elf_field(p + 4, 4, t->little);
+        size = t->wide ? elf_field(p + 32, 8, t->little) : elf_field(p + 16, 4, t->little);
+    }
+    return offset > UINT64_MAX - size ? UINT64_MAX : offset + size;
+}
+
+/* The largest entry end of the `count` entries that start at file offset
+ * `start` (all inside the file), or any value above `limit` as soon as one
+ * entry is found to exceed it. */
+static uint64_t elf_table_max(Carver *c, uint64_t start, uint64_t count, const ElfTable *t,
+                              uint64_t limit) {
+    /* Entries are numbered along the file: number g is at shift + g * entry. */
+    uint64_t shift = start % t->entry, first = start / t->entry;
+    uint64_t group = (uint64_t)t->sections | (uint64_t)t->wide << 1 | (uint64_t)t->little << 2 |
+                     shift << 3;                    /* shift < 64: nine bits in all */
+    uint64_t most = 0;
+    for (uint64_t g = first; g < first + count && most <= limit;) {
+        uint64_t value;
+        if (g % ELF_RUN == 0 && first + count - g >= ELF_RUN) {
+            uint64_t key = (g / ELF_RUN) << 9 | group;
+            if (!memo_get(&c->elf, key, &value)) {
+                value = 0;
+                for (uint64_t i = 0; i < ELF_RUN; i++) {
+                    uint64_t end = elf_entry_end(c->data + shift + (g + i) * t->entry, t);
+                    if (end > value)
+                        value = end;
+                }
+                memo_put(c->arena, &c->elf, key, value);
+            }
+            g += ELF_RUN;
+        } else {
+            value = elf_entry_end(c->data + shift + g * t->entry, t);
+            g++;
+        }
+        if (value > most)
+            most = value;
+    }
+    return most;
+}
+
+static uint64_t elf_length(Carver *c, uint64_t o) {
+    const uint8_t *h = c->data + o;
     uint64_t left = c->size - o;
-    if (left < 52 || memcmp(d + o, "\x7f" "ELF", 4) != 0)
+    if (left < 7 || memcmp(h, "\x7f" "ELF", 4) != 0)
         return 0;
-    unsigned class = d[o + 4], order = d[o + 5], version = d[o + 6];
-    if ((class != 1 && class != 2) || (order != 1 && order != 2) || version != 1)
+    if ((h[4] != 1 && h[4] != 2) || (h[5] != 1 && h[5] != 2) || h[6] != 1)
         return 0;
-    bool wide = class == 2, little = order == 1;
-    if (wide && left < 64)
+    bool wide = h[4] == 2, little = h[5] == 1;
+    if (left < (wide ? 64u : 52u))
         return 0;
-    const uint8_t *h = d + o;
     uint64_t phoff = wide ? elf_field(h + 32, 8, little) : elf_field(h + 28, 4, little);
     uint64_t shoff = wide ? elf_field(h + 40, 8, little) : elf_field(h + 32, 4, little);
     const uint8_t *counts = h + (wide ? 54 : 42);
     uint64_t phentsize = elf_field(counts, 2, little), phnum = elf_field(counts + 2, 2, little);
     uint64_t shentsize = elf_field(counts + 4, 2, little), shnum = elf_field(counts + 6, 2, little);
-    uint64_t ph_need = wide ? 56 : 32, sh_need = wide ? 64 : 40;
-    big length = wide ? 64 : 52;
-
-    if (phnum) {
-        big table_end = (big)phoff + (big)phnum * phentsize;
-        if (phentsize < ph_need || table_end > (big)left)
-            return 0;
-        if (table_end > length)
-            length = table_end;
-        for (uint64_t i = 0; i < phnum; i++) {
-            const uint8_t *p = h + phoff + i * phentsize;
-            big end = wide ? (big)elf_field(p + 8, 8, little) + elf_field(p + 32, 8, little)
-                           : (big)elf_field(p + 4, 4, little) + elf_field(p + 16, 4, little);
-            if (end > (big)left)
-                return 0;
-            if (end > length)
-                length = end;
-        }
-    }
-    if (shnum) {
-        big table_end = (big)shoff + (big)shnum * shentsize;
-        if (shentsize < sh_need || table_end > (big)left)
-            return 0;
-        if (table_end > length)
-            length = table_end;
-        for (uint64_t i = 0; i < shnum; i++) {
-            const uint8_t *s = h + shoff + i * shentsize;
-            if (elf_field(s + 4, 4, little) == 8)       /* SHT_NOBITS: no bytes in the file */
-                continue;
-            big end = wide ? (big)elf_field(s + 24, 8, little) + elf_field(s + 32, 8, little)
-                           : (big)elf_field(s + 16, 4, little) + elf_field(s + 20, 4, little);
-            if (end > (big)left)
-                return 0;
-            if (end > length)
-                length = end;
-        }
-    }
-    if (length < 84 || length > (big)left)
+    ElfTable segments = {false, wide, little, wide ? 56 : 32};
+    ElfTable sections = {true, wide, little, wide ? 64 : 40};
+    if ((phnum && phentsize != segments.entry) || (shnum && shentsize != sections.entry))
         return 0;
-    return (uint64_t)length;
+    /* Where the two tables end (a table with no entries still "ends" at its
+     * offset). Both must be inside the file before an entry is read. */
+    big ph_end = (big)phoff + (big)phnum * phentsize, sh_end = (big)shoff + (big)shnum * shentsize;
+    big tables = ph_end > sh_end ? ph_end : sh_end;
+    if (tables > (big)left)
+        return 0;
+    uint64_t length = (uint64_t)tables, most;
+    most = elf_table_max(c, o + phoff, phnum, &segments, left);
+    if (most > length)
+        length = most;
+    if (length <= left) {
+        most = elf_table_max(c, o + shoff, shnum, &sections, left);
+        if (most > length)
+            length = most;
+    }
+    if (length < 84 || length > left)
+        return 0;
+    return length;
 }
 
 /* The complete file starting at offset o, if any: its length and extension. */

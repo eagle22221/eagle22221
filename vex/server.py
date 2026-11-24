@@ -423,6 +423,24 @@ def _api_patch_string(ws, p, body):
     return {"out": out, "patches": [views.patch_result(out, r) for r in results]}
 
 
+def _split_plan(ws, p):
+    from . import split
+    path = p.need("path")
+    binary = ws.binary(path)
+    return split, binary, ws.memo(path, "split", lambda: split.plan(binary))
+
+
+def _api_split_preview(ws, p, body):
+    split, binary, pieces = _split_plan(ws, p)
+    return split.preview(binary, pieces)
+
+
+def _api_split(ws, p, body):
+    dest = p.need("dest")
+    split, binary, pieces = _split_plan(ws, p)
+    return split.split(binary, dest, pieces)
+
+
 GET_ROUTES: Dict[str, Callable] = {
     "info": _api_info, "layout": _api_layout, "sections": _api_sections,
     "segments": _api_segments, "imports": _api_imports, "exports": _api_exports,
@@ -432,12 +450,13 @@ GET_ROUTES: Dict[str, Callable] = {
     "engine": _api_engine, "archive/list": _api_archive_list,
     "archive/file": _api_archive_file, "resources": _api_resources,
     "resource/data": _api_resource_data, "resource/icon": _api_resource_icon,
+    "split": _api_split_preview,
 }
 POST_ROUTES: Dict[str, Callable] = {
     "upload": _api_upload, "archive/extract": _api_archive_extract,
     "archive/replace": _api_archive_replace, "resource/replace": _api_resource_replace,
     "patch/bytes": _api_patch_bytes, "patch/nop": _api_patch_nop,
-    "patch/string": _api_patch_string,
+    "patch/string": _api_patch_string, "split": _api_split,
 }
 
 

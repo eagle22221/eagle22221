@@ -356,6 +356,12 @@ def _render_resources(d: dict, st: Style) -> List[str]:
     return out
 
 
+def _render_split(d: dict, st: Style) -> List[str]:
+    return _table(["Offset", "Size", "Kind", "File", "Name", "Note"],
+                  [(f"{p['offset']:#x}", p["size"], p["kind"], p["path"] or "-", p["name"],
+                    p["note"]) for p in d["pieces"]], st, right=(0, 1))
+
+
 def _render_done(d: dict, st: Style) -> List[str]:
     out = [f"{p['address'] or 'file offset ' + format(p['offset'], '#x')}: "
            f"{p['old']} -> {p['new']}" for p in d.get("patches", [])]
@@ -416,6 +422,13 @@ def _cmd_resources(args, st):
                                          _read_file(args.newfile))
     return {"out": os.path.abspath(args.output), "size": updated.size,
             "message": f"Replaced {args.type} {args.name}; saved {args.output}"}, _render_done
+
+
+def _cmd_split(args, st):
+    from . import split
+    result = split.split(load(args.file), args.dest)
+    summary = f"Saved {result['count']} files to {args.dest}"
+    return result, lambda d, st: _render_split(d, st) + [st(summary, "green", "bold")]
 
 
 def _cmd_patch(args, st):
@@ -581,6 +594,9 @@ def build_parser() -> argparse.ArgumentParser:
         "protection and evasion techniques: packing, anti-debug, anti-VM, "
         "injection, hooking, drivers")
     add("report", _cmd_report, "everything at a glance")
+    sp = add("split", _cmd_split, "save the parts of a program as separate files: its "
+             "sections, files embedded in it and its resources")
+    sp.add_argument("dest", metavar="FOLDER", help="new or empty folder to save into")
     _add_modding(sub)
     return p
 
