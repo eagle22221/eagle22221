@@ -686,3 +686,44 @@ def test_api_solve(client):
         "source": {"kind": "hex", "value": cipher.hex()}, "name": "xor-single"})
     assert status == 200 and data["ok"]
     assert data["candidates"][0]["params"]["key"] == "2a"
+
+
+# --- ranking quality and exit codes ----------------------------------------
+
+PANGRAM = (b"The quick brown fox jumps over the lazy dog and keeps running "
+           b"through the quiet forest")
+
+
+@pytest.mark.parametrize("key", [0x5A, 0x13, 0xA7, 0x20, 0x41])
+def test_xor_single_ranks_the_true_key_first_even_on_a_pangram(key):
+    # A near-miss key turns every space into punctuation; a ranking that
+    # ignores spaces prefers it on text that is rich in rare letters.
+    out = decode.solve("xor-single", lambda: bytes(c ^ key for c in PANGRAM))
+    assert out["candidates"][0]["params"] == {"key": format(key, "02x")}
+
+
+@pytest.mark.parametrize("plain", [b"Hello World", b"the password is swordfish",
+                                   b"Meet me at the old bridge at nine tonight."])
+def test_caesar_ranks_the_true_shift_first_on_short_text(plain):
+    shifted = decode.execute(lambda: plain, [("rot-n", {"n": "3"})]).data
+    best = decode.solve("caesar", lambda: shifted)["candidates"][0]
+    assert best["text"].encode() == plain
+
+
+def test_english_fitness_follows_the_documented_formula():
+    # 0.7 * clamp(mean weight / 0.085) + 0.3 * min(1, mean pair weight / 0.0075)
+    assert decode._english_fitness(b"") == 0.0
+    assert decode._english_fitness(bytes(range(0x80, 0x100))) == 0.0
+    # "the": weights t .09056, h .06094, e .12702 -> mean .09284 -> clamps to 1;
+    # pairs "th" .0356 and "he" .0307 -> mean .03315 -> clamps to 1.
+    assert decode._english_fitness(b"the") == pytest.approx(1.0)
+    # "zz": mean weight .00074 -> .00074/.085; no common pair.
+    assert decode._english_fitness(b"zz") == pytest.approx(0.7 * 0.00074 / 0.085)
+    # a space weighs .19: "  " -> clamps to 1 on single characters, no pairs.
+    assert decode._english_fitness(b"  ") == pytest.approx(0.7)
+
+
+def test_cli_exits_1_when_a_step_fails(capsys):
+    code, out, _err = cli(capsys, "decode", "--text", "plain", "--recipe", "to-hex|gunzip")
+    assert code == 1
+    assert "error:" in out and "to-hex" in out          # the result is still shown

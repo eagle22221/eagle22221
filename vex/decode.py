@@ -726,25 +726,49 @@ def _printable_ratio(data: bytes) -> float:
     return sum(1 for c in data if c in _PRINTABLE) / len(data)
 
 
+# The commonest English letter pairs, per 10,000 pairs. They separate real words
+# from letter soup on inputs too short for single-letter counts to settle.
+_PAIRS = ("th 356 he 307 in 243 er 205 an 199 re 185 on 176 at 149 en 145 nd 135 "
+          "ti 134 es 134 or 128 te 120 of 117 ed 117 is 113 it 112 al 109 ar 107 "
+          "st 105 to 104 nt 104 ng 95 se 93 ha 93 as 87 ou 87 io 83 le 83 ve 83 "
+          "co 79 me 79 de 76 hi 76 ri 73 ro 73 ic 70 ne 69 ea 69 ra 69 ce 65 li 62 "
+          "ch 60 ll 58 be 58 ma 57 si 55 om 55 ur 54").split()
+_PAIR_FREQ = {_PAIRS[i].encode(): int(_PAIRS[i + 1]) / 10000 for i in range(0, len(_PAIRS), 2)}
+_SPACE_WEIGHT = 0.19                # a space is the commonest character in English
+_WEIGHT_FULL = 0.085                # mean character weight of ordinary English
+_PAIR_FULL = 0.0075                 # mean pair weight of ordinary English
+
+
 def _english_fitness(data: bytes) -> float:
-    """English letter-frequency chi-square mapped to 0..1 (1 = very English)."""
-    counts = [0] * 26
-    total = 0
-    for c in data:
-        if 65 <= c <= 90:
-            counts[c - 65] += 1
-            total += 1
-        elif 97 <= c <= 122:
-            counts[c - 97] += 1
-            total += 1
-    if total == 0:
+    """How English the bytes read, 0..1: 0.7 * characters + 0.3 * letter pairs.
+
+    Characters: the mean of a per-byte weight (a letter's English frequency,
+    0.19 for a space, 0 for other printable bytes, -0.5 for anything else),
+    divided by 0.085 and clamped to 0..1. Pairs: the mean frequency of each
+    adjacent pair of bytes among the commonest English letter pairs, divided by
+    0.0075 and capped at 1. Unlike a chi-square on letters alone this rewards
+    spaces, so a near-miss key that turns them into punctuation ranks lower."""
+    if not data:
         return 0.0
-    chi2 = 0.0
-    for i, letter in enumerate("abcdefghijklmnopqrstuvwxyz"):
-        observed = counts[i] / total
-        expected = _ENGLISH_FREQ[letter]
-        chi2 += (observed - expected) ** 2 / expected
-    return 1.0 / (1.0 + chi2)
+    total = 0.0
+    for c in data:
+        if c == 0x20:
+            total += _SPACE_WEIGHT
+        elif 65 <= c <= 90:
+            total += _ENGLISH_FREQ[chr(c + 32)]
+        elif 97 <= c <= 122:
+            total += _ENGLISH_FREQ[chr(c)]
+        elif c not in _PRINTABLE:
+            total -= 0.5
+    chars = min(1.0, max(0.0, total / len(data) / _WEIGHT_FULL))
+    pairs = 0.0
+    if len(data) > 1:
+        low = data.lower()
+        hits = 0.0
+        for i in range(len(low) - 1):
+            hits += _PAIR_FREQ.get(low[i:i + 2], 0.0)
+        pairs = min(1.0, hits / (len(low) - 1) / _PAIR_FULL)
+    return 0.7 * chars + 0.3 * pairs
 
 
 def _score(data: bytes) -> float:

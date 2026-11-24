@@ -68,8 +68,19 @@ Hash (not reversible; convenience):
 
 Each returns a ranked list `[{params, size, hex, text, score}]`, best first, at most
 20 candidates. `score` in 0..1 = 0.6 * printable_ratio + 0.4 * english_fitness,
-where english_fitness maps an English letter-frequency chi-square to 0..1 (1 = very
-English-like). Solvers never raise on arbitrary bytes.
+rounded to 6 decimal places. Solvers look at the first 64 KiB of the source and
+never raise on arbitrary bytes.
+
+- printable_ratio: the share of bytes in {0x09, 0x0A, 0x0D} ∪ [0x20, 0x7E].
+- english_fitness = 0.7 * chars + 0.3 * pairs (0 for empty input), where
+  - chars = clamp(mean weight / 0.085, 0, 1); a byte's weight is its English
+    letter frequency for A–Z/a–z, 0.19 for a space, 0 for any other printable
+    byte, and -0.5 for a non-printable byte;
+  - pairs = min(1, mean pair weight / 0.0075); each adjacent pair of bytes
+    (ASCII-lowercased) scores its frequency in the table of the 50 commonest
+    English letter pairs in `vex/decode.py` (`_PAIRS`, per 10,000), else 0; the
+    mean is over len - 1 pairs, and 0 when there is only one byte.
+  Sums run left to right in double precision so both editions agree exactly.
 - `caesar` — all 26 shifts
 - `xor-single` — all 256 single-byte keys
 - `xor-keylen` — guess a repeating-XOR key of length 1..40 (Hamming-distance
@@ -139,3 +150,27 @@ POST routes do, bounded to the file.
 - Safety: operate only on supplied or selected data; decryptions require a
   user-supplied key; no search that targets protection; enforce the 64 MiB cap and
   decompression-bomb guards everywhere; never execute anything.
+
+## Clarifications (as implemented by the Python edition, which is the reference)
+
+- Recipe string (CLI): unknown operation, unknown parameter or malformed `k=v`
+  is a usage error, exit 2. A structured recipe sent to the API reports the same
+  problems as `ok:false` with HTTP 200; an unknown source kind, a missing path or
+  a malformed body is 400.
+- A failed step: `steps` lists only the completed steps, and `size`/`hex`/`text`/
+  `looks_like` describe the last good bytes (the input of the failing step).
+- CLI exit codes: 0 on success; 1 when the result is `ok:false` (the result is
+  still printed), when `--out` would overwrite, or on a file error; 2 on usage.
+- `--out` refuses before running if the target exists and writes nothing when
+  the recipe failed.
+- The 64 MiB cap also applies to the source bytes. Decompressors emit at most
+  1 MiB at a time and stop past the cap.
+- Defaults: `rot-n n=13`, `charset-decode from=utf-8`, `hash algo=sha256`,
+  `aes` has no default mode, `des`/`3des mode=ecb`, `op=decrypt`, `unpad=pkcs7`.
+- Catalogue param `type` is one of `string`, `int`, `hex`, `choice`.
+- `looks_like` values: `PNG image`, `gzip`, `bzip2`, `xz`, `zip archive`,
+  `ELF program`, `PDF document`, `JPEG image`, `GIF image`, `PostScript`,
+  `PE program`, `DOS executable`, `printable text` (at least 95% printable),
+  `binary`, `empty`.
+- Solver params: caesar `{n}`, xor-single `{key}` (two hex digits), xor-keylen
+  `{key, keylen}`, substitution `{map}`.

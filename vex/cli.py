@@ -757,7 +757,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print("\n".join(renderer(data, st)).lstrip("\n"))
     except BrokenPipeError:         # e.g. piped into `head`
         sys.stderr.close()
-    return 0
+    # A decode that could not finish still prints how far it got, but fails.
+    failed = args.func is _cmd_decode and isinstance(data, dict) and data.get("ok") is False
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
