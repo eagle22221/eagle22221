@@ -1,5 +1,6 @@
 vex for Windows
 ===============
+Developed by SS
 
 vex.exe takes a program apart and shows what is inside it, without
 running it. It reads Windows programs (.exe, .dll) and Linux programs.

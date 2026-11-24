@@ -1098,6 +1098,9 @@ def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
     assert not b.symbols                                         # stripped
     from vex import resources                                    # the file icon is embedded
     assert any(r.type == "GROUP_ICON" for r in resources.list_resources(b))
+    details = resources.version_info(b)                          # shown under Properties > Details
+    assert (details["CompanyName"], details["ProductName"]) == ("SS", "vex")
+    assert details["LegalCopyright"] == "Developed by SS"
     imported = {i.name for i in b.imports}
     assert {"GetConsoleProcessList", "SetConsoleMode", "MoveFileExW",
             "CommandLineToArgvW"} <= imported

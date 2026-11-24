@@ -235,3 +235,8 @@ def test_page_shows_the_logo_in_the_sidebar_header_and_as_tab_icon(client):
     head = page[page.index('class="sidebar-head"'):page.index("</aside>", page.index('class="sidebar-head"'))]
     assert 'src="/static/logo.svg"' in head
     assert '<link rel="icon" href="/static/logo.svg"' in page
+
+
+def test_page_credits_the_developer(client):
+    _, body = client.get("/", token=False)
+    assert "Developed by SS" in body.decode()

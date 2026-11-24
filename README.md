@@ -4,6 +4,8 @@ A reverse-engineering toolkit for **Linux (ELF)** and **Windows (PE: `.exe`, `.d
 that runs on both systems. It takes a compiled program apart without ever running it, and it can
 open game asset packs and save modified copies.
 
+Developed by SS.
+
 A step-by-step beginner's guide with screenshots is in
 [`docs/vex-guide.pdf`](docs/vex-guide.pdf).
 
