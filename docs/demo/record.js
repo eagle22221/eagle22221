@@ -137,11 +137,31 @@ const overlay = () => {
   await click(page.locator('tr:has-text("config.json")'));
   await sleep(2400);
 
+  // 9b. techniques view
+  await app(R + '/tests/fixtures/bin/evasion_pe64.exe');
+  await page.waitForSelector('.titleblock');
+  await sleep(500);
+  await caption('Dissect cheats and anti-cheat: vex flags the techniques a program uses');
+  await sleep(1600);
+  await click(nav('Techniques'));
+  await page.waitForSelector('.technique');
+  await sleep(1800);
+  const inj = page.locator('.technique:has-text("Process injection")');
+  await inj.scrollIntoViewIfNeeded();
+  await sleep(600);
+  await caption('Each finding lists its evidence — and the code that uses it');
+  await click(inj.locator('li:has-text("WriteProcessMemory") button:has-text("Find uses")'));
+  await sleep(1300);
+  const use = inj.locator('.evidence-uses button').first();
+  await click(use);
+  await page.waitForSelector('.insn');
+  await sleep(2400);
+
   // 10. terminal: techniques
   await page.goto('file://' + D + '/term.html');
   await page.mouse.move(-50, -50);
   await sleep(300);
-  await caption('Dissect cheats and anti-cheat: flags anti-debug, VM checks, injection, hooking and packing');
+  await caption('The same check from the terminal: anti-debug, VM checks, injection, hooking, packing');
   const cmd = '.\\vex.exe techniques evasion_pe64.exe';
   for (const ch of cmd) { await page.evaluate((c) => { document.getElementById('cmd').textContent += c; }, ch); await sleep(55); }
   await sleep(450);

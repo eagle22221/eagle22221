@@ -14,6 +14,7 @@ CC       ?= cc
 AR       ?= ar
 MINGW    ?= x86_64-w64-mingw32-gcc
 MINGW_AR ?= x86_64-w64-mingw32-ar
+MINGW_RC ?= x86_64-w64-mingw32-windres
 PYTHON   ?= python3
 OPT      ?= -O2
 WARN      = -std=c11 -Wall -Wextra -Werror
@@ -77,8 +78,13 @@ $(BUILD)/vex: $(call objects,native) $(call web_object,native) $(call cs_library
 $(BUILD)/vex-asan: $(call objects,asan) $(call web_object,asan) $(call cs_library,asan)
 	$(CC) $(CFLAGS) -O1 $(SANITIZE) -o $@ $^ -lm
 
-$(BUILD)/vex.exe: $(call objects,windows) $(call web_object,windows) $(call cs_library,windows)
+$(BUILD)/vex.exe: $(call objects,windows) $(call web_object,windows) $(BUILD)/windows/vex_res.o $(call cs_library,windows)
 	$(MINGW) $(CFLAGS) -static -s -o $@ $^ -lws2_32 -lshell32
+
+# The file icon shown by Windows Explorer.
+$(BUILD)/windows/vex_res.o: res/vex.rc res/vex.ico
+	@mkdir -p $(dir $@)
+	$(MINGW_RC) -O coff -o $@ res/vex.rc
 
 $(BUILD)/native/%.o: src/%.c $(HEADERS)
 	@mkdir -p $(@D)

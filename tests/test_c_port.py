@@ -1096,6 +1096,8 @@ def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
     assert {lib.lower() for lib in b.libraries} <= {
         "kernel32.dll", "msvcrt.dll", "shell32.dll", "ws2_32.dll"}
     assert not b.symbols                                         # stripped
+    from vex import resources                                    # the file icon is embedded
+    assert any(r.type == "GROUP_ICON" for r in resources.list_resources(b))
     imported = {i.name for i in b.imports}
     assert {"GetConsoleProcessList", "SetConsoleMode", "MoveFileExW",
             "CommandLineToArgvW"} <= imported

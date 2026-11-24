@@ -4,16 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vex</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 
 <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
-  <symbol id="i-logo" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="2" y="2" width="24" height="24" rx="3.5"/>
-    <path d="M2 9.5h24M9.5 9.5v16.5M9.5 17.5h16.5"/>
-    <path d="M12 26l13.6-8.5M16.5 26l9.5-5.9M21.5 26l4.5-2.8" stroke-width="1"/>
-  </symbol>
   <symbol id="i-overview" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M3.5 9h17M9 9v11"/>
   </symbol>
@@ -52,7 +48,6 @@
 
 <div class="app">
   <aside class="rail">
-    <div class="rail-logo" aria-hidden="true"><svg class="rail-mark" viewBox="0 0 28 28"><use href="#i-logo"></use></svg></div>
     <div class="rail-spacer"></div>
     <button type="button" class="rail-btn" id="rail-open" aria-label="Open file or folder">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-open"></use></svg>
@@ -61,8 +56,11 @@
 
   <aside class="sidebar">
     <div class="sidebar-head">
-      <span class="brand-name">vex</span>
-      <span class="brand-sub">binary inspector</span>
+      <img class="brand-logo" src="/static/logo.svg" alt="" width="44" height="44">
+      <div class="brand-text">
+        <span class="brand-name">vex</span>
+        <span class="brand-sub">binary inspector</span>
+      </div>
     </div>
     <nav class="nav" id="nav" hidden aria-label="Views"></nav>
   </aside>

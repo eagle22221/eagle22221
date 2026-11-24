@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="vex">
+  <defs>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16324A"/><stop offset="1" stop-color="#081320"/>
+    </linearGradient>
+    <linearGradient id="lit" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2FD6E0" stop-opacity="0"/><stop offset="1" stop-color="#2FD6E0" stop-opacity=".55"/>
+    </linearGradient>
+    <radialGradient id="eye" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#FFD9D2"/><stop offset=".28" stop-color="#FF4A3D"/><stop offset="1" stop-color="#8E0F14"/>
+    </radialGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#FF3B30" stop-opacity=".55"/><stop offset="1" stop-color="#FF3B30" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <polygon points="128.0,14.0 163.0,92.0 128.0,108.0 93.0,92.0" fill="url(#steel)" stroke="#3FE0E6" stroke-width="2.2" stroke-linejoin="round"/><polygon points="128.0,14.0 163.0,92.0 128.0,108.0" fill="url(#lit)" opacity=".55"/><polygon points="230.2,191.0 145.1,182.3 148.8,144.0 180.1,121.7" fill="url(#steel)" stroke="#3FE0E6" stroke-width="2.2" stroke-linejoin="round"/><polygon points="230.2,191.0 145.1,182.3 148.8,144.0" fill="url(#lit)" opacity=".55"/><polygon points="25.8,191.0 75.9,121.7 107.2,144.0 110.9,182.3" fill="url(#steel)" stroke="#3FE0E6" stroke-width="2.2" stroke-linejoin="round"/><polygon points="25.8,191.0 75.9,121.7 107.2,144.0" fill="url(#lit)" opacity=".55"/><polygon points="128.0,196.0 150.0,176.0 128.0,168.0 106.0,176.0" fill="#0C1A2B" stroke="#22B8C4" stroke-width="1.6" stroke-linejoin="round"/><polygon points="72.6,100.0 78.9,129.1 96.8,114.0 100.9,90.9" fill="#0C1A2B" stroke="#22B8C4" stroke-width="1.6" stroke-linejoin="round"/><polygon points="183.4,100.0 155.1,90.9 159.2,114.0 177.1,129.1" fill="#0C1A2B" stroke="#22B8C4" stroke-width="1.6" stroke-linejoin="round"/>
+  <polygon points="128,56 194,170 62,170" fill="none" stroke="#3FE0E6" stroke-width="3" stroke-linejoin="round" opacity=".9"/>
+  <circle cx="128" cy="132" r="46" fill="url(#glow)"/>
+  <circle cx="128" cy="132" r="27" fill="#07101B" stroke="#3FE0E6" stroke-width="2.4"/>
+  <circle cx="128" cy="132" r="17" fill="url(#eye)"/>
+  <circle cx="128" cy="132" r="17" fill="none" stroke="#FF8A7E" stroke-width="1.2" opacity=".8"/>
+  <circle cx="128" cy="132" r="5" fill="#FFF2EE"/>
+</svg>

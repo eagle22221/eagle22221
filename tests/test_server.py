@@ -221,3 +221,17 @@ def test_techniques_endpoint_matches_the_cli_view(client):
     assert inj["confidence"] == "high" and "imports VirtualAllocEx" in inj["evidence"]
     assert inj["title"] and inj["explanation"]
     assert client.api("techniques", path=ELF) == []
+
+
+def test_logo_is_served_as_svg(client):
+    status, ctype, body = client.request("GET", "/static/logo.svg", token=False)
+    assert (status, ctype) == (200, "image/svg+xml")
+    assert body == (FIXTURES.parent.parent.parent / "vex" / "web" / "logo.svg").read_bytes()
+
+
+def test_page_shows_the_logo_in_the_sidebar_header_and_as_tab_icon(client):
+    _, body = client.get("/", token=False)
+    page = body.decode()
+    head = page[page.index('class="sidebar-head"'):page.index("</aside>", page.index('class="sidebar-head"'))]
+    assert 'src="/static/logo.svg"' in head
+    assert '<link rel="icon" href="/static/logo.svg"' in page

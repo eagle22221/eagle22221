@@ -1,5 +1,5 @@
 vex for Windows
-====================
+===============
 
 vex.exe takes a program apart and shows what is inside it, without
 running it. It reads Windows programs (.exe, .dll) and Linux programs.
@@ -16,7 +16,7 @@ program, or drag any .exe or .dll onto vex.exe to open it straight
 away. Try it with practice\hello_pe64.exe.
 
 The interface has an Overview (what the file is and how it is protected),
-Code (the instructions, grouped into functions), Strings, Imports,
+Techniques (anti-debug, VM checks, injection, hooking, packing), Code (the instructions, grouped into functions), Strings, Imports,
 Sections, a Bytes view, Assets (game asset packs), and Modify.
 
 Prefer the terminal? Everything is also a command (see below), including
