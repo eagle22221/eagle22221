@@ -101,7 +101,7 @@ def run_python(*args):
 # port was written and that the C program does not produce yet. They are left
 # out of the comparison (everything else in the report must still match);
 # test_report_parts_missing_from_the_c_port starts failing when this is stale.
-NOT_PORTED_REPORT_KEYS = ("techniques",)
+NOT_PORTED_REPORT_KEYS = ()
 
 
 def strip_path(data):
@@ -311,8 +311,6 @@ def test_text_output_follows_the_python_layout(c_binary, name, command):
     assert mine == reference
 
 
-@pytest.mark.xfail(strict=True, reason="report parts in NOT_PORTED_REPORT_KEYS are missing "
-                                       "from the C program")
 def test_report_parts_missing_from_the_c_port(c_binary):
     """Fails (as an unexpected pass) once the C report has every part of the
     Python report: then empty NOT_PORTED_REPORT_KEYS and delete this test."""

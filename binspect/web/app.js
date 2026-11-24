@@ -4,6 +4,20 @@
 
 const $ = (id) => document.getElementById(id);
 
+// A small inline SVG icon that points at a <symbol> in index.html's sprite.
+// Presentation only — no external requests, CSP-safe.
+const SVGNS = 'http://www.w3.org/2000/svg';
+function icon(name, cls) {
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'ico' + (cls ? ' ' + cls : ''));
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(SVGNS, 'use');
+  use.setAttribute('href', '#i-' + name);
+  svg.appendChild(use);
+  return svg;
+}
+
 function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -129,14 +143,14 @@ function ask(title, note, value, okLabel) {
 // --- views registry ---------------------------------------------------------
 
 const VIEWS = {
-  overview: { label: 'Overview', render: renderOverview, kinds: ['binary'] },
-  code: { label: 'Code', render: renderCode, kinds: ['binary'] },
-  strings: { label: 'Strings', render: renderStrings, kinds: ['binary'] },
-  imports: { label: 'Imports', render: renderImports, kinds: ['binary'] },
-  sections: { label: 'Sections', render: renderSections, kinds: ['binary'] },
-  bytes: { label: 'Bytes', render: renderBytes, kinds: ['binary'] },
-  assets: { label: 'Assets', render: renderAssets, kinds: ['binary', 'archive', 'folder'] },
-  modify: { label: 'Modify', render: renderModify, kinds: ['binary'] },
+  overview: { label: 'Overview', render: renderOverview, kinds: ['binary'], icon: 'overview' },
+  code: { label: 'Code', render: renderCode, kinds: ['binary'], icon: 'code' },
+  strings: { label: 'Strings', render: renderStrings, kinds: ['binary'], icon: 'strings' },
+  imports: { label: 'Imports', render: renderImports, kinds: ['binary'], icon: 'imports' },
+  sections: { label: 'Sections', render: renderSections, kinds: ['binary'], icon: 'sections' },
+  bytes: { label: 'Bytes', render: renderBytes, kinds: ['binary'], icon: 'bytes' },
+  assets: { label: 'Assets', render: renderAssets, kinds: ['binary', 'archive', 'folder'], icon: 'assets' },
+  modify: { label: 'Modify', render: renderModify, kinds: ['binary'], icon: 'modify' },
 };
 
 function renderNav() {
@@ -145,10 +159,10 @@ function renderNav() {
   for (const [id, view] of Object.entries(VIEWS)) {
     if (!view.kinds.includes(state.kind)) continue;
     add(nav, h('button', {
-      type: 'button', text: view.label,
+      type: 'button', class: 'nav-item',
       'aria-current': state.view === id ? 'page' : null,
       onclick: () => show(id),
-    }));
+    }, icon(view.icon, 'nav-ico'), h('span', { class: 'nav-label', text: view.label })));
   }
   nav.hidden = !state.path;
 }
@@ -1045,6 +1059,8 @@ function start() {
     applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
 
   $('open-button').addEventListener('click', openDialog);
+  const railOpen = $('rail-open');
+  if (railOpen) railOpen.addEventListener('click', openDialog);
   $('open-dialog').querySelector('.dialog-head button').addEventListener('click', (e) => { e.preventDefault(); $('open-dialog').close(); });
   $('path-form').addEventListener('submit', (e) => {
     e.preventDefault();

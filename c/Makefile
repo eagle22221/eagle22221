@@ -21,7 +21,7 @@ CFLAGS    = $(OPT) $(WARN) -ffp-contract=off
 SANITIZE  = -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
 BUILD     = build
-CORE      = util hash model elf pe strings json views render platform patch cli main
+CORE      = util hash model elf pe strings json views techniques render platform patch cli main
 HEADERS   = $(wildcard src/*.h)
 
 # --- Capstone (third-party) -----------------------------------------------------

@@ -4,6 +4,7 @@
 #include <errno.h>
 
 #include "platform.h"
+#include "techniques.h"
 
 /* --- usage errors ------------------------------------------------------------- */
 
@@ -37,6 +38,8 @@ static const char HELP[] =
     "  hexdump FILE [LOCATION] [--offset N] [-n BYTES]\n"
     "                            raw bytes at an address or file offset\n"
     "  layout FILE               the file as consecutive regions\n"
+    "  techniques FILE           protection and evasion techniques: packing,\n"
+    "                            anti-debug, anti-VM, injection, hooking, drivers\n"
     "  report FILE               everything at a glance\n"
     "  patch bytes FILE LOCATION HEX [--offset] (-o OUT | --in-place)\n"
     "  patch nop FILE LOCATION BYTES [--offset] (-o OUT | --in-place)\n"
@@ -196,6 +199,10 @@ static void cmd_symbols(Session *s) {
     cli_emit(s, view_symbols(s->a, b, cli_option(s, "grep")), render_symbols);
 }
 
+static void cmd_techniques(Session *s) {
+    cli_emit(s, tech_view(s->a, cli_load(s, s->positional[0])), render_techniques);
+}
+
 /* Strings are written one at a time: a large file holds millions of them. */
 static void cmd_strings(Session *s) {
     static const char *const encodings[] = {"all", "ascii", "utf16"};
@@ -294,6 +301,7 @@ static void cmd_report(Session *s) {
     j_set(a, d, "imports", view_imports(a, b));
     j_set(a, d, "exports", view_exports(a, b));
     j_set(a, d, "strings", view_strings(a, b, 4, "all", NULL, true));
+    j_set(a, d, "techniques", tech_view(a, b));
     FunctionsJob job = {s, b, NULL};
     if (err_protect(s->err, find_functions, &job)) {
         j_set(a, d, "functions", job.functions);
@@ -326,6 +334,7 @@ static const Command COMMANDS[] = {
     {"imports", NULL, 1, 1, "FILE", NULL, 0, cmd_imports},
     {"exports", NULL, 1, 1, "FILE", NULL, 0, cmd_exports},
     {"symbols", NULL, 1, 1, "FILE", GREP_OPTION, 1, cmd_symbols},
+    {"techniques", NULL, 1, 1, "FILE", NULL, 0, cmd_techniques},
     {"strings", NULL, 1, 1, "FILE", STRINGS_OPTIONS, 4, cmd_strings},
     {"functions", NULL, 1, 1, "FILE", GREP_OPTION, 1, cmd_functions},
     {"disasm", NULL, 1, 2, "FILE", DISASM_OPTIONS, 1, cmd_disasm},
