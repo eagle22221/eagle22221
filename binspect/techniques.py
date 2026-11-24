@@ -120,7 +120,7 @@ _VM_MARKERS: List[Tuple[str, str]] = [
     ("vmware-vmx", "vmware"),
     ("qemu-ga", "qemu"), ("qemuwmi", "qemu"),
     ("xenservice", "xen"), ("xenvbd", "xen"), ("xennet", "xen"),
-    ("SbieDll.dll", "sandbox"), ("sbiedll", "sandbox"), ("cuckoomon", "sandbox"),
+    ("SbieDll.dll", "sandbox"), ("cuckoomon", "sandbox"),
     ("sandboxiedcomlaunch", "sandbox"),
     ("prl_cc", "parallels"), ("prltools", "parallels"),
 ]

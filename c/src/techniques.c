@@ -107,7 +107,7 @@ static const struct {
     {"qemu-ga", "qemu-ga", "qemu"}, {"qemuwmi", "qemuwmi", "qemu"},
     {"xenservice", "xenservice", "xen"}, {"xenvbd", "xenvbd", "xen"},
     {"xennet", "xennet", "xen"},
-    {"SbieDll.dll", "sbiedll.dll", "sandbox"}, {"sbiedll", "sbiedll", "sandbox"},
+    {"SbieDll.dll", "sbiedll.dll", "sandbox"},
     {"cuckoomon", "cuckoomon", "sandbox"}, {"sandboxiedcomlaunch", "sandboxiedcomlaunch", "sandbox"},
     {"prl_cc", "prl_cc", "parallels"}, {"prltools", "prltools", "parallels"},
 };
