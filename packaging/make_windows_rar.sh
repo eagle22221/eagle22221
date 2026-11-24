@@ -18,6 +18,9 @@ cp tests/fixtures/bin/hello_pe64.exe tests/fixtures/bin/sample.dll \
 python3 examples/make_demo_game.py >/dev/null 2>&1 || true
 mkdir -p "$ROOT/practice/demo_game"
 cp examples/demo_game/game.exe examples/demo_game/assets.pk3 "$ROOT/practice/demo_game/"
+# a program with a picture, a sound and a zip attached, for trying the split command
+python3 examples/make_split_sample.py >/dev/null 2>&1 || true
+cp examples/split_sample/bundle_pe64.exe "$ROOT/practice/"
 for f in c/third_party/capstone*/LICENSE.TXT c/third_party/*/LICENSE.TXT; do
     [ -f "$f" ] && cp "$f" "$ROOT/licences/capstone-LICENSE.TXT" && break
 done

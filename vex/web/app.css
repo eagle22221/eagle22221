@@ -428,6 +428,9 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 
 /* --- split -------------------------------------------------------------- */
 .pieces .legend-item { white-space: nowrap; }
+/* names and paths wrap between words first; the card scrolls on narrow screens */
+.pieces td:first-child { min-width: 9em; }
+.pieces td:last-child { min-width: 22em; }
 .pieces tr.is-unsaved td { color: var(--ink-2); }
 .piece-note { display: block; margin-top: 2px; font: 400 12px/1.4 var(--ui); color: var(--ink-2); }
 .split-result { overflow-wrap: anywhere; }

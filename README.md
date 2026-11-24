@@ -25,6 +25,7 @@ A step-by-step beginner's guide with screenshots is in
 | Game engines | Recognises Unity, Unreal, Godot, GameMaker, Ren'Py, RPG Maker, Electron and others, and says where the assets are |
 | Asset packs | Browse, extract, replace and repack ZIP-family packs, Quake PAK, Doom WAD, Godot PCK, Electron ASAR, Ren'Py RPA |
 | Windows resources | List, extract and replace icons, version info, manifests and embedded data |
+| Splitting | Save a program's parts (headers, code, data, appended data) as separate files in a folder, together with any complete files found inside it — pictures, sounds, ZIP archives, other programs — and an index of every piece |
 | Patching | Overwrite bytes, blank out instructions, or replace text, always into a copy or with a backup |
 
 ## Install
@@ -55,6 +56,7 @@ anywhere. Drop a file on the page or use **Open file or folder**.
 - **Strings** — search the text in the file; **Find uses** jumps to the code that reads it.
 - **Imports**, **Sections**, **Bytes** — the supporting tables and a hex view.
 - **Assets** — the game engine, its asset packs, and resources inside Windows programs.
+- **Split** — lists the parts of the program and the complete files found inside it, and saves them as separate files in a folder you choose.
 - **Modify** — save a patched copy.
 
 The strip across the top is the file drawn to scale: click any part to see its bytes.
@@ -75,6 +77,7 @@ vex xrefs FILE TARGET             who uses this function, import or address
 vex xrefs FILE --string TEXT      who uses strings containing TEXT
 vex hexdump FILE [LOCATION] [--offset N] [-n BYTES]
 vex techniques FILE               protection and evasion techniques in a program
+vex split FILE FOLDER             save the parts of a program as separate files
 ```
 
 `LOCATION` and `TARGET` accept a function, symbol or import name (`main`, `puts`,
@@ -89,6 +92,58 @@ vex strings suspicious.exe --tagged
 vex xrefs suspicious.exe --string "http"
 vex disasm suspicious.exe sub_401230
 ```
+
+## Splitting a program into its parts
+
+```
+vex split FILE FOLDER
+```
+
+`split` saves the parts of a Linux or Windows program as separate files, so that each one can be
+looked at on its own or opened with another tool. `FOLDER` is created if it does not exist. A
+folder that already exists must be empty; otherwise vex stops with a message and writes nothing.
+
+```
+vex split game.exe game_parts
+```
+
+The command prints a table of the pieces and ends with `Saved N files to game_parts`. The folder
+then looks like this (the names depend on the program):
+
+```
+game_parts/
+  index.txt                      a list of every piece
+  parts/
+    00_headers.bin               the program cut into its parts, in file order
+    01_.text.bin
+    ...
+  embedded/
+    000_0x00000e00.png           complete files found inside the program
+    ...
+  resources/                     Windows resources (Windows programs only)
+```
+
+- **`parts/`** — the file cut along the same lines as the file map: headers, code, data, tables,
+  and any data appended after the program. Each name starts with the part's position in the file.
+- **`embedded/`** — complete files that sit inside the program: PNG and GIF pictures, WAV, AVI and
+  WebP files, ZIP archives, and other Windows or Linux programs. Each name carries the offset the
+  file was found at. These are extra copies; the same bytes are also in the part that contains them.
+- **`resources/`** — for Windows programs, every resource (icons, version info, manifests), named
+  the same way as by `vex resources extract`.
+- **`index.txt`** — the source file's name, size and SHA-256, then one line per piece: offset,
+  size, kind, the file it was saved as, its name and a note.
+
+What to expect:
+
+- **The original is not changed, and nothing is run.** `split` only reads the file.
+- **The parts add up to the original.** Joining the files in `parts/` in order gives back the
+  original file exactly. The only pieces left out are stretches of padding that are all zero
+  bytes; `index.txt` lists each of them with its size and the note `zero padding, not saved`.
+- **It copies, it does not convert.** Nothing is unpacked, decrypted or decompressed. Packed or
+  encrypted content comes out exactly as it is stored, and a ZIP archive is saved as one `.zip`
+  file.
+- **It does not recover source code.** A program cannot be turned back into its source files; the
+  code part holds the same machine instructions that `vex disasm` shows.
 
 ## Games and modding
 
@@ -187,6 +242,7 @@ vex/
   archives/            asset pack formats (ZIP family, PAK, WAD, PCK, ASAR, RPA)
   engines.py           game engine detection
   resources.py         Windows resources
+  split.py             saving a program's parts as separate files
   patch.py             byte, instruction and text patches
   views.py             JSON-ready views shared by the CLI and the web UI
   cli.py               command line

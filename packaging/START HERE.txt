@@ -17,8 +17,10 @@ program, or drag any .exe or .dll onto vex.exe to open it straight
 away. Try it with practice\hello_pe64.exe.
 
 The interface has an Overview (what the file is and how it is protected),
-Techniques (anti-debug, VM checks, injection, hooking, packing), Code (the instructions, grouped into functions), Strings, Imports,
-Sections, a Bytes view, Assets (game asset packs), and Modify.
+Techniques (anti-debug, VM checks, injection, hooking, packing), Code (the
+instructions, grouped into functions), Strings, Imports, Sections, a Bytes
+view, Assets (game asset packs), Split (save the parts of the program as
+separate files), and Modify.
 
 Prefer the terminal? Everything is also a command (see below), including
 a report you can read without the browser:
@@ -54,6 +56,8 @@ an empty part of the folder and choose "Open PowerShell window here" (or
     techniques FILE                      packing, anti-debug, anti-VM,
                                          injection, hooking, driver checks
                                          (useful for cheats and anti-cheat)
+    split FILE FOLDER                    save the parts of a program, and files
+                                         found inside it, into a new folder
     engine FOLDER                        a game's engine and its asset packs
     assets list PACK                     files in a .pk3/.pak/.wad/.pck pack
     assets extract PACK FOLDER           unpack a pack
@@ -112,6 +116,20 @@ Good to know
   library) for "exports"; evasion_pe64.exe, a harmless sample that trips every
   check, for "techniques"; and demo_game\ (a pretend game) for "engine" and the
   Assets view, e.g.  .\vex.exe engine practice\demo_game
+- "split" saves the parts of a program as separate files. To try it, use
+  practice\bundle_pe64.exe, a harmless hello-world program with a picture, a
+  sound and a zip archive attached to its end:
+      .\vex.exe split practice\bundle_pe64.exe bundle_parts
+  The new folder bundle_parts gets "parts" (the program cut into its parts,
+  in order), "embedded" (the picture, the sound and the zip archive) and
+  index.txt, a list of every piece. Read index.txt first. The folder must be
+  new or empty. The original is not changed and nothing is run.
+- "split" only copies what is already in the file. It does not unpack,
+  decrypt or decompress anything, so packed or encrypted content comes out
+  exactly as stored, and it cannot turn a program back into source code.
+  Joining the files in "parts" in order gives the original file again.
+- vex.exe saves the parts and the embedded files. Saving Windows resources
+  (icons, version info) as files is in the Python edition.
 - This one vex.exe does everything above - the browser interface, the
   analysis and disassembly, the techniques scan, game asset packs and patching -
   with nothing to install. The Python edition of vex adds a few extras:
