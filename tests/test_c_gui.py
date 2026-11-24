@@ -172,6 +172,11 @@ def test_symbols_and_strings_match_python(c_client, py_client, fixture):
 
 
 @pytest.mark.parametrize("fixture", FIXTURE_NAMES)
+def test_techniques_match_python(c_client, py_client, fixture):
+    _same(c_client, py_client, "GET", "techniques", {"path": str(fixture_path(fixture))})
+
+
+@pytest.mark.parametrize("fixture", FIXTURE_NAMES)
 def test_hexdump_matches_python(c_client, py_client, fixture):
     path = str(fixture_path(fixture))
     _same(c_client, py_client, "GET", "hexdump", {"path": path, "length": 48})

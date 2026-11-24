@@ -48,6 +48,7 @@ This starts a small server on your own computer and opens it in your browser. No
 anywhere. Drop a file on the page or use **Open file or folder**.
 
 - **Overview** — what the file is, how it is protected, what it needs.
+- **Techniques** — protection and evasion techniques (anti-debug, VM checks, injection, hooking, packing, drivers) with their evidence; "Find uses" jumps to the code that uses each API.
 - **Code** — functions on the left, instructions in the middle, "used by" on the right. Click a call to follow it.
 - **Strings** — search the text in the file; **Find uses** jumps to the code that reads it.
 - **Imports**, **Sections**, **Bytes** — the supporting tables and a hex view.

@@ -210,3 +210,14 @@ def test_analysis_is_reloaded_when_the_file_changes(client, tmp_path):
     assert client.api("info", path=str(f))["arch"] == "x86"
     f.write_bytes(fixture_bytes("bare_arm64"))
     assert client.api("info", path=str(f))["arch"] == "aarch64"
+
+
+def test_techniques_endpoint_matches_the_cli_view(client):
+    evasion = str(fixture_path("evasion_pe64.exe"))
+    rows = client.api("techniques", path=evasion)
+    assert [r["category"] for r in rows] == [
+        "anti-debug", "anti-vm", "hooking", "injection", "packing"]
+    inj = next(r for r in rows if r["category"] == "injection")
+    assert inj["confidence"] == "high" and "imports VirtualAllocEx" in inj["evidence"]
+    assert inj["title"] and inj["explanation"]
+    assert client.api("techniques", path=ELF) == []

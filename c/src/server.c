@@ -55,6 +55,7 @@ typedef int socket_t;
 #endif
 
 #include "analysis.h"
+#include "techniques.h"
 #include "archives.h"
 #include "engines.h"
 #include "model.h"
@@ -754,6 +755,11 @@ static void h_hexdump(Req *req) {
     Binary *b = load_binary(req, "path", NULL);
     req->result = view_hexdump(req->a, b, has_address ? &address : NULL,
                                has_offset ? &offset : NULL, length);
+}
+
+static void h_techniques(Req *req) {
+    Binary *b = load_binary(req, "path", NULL);
+    req->result = tech_view(req->a, b);
 }
 
 /* --- GET: opening files ------------------------------------------------------ */
@@ -1579,7 +1585,7 @@ static const Route ROUTES[] = {
     {"GET", "info", h_info}, {"GET", "layout", h_layout}, {"GET", "sections", h_sections},
     {"GET", "segments", h_segments}, {"GET", "imports", h_imports}, {"GET", "exports", h_exports},
     {"GET", "symbols", h_symbols}, {"GET", "strings", h_strings}, {"GET", "functions", h_functions},
-    {"GET", "disasm", h_disasm}, {"GET", "xrefs", h_xrefs}, {"GET", "hexdump", h_hexdump},
+    {"GET", "disasm", h_disasm}, {"GET", "xrefs", h_xrefs}, {"GET", "hexdump", h_hexdump}, {"GET", "techniques", h_techniques},
     {"GET", "open", h_open}, {"GET", "browse", h_browse}, {"GET", "engine", h_engine},
     {"GET", "archive/list", h_archive_list}, {"GET", "archive/file", h_archive_file},
     {"GET", "resources", h_resources}, {"GET", "resource/data", h_resource_unavailable},

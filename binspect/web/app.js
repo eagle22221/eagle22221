@@ -144,6 +144,7 @@ function ask(title, note, value, okLabel) {
 
 const VIEWS = {
   overview: { label: 'Overview', render: renderOverview, kinds: ['binary'], icon: 'overview' },
+  techniques: { label: 'Techniques', render: renderTechniques, kinds: ['binary'], icon: 'techniques' },
   code: { label: 'Code', render: renderCode, kinds: ['binary'], icon: 'code' },
   strings: { label: 'Strings', render: renderStrings, kinds: ['binary'], icon: 'strings' },
   imports: { label: 'Imports', render: renderImports, kinds: ['binary'], icon: 'imports' },
@@ -392,6 +393,15 @@ async function renderOverview(box) {
       : null);
   }).catch(() => fill(notable));
 
+  const techNote = h('div');
+  api('techniques', { path: state.path }).then((rows) => {
+    if (!rows.length) return;
+    fill(techNote, h('p', { class: 'notice' },
+      h('strong', { text: `binspect found ${rows.length} protection or evasion technique${rows.length === 1 ? '' : 's'}: ` }),
+      rows.map((t) => t.title).join(', ') + '. ',
+      h('button', { class: 'link', type: 'button', text: 'See the evidence', onclick: () => show('techniques') })));
+  }).catch(() => {});
+
   const engineNote = h('div');
   api('engine', { path: state.path }).then((result) => {
     if (!result.matches.length) return;
@@ -402,6 +412,7 @@ async function renderOverview(box) {
   }).catch(() => {});
 
   add(box, 
+    techNote,
     engineNote,
     info.warnings.length ? h('div', { class: 'notice' }, h('strong', { text: 'This file is damaged or unusual. ' }), info.warnings.join(' · ')) : null,
     block,
@@ -624,6 +635,62 @@ async function renderStrings(box) {
 }
 
 // --- imports & exports ------------------------------------------------------
+
+// --- techniques ---------------------------------------------------------------
+
+function evidenceItem(text) {
+  const li = h('li', {}, h('span', { class: 'mono', text }));
+  const api_name = /^imports (.+)$/.exec(text);
+  if (api_name) {
+    const uses = h('span', { class: 'evidence-uses' });
+    add(li, h('button', { class: 'link', type: 'button', text: 'Find uses', onclick: async (e) => {
+      e.target.remove();
+      fill(uses, 'Searching…');
+      try {
+        const found = await api('xrefs', { path: state.path, target: api_name[1] });
+        const calls = found.filter((x) => x.kind !== 'jump' || !(x.function || '').includes('@'));
+        fill(uses, ...(calls.length ? calls.map((x) =>
+          h('button', { class: 'link', type: 'button', text: x.function || x.address, onclick: () => goTo(x.address) }))
+          : [h('span', { class: 'muted', text: 'not called directly' })]));
+      } catch (error) { fill(uses, h('span', { class: 'muted', text: error.message })); }
+    } }), uses);
+  } else if (/^(executable )?section |^entry point/.test(text)) {
+    add(li, h('button', { class: 'link', type: 'button', text: 'Show sections', onclick: () => show('sections') }));
+  } else if (/^appended data/.test(text)) {
+    add(li, h('button', { class: 'link', type: 'button', text: 'Show bytes', onclick: () => {
+      const m = /offset (0x[0-9a-f]+)/.exec(text);
+      state.bytes = { offset: m ? parseInt(m[1], 16) : 0 };
+      show('bytes');
+    } }));
+  }
+  return li;
+}
+
+// Show each kind of jump link once per card (e.g. one "Show sections").
+function dedupeLinks(items) {
+  const seen = new Set();
+  for (const li of items) {
+    const b = li.querySelector('button');
+    if (!b || b.textContent === 'Find uses') continue;
+    if (seen.has(b.textContent)) b.remove(); else seen.add(b.textContent);
+  }
+  return items;
+}
+
+async function renderTechniques(box) {
+  const rows = await api('techniques', { path: state.path });
+  add(box, h('div', { class: 'view-head' }, h('h2', { text: `Techniques (${rows.length})` }),
+    h('p', { text: 'Protection and evasion techniques this program uses, with the evidence for each. binspect identifies them; it never disables or defeats them.' })));
+  if (!rows.length) {
+    add(box, h('p', { class: 'notice is-ok', text: 'No notable protection or evasion techniques found: no packing, anti-debugging, VM checks, injection, hooking or driver use.' }));
+    return;
+  }
+  add(box, h('div', { class: 'stack' }, rows.map((t) =>
+    h('section', { class: `engine technique is-${t.confidence}` },
+      h('h3', {}, t.title, h('span', { class: `confidence conf-${t.confidence}`, text: `${t.confidence} confidence` })),
+      h('p', { class: 'technique-why', text: t.explanation }),
+      h('ul', { class: 'evidence' }, dedupeLinks(t.evidence.map(evidenceItem)))))));
+}
 
 async function renderImports(box) {
   const [imports, exports_] = await Promise.all([

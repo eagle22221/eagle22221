@@ -396,6 +396,13 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 
 /* --- assets & modify ---------------------------------------------------- */
 .stack { display: grid; gap: 20px; }
+.technique-why { color: var(--ink-2); margin: 8px 0 12px; max-width: 78ch; }
+.confidence.conf-high { color: var(--bad); background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.confidence.conf-medium { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.technique .evidence { list-style: none; margin: 0; padding: 0; }
+.evidence li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 7px 0; border-top: 1px solid var(--line); }
+.evidence .mono { font-size: 13px; }
+.evidence-uses { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
 .engine { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--raised); padding: 16px 18px; box-shadow: var(--shadow); }
 .engine h3 { font: 600 1.2rem/1.2 var(--display); display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .confidence { font: 500 12.5px/1 var(--ui); color: var(--ink-2); background: var(--accent-wash); border-radius: var(--r-pill); padding: 4px 10px; }
