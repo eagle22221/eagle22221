@@ -1138,3 +1138,17 @@ def test_split_of_a_program_with_a_large_hostile_overlay(tmp_path):
     found = [p for p in result["pieces"] if p["kind"] == "embedded"]
     assert [(p["offset"], p["size"]) for p in found] == \
         [(len(HOST) + len(junk), len(BLOBS["png"]))]
+
+
+def test_a_very_long_resource_name_cannot_break_the_split(monkeypatch, tmp_path):
+    # A damaged program can carry a resource name far longer than any file
+    # system accepts as a file name; the split must still succeed.
+    from vex import resources
+    binary = vex.load_bytes(fixture_bytes("resdemo.exe"))
+    real = resources.list_resources(binary)[0]
+    long = resources.Resource("RCDATA", "N" * 1000, 1033, real.offset, real.size, real.codepage)
+    monkeypatch.setattr(resources, "list_resources", lambda b: [long])
+    result = split.split(binary, str(tmp_path / "out"))
+    (piece,) = [p for p in result["pieces"] if p["kind"] == "resource"]
+    assert len(piece["path"].split("/")[1]) <= 80
+    assert (tmp_path / "out" / piece["path"]).stat().st_size == real.size

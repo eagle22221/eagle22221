@@ -55,7 +55,10 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
   // the list of pieces arrives after the view itself
   await page.waitForSelector('.table-wrap table', { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(300);
+  await page.setViewportSize({ width: 1120, height: 1000 });   // tall enough for the whole list
+  await page.waitForTimeout(300);
   await page.screenshot({ path: out('split') });
+  await page.setViewportSize({ width: 1120, height: 640 });
 
   if (game) {
     await page.setViewportSize({ width: 1120, height: 700 });

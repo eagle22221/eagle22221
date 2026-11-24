@@ -266,7 +266,8 @@ def _piece(binary: Binary, path: Optional[str], kind: str, name: str, offset: in
 
 
 def _resources(binary: Binary) -> List[dict]:
-    """One piece per PE resource, named as `vex resources extract` names them.
+    """One piece per PE resource, named as `vex resources extract` names them
+    (kept to plain ASCII and a safe length).
     Nothing at all when any of them cannot be read."""
     from . import resources
     out, taken = [], set()
@@ -275,8 +276,9 @@ def _resources(binary: Binary) -> List[dict]:
             icon = res.type == "GROUP_ICON"
             data = resources.icon_file(binary, res) if icon \
                 else resources.read_resource(binary, res)
-            stem = "".join(ch if ch.isalnum() or ch in "-_" else "_"
-                           for ch in f"{res.type}_{res.name.lstrip('#')}_{res.language}")
+            label = f"{res.type}_{res.name.lstrip('#')}"[:_MAX_NAME] + f"_{res.language}"
+            stem = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_"
+                           for ch in label)
             unique, n = stem, 1
             while unique.lower() in taken:          # two resources, one file name
                 n += 1

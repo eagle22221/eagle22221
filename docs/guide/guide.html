@@ -60,7 +60,7 @@ figure { margin: 9pt 0 10pt; break-inside: avoid; }
 figure img { width: 100%; border: .8pt solid var(--ink); display: block; }
 figure.crop img { height: 72mm; object-fit: cover; object-position: top left; }
 figure.crop-tall img { height: 70mm; object-fit: cover; object-position: 0 88%; }
-figure.crop-short img { height: 58mm; object-fit: cover; object-position: top left; }
+figure.crop-short img { height: 58mm; object-fit: cover; object-position: 0 42%; }
 figcaption { font-size: 9pt; color: var(--ink-2); margin-top: 3.5pt; }
 .box { border: .8pt solid var(--ink); padding: 8pt 10pt; margin: 8pt 0 10pt; break-inside: avoid; background: var(--paper); }
 .box h3 { margin-top: 0; }
@@ -288,12 +288,12 @@ td code { white-space: nowrap; }
     <li>Choose <b>Split into a folder…</b> and type a name for a new or empty folder.</li>
     <li>Open the folder and read <code>index.txt</code> first.</li>
   </ol>
-  <figure class="crop-short"><img src="img/split.png" alt="The Split view"><figcaption>The Split view lists every piece before anything is saved: first the parts in file order, then the files found inside.</figcaption></figure>
+  <figure class="crop-short"><img src="img/split.png" alt="The Split view"><figcaption>The Split view lists every piece before anything is saved: the parts in file order first, then the files found inside.</figcaption></figure>
   <table>
     <tr><th>In the folder</th><th>What it holds</th></tr>
     <tr><td><code>parts/</code></td><td>The program cut into its parts, in file order: headers, code, data, tables and anything attached after the program. Put back together in order, they give the original file, byte for byte.</td></tr>
     <tr><td><code>embedded/</code></td><td>Complete files found inside the program: PNG and GIF pictures, WAV, AVI and WebP files, ZIP archives, and other Windows or Linux programs.</td></tr>
-    <tr><td><code>resources/</code></td><td>The icons, version details and other built-in resources of a Windows program, if it has any.</td></tr>
+    <tr><td><code>resources/</code></td><td>The icons, version details and other built-in resources of a Windows program (Python edition).</td></tr>
     <tr><td><code>index.txt</code></td><td>The original's name, size and SHA-256 fingerprint, then one line per piece. Empty filler between parts (zero bytes only) is listed here with its size and is not saved as a file.</td></tr>
   </table>
   <div class="box">
