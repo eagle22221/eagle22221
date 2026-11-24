@@ -31,6 +31,9 @@ bool fs_mkdir(const char *path);
 /* Creates or truncates a file for writing without following a symbolic
  * link in the last component. */
 FILE *fs_create(const char *path);
+/* Creates a file for writing; fails (EEXIST) when anything, even a dangling
+ * symbolic link, already has that name. Python: open(path, "xb"). */
+FILE *fs_create_new(const char *path);
 /* A new, uniquely named file next to `dest`, open for reading and writing;
  * *name receives its path (arena memory). */
 FILE *fs_create_temp(Arena *a, const char *dest, const char **name);

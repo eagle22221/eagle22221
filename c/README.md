@@ -38,6 +38,7 @@ compiled from source into the program. Without `third_party/` (or with
     vex functions FILE [--grep TEXT]
     vex disasm FILE [LOCATION] [-n COUNT]
     vex xrefs FILE TARGET | --string TEXT
+    vex split FILE FOLDER           save the parts of the file as separate files
     vex patch bytes  FILE LOCATION HEX   [--offset] (-o OUT | --in-place)
     vex patch nop    FILE LOCATION BYTES [--offset] (-o OUT | --in-place)
     vex patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)
@@ -56,6 +57,9 @@ report and waits for Enter before the window closes.
   regions) are extra commands; Python has these views but no command for them.
 * A file given without a command is shown as a report instead of being a
   usage error, and `--json` / `--color` are accepted after the command too.
+* `split` saves the parts of the file and the files embedded in it, byte for
+  byte as the Python version does, but not Windows resources (the `resources/`
+  folder and its rows of `index.txt`): there is no resource reader here.
 * Commands of the Python version that are not in `vex --help` answer
   "only available in the Python version".
 * Where Python stops with a traceback the C program does not: a `--offset`

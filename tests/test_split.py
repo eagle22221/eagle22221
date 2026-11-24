@@ -194,8 +194,9 @@ def test_overlay_is_saved(tmp_path):
     assert (tmp_path / "out" / last["path"]).read_bytes() == payload
 
 
-@pytest.mark.parametrize("patched", [b"../x\0\0\0\0", b"/../../x", b"a\\..\\b\0\0", b"..\0\0\0\0\0\0",
-                                     b"C:\\x\0\0\0\0", b"a b\tc\n\0\0"])
+@pytest.mark.parametrize("patched", [
+    b"../x\0\0\0\0", b"/../../x", b"a\\..\\b\0\0", b"..\0\0\0\0\0\0", b"C:\\x\0\0\0\0",
+    b"a b\tc\n\0\0"])
 def test_hostile_pe_section_names_stay_inside_the_folder(patched, tmp_path):
     data = fixture_bytes("hello_pe64.exe")
     assert data.count(b".rdata\0\0") == 1
@@ -269,6 +270,16 @@ def test_zip_length_includes_the_archive_comment():
     blob = make_zip(comment=b"the end of the archive")
     data, offset = appended(blob)
     assert embedded(data) == [(offset, len(blob), f"embedded/000_0x{offset:08x}.zip")]
+
+
+def test_zip_ends_at_the_first_end_record_that_fits():
+    blob = BLOBS["zip"]
+    size, offset = struct.unpack_from("<II", blob, blob.rindex(b"PK\x05\x06") + 12)
+    # A second end record further on that describes the same archive start.
+    later = len(blob) + 10
+    second = b"PK\x05\x06" + bytes(8) + struct.pack("<IIH", later - offset, offset, 0)
+    data, at = appended(blob + b"\xaa" * 10 + second)
+    assert embedded(data) == [(at, len(blob), f"embedded/000_0x{at:08x}.zip")]
 
 
 def test_pe_length_is_the_end_of_its_last_section_not_of_its_symbol_table():
@@ -408,9 +419,101 @@ def test_pe_shorter_than_512_bytes_is_not_reported():
         struct.pack_into("<II", blob, table + 40 * i + 16, 16, 300)   # raw size, pointer
     struct.pack_into("<I", blob, PE32_HEADER + 24 + 60, 400)          # SizeOfHeaders
     assert embedded(appended(bytes(blob))[0]) == []
+    struct.pack_into("<I", blob, PE32_HEADER + 24 + 60, 511)
+    assert embedded(appended(bytes(blob))[0]) == []
     struct.pack_into("<I", blob, PE32_HEADER + 24 + 60, 512)
     data, offset = appended(bytes(blob))
     assert embedded(data) == [(offset, 512, f"embedded/000_0x{offset:08x}.exe")]
+
+
+def pe_with_sections(count: int, dll: bool = False) -> bytes:
+    """A bare PE64 image: headers, `count` section entries, 16 bytes of data
+    at 8192 shared by all of them."""
+    out = b"MZ" + bytes(58) + struct.pack("<I", 64) + b"PE\0\0" + struct.pack(
+        "<HHIIIHH", 0x8664, count, 0, 0, 0, 240, 0x2022 if dll else 0x22)
+    optional = bytearray(240)
+    struct.pack_into("<H", optional, 0, 0x20b)
+    struct.pack_into("<I", optional, 60, 4096)                  # SizeOfHeaders
+    out += optional
+    for i in range(count):
+        out += b".s%-6d" % i + struct.pack("<IIII", 16, 0x1000 * (i + 1), 16, 8192) + bytes(16)
+    return out + bytes(8192 + 16 - len(out))
+
+
+def test_pe_may_have_up_to_96_sections():
+    for count, dll, expected in ((1, False, "exe"), (96, False, "exe"), (96, True, "dll"),
+                                 (97, False, None), (0, False, None)):
+        blob = pe_with_sections(count, dll)
+        data, offset = appended(blob)
+        assert embedded(data) == ([] if expected is None else [
+            (offset, 8208, f"embedded/000_0x{offset:08x}.{expected}")]), count
+
+
+def test_elf_sections_without_contents_in_the_file_do_not_count():
+    blob = bytearray(BLOBS["elf"])
+    assert struct.unpack_from("<I", blob, 32)[0] == 580 and len(blob) == 580 + 8 * 40
+    entry = 580 + 4 * 40                                        # .comment
+    assert struct.unpack_from("<I", blob, entry + 4)[0] == 1    # ordinary contents
+    struct.pack_into("<I", blob, entry + 20, 0x100000)          # its size: far past the end
+    assert embedded(appended(bytes(blob))[0]) == []
+    struct.pack_into("<I", blob, entry + 4, 8)                  # SHT_NOBITS: nothing in the file
+    data, offset = appended(bytes(blob))
+    assert embedded(data) == [(offset, 900, f"embedded/000_0x{offset:08x}.elf")]
+
+
+def test_elf_segments_count_towards_its_length():
+    blob = bytearray(BLOBS["elf"])
+    assert struct.unpack_from("<IHH", blob, 28)[0] == 52        # program headers at 52
+    struct.pack_into("<I", blob, 52 + 4, 8)                     # p_offset; then p_filesz:
+    struct.pack_into("<I", blob, 52 + 16, 992)                  # the segment ends at 1000
+    data, offset = appended(bytes(blob) + bytes(100))
+    assert embedded(data) == [(offset, 1000, f"embedded/000_0x{offset:08x}.elf")]
+    assert embedded(appended(bytes(blob) + bytes(90))[0]) == []
+
+
+def big_elf(entries: int, peak_at: int, peak: int, order: str = "<") -> bytes:
+    """ELF64 header and a table of small sections, one of which ends at `peak`."""
+    out = b"\x7fELF\x02" + (b"\x01" if order == "<" else b"\x02") + b"\x01" + bytes(9)
+    out += struct.pack(order + "HHIQQQIHHHHHH", 2, 62, 1, 0, 0, 64, 0, 64, 56, 0, 64, entries, 0)
+    for i in range(entries):
+        offset, size = (peak - 16, 16) if i == peak_at else (64, 1 + i % 90)
+        out += struct.pack(order + "IIQQQQIIQQ", 0, 1, 0, 0, offset, size, 0, 0, 0, 0)
+    return out + bytes(max(0, peak - len(out)))
+
+
+@pytest.mark.parametrize("order", "<>")
+def test_elf_with_many_sections_is_measured_to_its_furthest_section(order):
+    for entries, peak_at in ((1, 0), (255, 254), (256, 0), (257, 256), (700, 255), (700, 256),
+                             (700, 511), (700, 512), (700, 699), (1000, 3)):
+        table_end = 64 + 64 * entries
+        for peak in (table_end + 5000, 100):                    # beyond the table, or not
+            blob = big_elf(entries, peak_at, peak, order)
+            data, offset = appended(blob, gap=7 + entries % 64)
+            assert embedded(data) == [(offset, max(peak, table_end),
+                                       f"embedded/000_0x{offset:08x}.elf")], (entries, peak_at)
+
+
+def test_one_table_read_as_two_different_kinds_of_table():
+    # The first header takes the bytes as program headers (which then reach
+    # past the end of the file), the second as section headers (which fit).
+    table = b"".join(struct.pack("<IIQQQQIIQQ", 0, 1, 0, 0, 64, 100, 0, 0, 0, 0)
+                     for _ in range(600))
+    ident = b"\x7fELF\x02\x01\x01" + bytes(9)
+    first = ident + struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0, 128, 0, 0, 64, 56, 600, 64, 0, 0)
+    second = ident + struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0, 0, 64, 0, 64, 56, 0, 64, 600, 0)
+    data = b"\xaa" + first + second + table
+    assert check_carve(data) == reference_carve(data) == [(65, 64 + 600 * 64, "elf")]
+    # The same with one byte order after the other: small little-endian
+    # numbers are huge big-endian ones.
+    table = b"".join(struct.pack("<IIIIIIIIII", 0, 1, 0, 0, 52, 100, 0, 0, 0, 0)
+                     for _ in range(600))
+    fields = (2, 3, 1, 0, 0, 0, 0, 52, 32, 0, 40, 600, 0)
+    first = b"\x7fELF\x01\x02\x01" + bytes(9) + struct.pack(
+        ">HHIIIIIHHHHHH", *fields[:5], 104, *fields[6:])
+    second = b"\x7fELF\x01\x01\x01" + bytes(9) + struct.pack(
+        "<HHIIIIIHHHHHH", *fields[:5], 52, *fields[6:])
+    data = b"\xaa" + first + second + table
+    assert check_carve(data) == reference_carve(data) == [(53, 52 + 600 * 40, "elf")]
 
 
 def test_elf_shorter_than_84_bytes_is_not_reported():
@@ -451,6 +554,21 @@ def test_broken_resources_are_skipped_and_the_rest_is_still_saved(tmp_path):
     assert [p for p in result["pieces"] if p["kind"] == "resource"] == []
     assert sorted(os.listdir(tmp_path / "out")) == ["index.txt", "parts"]
     assert result["count"] == 6
+
+
+def test_resources_that_would_share_a_file_name_are_kept_apart(tmp_path, monkeypatch):
+    from vex import resources
+    fake = [resources.Resource("RCDATA", name, 1033, 3472 + i, 4, 0)
+            for i, name in enumerate(["A/B", "A_B", "a_b", "C"])]
+    monkeypatch.setattr(resources, "list_resources", lambda binary: fake)
+    result = split.split(vex.load(fixture_path("resdemo.exe")), str(tmp_path / "out"))
+    rows = [p for p in result["pieces"] if p["kind"] == "resource"]
+    assert [p["path"] for p in rows] == [
+        "resources/RCDATA_A_B_1033.bin", "resources/RCDATA_A_B_1033_2.bin",
+        "resources/RCDATA_a_b_1033_3.bin", "resources/RCDATA_C_1033.bin"]
+    data = fixture_bytes("resdemo.exe")
+    assert [(tmp_path / "out" / p["path"]).read_bytes() for p in rows] == \
+        [data[3472 + i:3476 + i] for i in range(4)]
 
 
 def test_elf_files_have_no_resource_group():
@@ -955,6 +1073,33 @@ def test_carver_agrees_with_the_reference_on_random_bytes():
     for round_ in range(300):
         data = b"\0" + b"".join(rng.choice(alphabet) for _ in range(rng.randint(1, 120)))
         assert check_carve(data) == reference_carve(data), round_
+
+
+def test_plan_copes_with_damaged_programs():
+    rng = random.Random(4321)
+    for name in ALL_FIXTURES:
+        original = fixture_bytes(name)
+        for _ in range(40):
+            data = bytearray(original)
+            for _ in range(rng.randint(1, 12)):
+                data[rng.randrange(len(data))] = rng.choice((0, 0xff, rng.randrange(256)))
+            if rng.random() < 0.3:
+                data = data[:rng.randrange(64, len(data))]
+            if rng.random() < 0.3:
+                data += rng.choice(list(BLOBS.values()))
+            try:
+                binary = vex.load_bytes(bytes(data), name)
+            except vex.VexError:
+                continue
+            pieces = split.plan(binary)
+            paths = [p["path"] for p in pieces if p["path"] is not None]
+            assert len(set(map(str.lower, paths))) == len(paths)
+            assert all(len(p.split("/")) == 2 and ".." not in p.split("/") for p in paths)
+            parts = [p for p in pieces if p["kind"] not in ("embedded", "resource")]
+            assert b"".join(bytes(p["size"]) if p["data"] is None else bytes(p["data"])
+                            for p in parts) == bytes(data)
+            assert all(p["data"] is None or len(p["data"]) == p["size"] for p in pieces)
+            check_carve(bytes(data))
 
 
 LIMIT = 20.0        # seconds; each case takes well under one, a quadratic carver minutes

@@ -32,7 +32,8 @@ from urllib.parse import quote
 
 import pytest
 
-from vex import server
+import vex
+from vex import server, split
 from vex.cli import main as python_main
 from conftest import FIXTURES, fixture_bytes, fixture_path
 
@@ -58,6 +59,11 @@ def _make(target):
 
 @pytest.fixture(scope="session")
 def c_binary():
+    """The native build; with VEX_TEST_SANITIZED=1 the AddressSanitizer/UBSan
+    build, so that a memory error anywhere fails the test that reaches it."""
+    if os.environ.get("VEX_TEST_SANITIZED"):
+        _make("asan")
+        return C_DIR / "build" / "vex-asan"
     _make("all")
     return C_DIR / "build" / "vex"
 
@@ -68,9 +74,13 @@ def asan_binary():
     return C_DIR / "build" / "vex-asan"
 
 
-def run_c(binary, *args, timeout=120, env=None):
+SANITIZER_ENV = dict(os.environ, ASAN_OPTIONS="abort_on_error=1:detect_leaks=1",
+                     UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
+
+
+def run_c(binary, *args, timeout=120, env=None, cwd=None):
     proc = subprocess.run([str(binary), *map(str, args)], capture_output=True,
-                          timeout=timeout, env=env)
+                          timeout=timeout, env=env or SANITIZER_ENV, cwd=cwd)
     return (proc.returncode, proc.stdout.decode("utf-8", "replace"),
             proc.stderr.decode("utf-8", "replace"))
 
@@ -121,12 +131,37 @@ def without_resource_rows(index, result):
             if not any(f" {path} " in line + " " for path in paths)]
 
 
+def expected_without_resources(source):
+    """What the C edition must write for `source`, worked out with the Python
+    edition's own functions from its pieces minus the resources: the result
+    (without `dest`) and the folder's files, index.txt included."""
+    binary = vex.load(str(source))
+    pieces = split.plan(binary)
+    own = [p for p in pieces if p["kind"] != "resource"]
+    files = {p["path"]: bytes(p["data"]) for p in own if p["path"]}
+    files["index.txt"] = split.index_text(binary, own).encode("utf-8")
+    result = split.preview(binary, own)
+    result.pop("dest")
+    return result, files, len(pieces) - len(own)
+
+
 def split_both(c_binary, tmp_path, source, tag="x"):
     """Splits `source` with both editions; returns their (status, result,
     folder) and has checked that they agree."""
     c_dest, py_dest = tmp_path / f"c-{tag}", tmp_path / f"py-{tag}"
     c_code, c_out, c_err = run_c(c_binary, "--json", "split", source, c_dest)
     py_code, py_out, py_err = run_python("--json", "split", source, py_dest)
+    if c_code == 0 and py_code != 0:
+        # Only a resource can stop the Python edition where the C edition goes
+        # on (a damaged resource name too long for a file name, for one). The
+        # pieces both editions have must then still be the same.
+        result, files, resources = expected_without_resources(source)
+        assert resources > 0, (c_err, py_err)
+        c_result = json.loads(c_out)
+        assert c_result.pop("dest") == str(c_dest)
+        assert c_result == result and tree(c_dest) == files
+        shutil.rmtree(py_dest, ignore_errors=True)
+        return c_code, dict(c_result, dest=str(c_dest)), c_dest
     assert c_code == py_code, (c_err, py_err)
     if py_code != 0:
         assert c_err == py_err
@@ -136,11 +171,12 @@ def split_both(c_binary, tmp_path, source, tag="x"):
     assert c_result["dest"] == str(c_dest)
     assert without_resources(c_result) == without_resources(py_result)
     c_tree, py_tree = tree(c_dest), tree(py_dest)
-    has_resources = any(p["kind"] == "resource" for p in py_result["pieces"])
-    if has_resources:
+    if any(p["kind"] == "resource" for p in py_result["pieces"]):
+        # index.txt differs by the resource rows, and only by them.
         c_index, py_index = c_tree.pop("index.txt"), py_tree.pop("index.txt")
         assert (without_resource_rows(c_index, py_result)
                 == without_resource_rows(py_index, py_result))
+        assert c_index == expected_without_resources(source)[1]["index.txt"]
     assert c_tree == py_tree
     # What the result promises is what is on disk.
     saved = [p for p in c_result["pieces"] if p["path"]]
@@ -515,12 +551,112 @@ def test_errors_match_python(c_binary, tmp_path):
 
 
 def test_usage_errors(c_binary, tmp_path):
-    for args in (["split"], ["split", fixture_path("hello_elf64")],
-                 ["split", fixture_path("hello_elf64"), tmp_path / "o", "extra"]):
+    elf = fixture_path("hello_elf64")
+    for args, missing in ((["split"], "FILE, FOLDER"), (["split", elf], "FOLDER"),
+                          (["split", elf, tmp_path / "o", "extra"], None)):
         c, py = run_c(c_binary, *args), run_python(*args)
         assert c[0] == py[0] == 2 and c[1] == py[1] == ""
+        if missing:
+            wanted = f"error: the following arguments are required: {missing}\n"
+            assert c[2].endswith(wanted) and py[2].endswith(wanted)
     assert not (tmp_path / "o").exists()
     assert "split FILE FOLDER" in run_c(c_binary, "--help")[1]
+
+
+ODD_FOLDERS = ["", ".", "./", "new1", "new2/", "new3/.", "new4/sub/..", "a//b/", "empty/",
+               "link_empty", "link_full", "dangling", "link_file", "afile", "afile/x",
+               "afile/x/y", "full", "full/new", "missing/../new5", "./new6/./deep", "new7//",
+               "/", "new8/\u00e9t\u00e9", "new9 with space", "..", "../outside"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symbolic links and POSIX path rules")
+@pytest.mark.parametrize("folder", ODD_FOLDERS)
+def test_odd_destinations_match_python(c_binary, tmp_path, folder):
+    """Folders named in unusual ways, taken or not: the same outcome, the
+    same message, the same files, and nothing written anywhere else."""
+    source = fixture_path("sample.dll")
+    outcome, trees = {}, {}
+    for edition in ("c", "py"):
+        root = tmp_path / edition / "cwd"
+        root.mkdir(parents=True)
+        (root / "empty").mkdir()
+        (root / "full").mkdir()
+        (root / "full" / "f").write_text("x")
+        (root / "afile").write_text("x")
+        os.symlink("empty", root / "link_empty")
+        os.symlink("full", root / "link_full")
+        os.symlink("nowhere", root / "dangling")
+        os.symlink("afile", root / "link_file")
+        if edition == "c":
+            result = run_c(c_binary, "--json", "split", source, folder, cwd=root)
+        else:
+            here = os.getcwd()
+            os.chdir(root)
+            try:
+                result = run_python("--json", "split", source, folder)
+            finally:
+                os.chdir(here)
+        outcome[edition] = (result[0], result[1].replace(str(tmp_path / edition), "ROOT"),
+                            result[2])
+        top = tmp_path / edition
+        trees[edition] = sorted(
+            (p.relative_to(top).as_posix(),
+             os.readlink(p) if p.is_symlink() else p.read_bytes() if p.is_file() else None)
+            for p in top.rglob("*"))
+    assert outcome["c"] == outcome["py"]
+    assert trees["c"] == trees["py"]
+    if outcome["c"][0] != 0:
+        assert outcome["c"][1] == "" and outcome["c"][2].startswith("vex: error: ")
+        assert len(trees["c"]) == 9                         # exactly what was set up
+
+
+def test_a_link_to_an_empty_folder_is_accepted_like_python(c_binary, tmp_path):
+    for edition, run in (("c", lambda *a: run_c(c_binary, *a)), ("py", run_python)):
+        root = tmp_path / edition
+        (root / "real").mkdir(parents=True)
+        os.symlink("real", root / "link")
+        code, _, err = run("split", fixture_path("sample.dll"), root / "link")
+        assert code == 0, err
+        assert (root / "real" / "index.txt").is_file()
+    assert tree(tmp_path / "c" / "real") == tree(tmp_path / "py" / "real")
+
+
+def test_long_section_names_give_usable_file_names(c_binary, tmp_path):
+    """An ELF section name can be longer than a file name may be."""
+    data = bytearray(fixture_bytes("hello_elf64"))
+    start = data.index(b"\x00.symtab\x00") + 1         # the first name in .shstrtab
+    end = 13960 + 282 - 1                               # its last byte, a NUL
+    assert data[end] == 0
+    filler = b"n" * 63 + b"/" + b"\xc3\xa9" * ((end - start - 64) // 2)
+    data[start:end] = filler.ljust(end - start, b"z")
+    source = tmp_path / "long.bin"
+    source.write_bytes(bytes(data))
+    code, result, folder = split_both(c_binary, tmp_path, source)
+    assert code == 0
+    names = [p["path"].split("/")[1] for p in result["pieces"] if p["path"]]
+    assert max(map(len, names)) == len("00_") + 64 + len(".bin")
+    assert max(len(p["name"]) for p in result["pieces"]) > 150
+    assert rebuilt(result, folder) == bytes(data)
+
+
+def test_index_and_table_with_hostile_names_match_python(c_binary, tmp_path):
+    """Names with line breaks, escape sequences and non-ASCII letters: one
+    row per piece in index.txt, and the same text on the terminal."""
+    data = fixture_bytes("hello_pe64.exe").replace(b".rdata\x00\x00", b"a\nb\x1b[1m\x00")
+    data = data.replace(b".pdata\x00\x00", b"\xc3\xa9t\xc3\xa9 x\x00")
+    assert len(data) == len(fixture_bytes("hello_pe64.exe"))
+    source = tmp_path / "h\u00e9llo w\u00f6rld.exe"
+    source.write_bytes(data + b"-" + make_png())
+    code, result, folder = split_both(c_binary, tmp_path, source)
+    assert code == 0
+    index = (folder / "index.txt").read_bytes()
+    assert index.count(b"\n") == 1 + len(result["pieces"])
+    assert index.startswith(b"h?llo w?rld.exe: ") and b"\x1b" not in index
+    assert b"  a?b?[1m\n" in index and b"  ?t? x\n" in index
+    c = run_c(c_binary, "split", source, tmp_path / "c2")
+    py = run_python("split", source, tmp_path / "py2")
+    assert c[0] == py[0] == 0
+    assert c[1].replace(str(tmp_path / "c2"), "D") == py[1].replace(str(tmp_path / "py2"), "D")
 
 
 # --- damaged programs -------------------------------------------------------------
@@ -570,19 +706,19 @@ def test_damaged_programs_match_python(c_binary, tmp_path, seed):
     rng = random.Random(4000 + seed)
     blobs = _fuzz_blobs()
     source = tmp_path / "damaged.bin"
-    split = 0
-    for round_number in range(40):
+    succeeded = 0
+    for round_number in range(100):
         data = _damaged(rng, blobs)
         source.write_bytes(data)
         code, result, folder = split_both(c_binary, tmp_path, source, str(round_number))
         if code == 0:
-            split += 1
+            succeeded += 1
             for piece in result["pieces"]:
                 if piece["path"]:
                     assert re.fullmatch(r"(parts|embedded)/[A-Za-z0-9._-]+", piece["path"])
             shutil.rmtree(folder)
-            shutil.rmtree(tmp_path / f"py-{round_number}")
-    assert split >= 10
+            shutil.rmtree(tmp_path / f"py-{round_number}", ignore_errors=True)
+    assert succeeded >= 30
     assert sorted(p.name for p in tmp_path.iterdir()) == ["damaged.bin"]
 
 
@@ -601,15 +737,13 @@ def test_hostile_input_is_safe_under_asan(asan_binary, tmp_path):
     sanitizer report, nothing written outside the destination."""
     rng = random.Random(99)
     blobs = _fuzz_blobs()
-    env = dict(os.environ, ASAN_OPTIONS="abort_on_error=1:detect_leaks=1",
-               UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
     source, dest = tmp_path / "fuzz.bin", tmp_path / "dest"
 
     def exercise(data):
         source.write_bytes(data)
         for args in (["--json", "split", source, dest], ["split", source, dest]):
             shutil.rmtree(dest, ignore_errors=True)
-            code, _, err = run_c(asan_binary, *args, env=env)
+            code, _, err = run_c(asan_binary, *args)
             assert code in (0, 1), (code, err[-400:])
             for bad in ("AddressSanitizer", "runtime error", "LeakSanitizer", "ERROR:"):
                 assert bad not in err, err[-600:]
@@ -699,32 +833,139 @@ def pe_headers(starts):
     return bytes(stubs) + header + bytes(optional) + bytes(table)
 
 
+def png_nest(count, closed):
+    """A PNG whose every chunk holds the start of another PNG that, read on
+    its own, joins the outer chunk chain."""
+    link = (struct.pack(">I", 41) + b"juNK" + PNG_START + struct.pack(">I", 0) + b"miNI"
+            + bytes(4))
+    return PNG_START + link * count + (_chunk(b"IEND", b"") if closed else b"")
+
+
+def gif_nest(count, images, closed, first_image=False):
+    """A GIF of comment blocks, each holding the start of another GIF that
+    joins the outer block chain (after an image of its own if `images`)."""
+    image = b"\x2c" + bytes(9) + b"\x02"
+    inner = GIF_START + (image if images else b"\x21\xfe") + b"\x01\x00"
+    link = b"\x21\xfe" + bytes([len(inner)]) + inner + b"\x00"
+    return (GIF_START + (image + b"\x01\x00\x00" if first_image else b"") + link * count
+            + (b"\x3b" if closed else b""))
+
+
+def elf_windows(count, entries, wide=True, order="<", past_end=True, step=1):
+    """`count` ELF headers sharing one section header table of `entries`
+    entries; each uses a different window of it. With `past_end` the last
+    entry, which is in every window, reaches past the end of any file."""
+    head, entry = (64, 64) if wide else (52, 40)
+    out = bytearray()
+    for i in range(count):
+        ident = b"\x7fELF" + bytes([2 if wide else 1, 1 if order == "<" else 2, 1]) + bytes(9)
+        skip = i * step % entries
+        shoff, shnum = (count - i) * head + skip * entry, entries - skip
+        if wide:
+            out += ident + struct.pack(order + "HHIQQQIHHHHHH", 2, 62, 1, 0, 0, shoff, 0, 64,
+                                       56, 0, 64, shnum, 0)
+        else:
+            out += ident + struct.pack(order + "HHIIIIIHHHHHH", 2, 3, 1, 0, 0, shoff, 0, 52,
+                                       32, 0, 40, shnum, 0)
+    table = bytearray(entry * entries)
+    for i in range(entries):
+        kind, offset, size = (8, 0x7FFF0000, 0x7FFF0000) if i % 7 == 3 else (1, 64, 100 + i % 50)
+        if past_end and i == entries - 1:
+            kind, offset, size = 1, 0x7F000000, 16
+        struct.pack_into(order + "I", table, entry * i + 4, kind)
+        struct.pack_into(order + ("QQ" if wide else "II"), table,
+                         entry * i + (24 if wide else 16), offset, size)
+    return bytes(out + table)
+
+
+def elf_segments(count, entries, wide, order):
+    """ELF headers sharing one program header table, each a different
+    window; the entry furthest into the table decides every length."""
+    head, entry = (64, 56) if wide else (52, 32)
+    out = bytearray()
+    for i in range(count):
+        ident = b"\x7fELF" + bytes([2 if wide else 1, 1 if order == "<" else 2, 1]) + bytes(9)
+        phoff, phnum = (count - i) * head + (i % entries) * entry, entries - i % entries
+        if wide:
+            out += ident + struct.pack(order + "HHIQQQIHHHHHH", 2, 62, 1, 0, phoff, 0, 0, 64,
+                                       56, phnum, 64, 0, 0)
+        else:
+            out += ident + struct.pack(order + "HHIIIIIHHHHHH", 2, 3, 1, 0, phoff, 0, 0, 52,
+                                       32, phnum, 40, 0, 0)
+    table = bytearray(entry * entries)
+    for i in range(entries):
+        struct.pack_into(order + ("Q" if wide else "I"), table, entry * i + (8 if wide else 4),
+                         i * 3)
+        struct.pack_into(order + ("Q" if wide else "I"), table, entry * i + (32 if wide else 16),
+                         i % 11)
+    return bytes(out + table) + bytes(3 * entries)
+
+
+def elf_worst_case(count, entries):
+    """ELF headers that each read a full-size section table, at 64 different
+    byte alignments; only the entries at its very end rule a header out."""
+    out = bytearray()
+    for i in range(count):
+        out += b"\x7fELF\x02\x01\x01" + bytes(9) + struct.pack(
+            "<HHIQQQIHHHHHH", 2, 62, 1, 0, 0, (count - i) * 64 + i % 64, 0, 64, 56, 0, 64,
+            entries, 0)
+    # Read at any alignment, the last entry is a section far past the end.
+    return bytes(out) + bytes(64 * (entries - 1)) + b"\x7f" * 128
+
+
 def adversarial_inputs(scale):
-    """Payloads that cost a naive carver time quadratic in their size.
+    """Payloads that cost a naive carver time quadratic in their size, and
+    structures that run into each other, where a shortcut could go wrong.
     scale=1 is small enough for the Python edition and the sanitizer build."""
-    return {
+    late = b"\x3b" + _chunk(b"IEND", b"") + bytes(50)       # endings that arrive late
+    inputs = {
         "zip-local-headers": b"PK\x03\x04" * (2000 * scale),
         "zip-end-records": b"PK\x05\x06" * (2000 * scale),
         "zip-everything": (b"PK\x03\x04" + b"PK\x05\x06" + b"PK\x01\x02") * (700 * scale),
         "zip-ends-pointing-back": (b"PK\x03\x04" * (300 * scale) + b"".join(
             b"PK\x05\x06" + bytes(8) + struct.pack("<IIH", 4, 22 * i, 0)
             for i in range(300 * scale))),
+        "zip-records-that-do-not-match": (b"PK\x03\x04PK\x05\x06" + bytes(8) + struct.pack(
+            "<IIH", 7, 0x7FFFFFFF, 0)) * (300 * scale),
         "mz": b"MZ" * (4000 * scale),
         "pe-headers": pe_headers(100 * scale),
         "elf-magic": b"\x7fELF\x02\x01\x01\x00" * (1000 * scale),
-        "elf-tables": elf_tables(40 * scale, min(65535, 300 * scale)),
+        "elf-tables": elf_tables(40 * scale, min(65535, 700 * scale)),
+        "elf64-windows": elf_windows(40 * scale, min(65535, 900 * scale)),
+        "elf32-windows": elf_windows(40 * scale, min(65535, 900 * scale), wide=False),
+        "elf32-big-endian-windows": elf_windows(40 * scale, min(65535, 900 * scale),
+                                                wide=False, order=">"),
+        "elf64-big-endian-windows": elf_windows(40 * scale, min(65535, 900 * scale), order=">"),
+        "elf64-windows-that-fit": elf_windows(12 * scale, min(65535, 900 * scale),
+                                              past_end=False, step=77),
+        "elf32-windows-that-fit": elf_windows(12 * scale, min(65535, 900 * scale), wide=False,
+                                              order=">", past_end=False, step=131),
+        "elf64-segments": elf_segments(30 * scale, min(65535, 800 * scale), True, "<"),
+        "elf32-segments": elf_segments(30 * scale, min(65535, 800 * scale), False, ">"),
+        "elf-worst-case": elf_worst_case(70 * scale, min(65535, 700 * scale)),
         "gif-magic": b"GIF89a" * (1300 * scale),
         "png-magic": PNG_SIGNATURE * (1000 * scale),
         "riff-magic": b"RIFF" * (2000 * scale),
         "png-chain-open": png_chain(60 * scale, 300 * scale, False),
         "png-chain-closed": png_chain(60 * scale, 300 * scale, True),
+        "png-nest-open": png_nest(150 * scale, False),
+        "png-nest-closed": png_nest(150 * scale, True),
+        "png-nest-closed-late": png_nest(150 * scale, False) + late,
         "gif-blocks-open": gif_block_chain(60 * scale, 300 * scale, False, 250 * scale),
         "gif-blocks-closed": gif_block_chain(60 * scale, 300 * scale, True, 250 * scale),
         "gif-blocks-no-image": gif_block_chain(60 * scale, 300 * scale, True),
         "gif-blocks-early-image": gif_block_chain(60 * scale, 300 * scale, True, 10),
         "gif-data-open": gif_data_chain(60 * scale, 600 * scale, False),
         "gif-data-closed": gif_data_chain(60 * scale, 600 * scale, True),
+        "gif-nest-cut-off": gif_nest(150 * scale, False, False),
+        "gif-nest-no-image": gif_nest(150 * scale, False, True),
+        "gif-nest-images-inside": gif_nest(150 * scale, True, True),
+        "gif-nest-images-inside-cut-off": gif_nest(150 * scale, True, False),
+        "gif-nest-image-first-cut-off": gif_nest(150 * scale, False, False, first_image=True),
+        "gif-nest-image-first": gif_nest(150 * scale, False, True, first_image=True),
+        "gif-nest-closed-late": gif_nest(150 * scale, True, False) + late,
     }
+    return inputs
 
 
 @pytest.mark.parametrize("label", sorted(adversarial_inputs(1)))
@@ -737,16 +978,52 @@ def test_adversarial_input_matches_python(c_binary, tmp_path, label):
     assert code == 0
 
 
+def test_adversarial_inputs_are_what_they_claim(c_binary, tmp_path):
+    """The structures above really do or do not hold files (checked on the
+    C edition's answers; the test before this one ties them to Python's)."""
+    host = fixture_bytes("hello_elf64")
+    expected = {"png-chain-open": [], "png-chain-closed": ["png"], "png-nest-open": [],
+                "png-nest-closed": ["png"], "gif-blocks-open": [], "gif-blocks-closed": ["gif"],
+                "gif-blocks-no-image": [], "gif-data-open": [], "gif-data-closed": ["gif"],
+                "gif-nest-no-image": [], "gif-nest-images-inside": ["gif"],
+                "gif-nest-image-first": ["gif"], "elf64-windows": [], "elf32-windows": [],
+                "zip-local-headers": [], "mz": [], "pe-headers": []}
+    inputs = adversarial_inputs(1)
+    source = tmp_path / "adversarial.bin"
+    for label, kinds in expected.items():
+        source.write_bytes(host + inputs[label])
+        code, out, err = run_c(c_binary, "--json", "split", source, tmp_path / label)
+        assert code == 0, err
+        found = [p for p in json.loads(out)["pieces"] if p["kind"] == "embedded"]
+        assert [p["path"].rsplit(".", 1)[1] for p in found] == kinds, label
+    for label in ("elf64-windows-that-fit", "elf32-windows-that-fit", "elf64-segments",
+                  "elf32-segments"):
+        source.write_bytes(host + inputs[label])
+        code, out, err = run_c(c_binary, "--json", "split", source, tmp_path / label)
+        found = [p for p in json.loads(out)["pieces"] if p["kind"] == "embedded"]
+        assert found and {p["name"] for p in found} == {"elf file"}, label
+
+
 def test_adversarial_input_stays_fast(c_binary, tmp_path):
-    """Megabytes of signatures and shared chains finish in seconds."""
+    """Megabytes of signatures and of structures that share their tails
+    finish in seconds: the work per byte is bounded."""
     source = tmp_path / "big.bin"
     host = fixture_bytes("hello_elf64")
-    payloads = adversarial_inputs(600)
+    payloads = {label: payload for label, payload in adversarial_inputs(300).items()}
     payloads["zip-local-headers-8mb"] = b"PK\x03\x04" * (2 << 20)
+    payloads["zip-end-records-8mb"] = b"PK\x05\x06" * (2 << 20)
     payloads["mz-8mb"] = b"MZ" * (4 << 20)
+    payloads["every-signature-4mb"] = (b"MZ\x7fELFRIFFPK\x03\x04GIF89a" + PNG_SIGNATURE
+                                       + b"PK\x05\x06PE\x00\x00") * ((4 << 20) // 36)
     payloads["png-chain-4mb"] = png_chain(40000, 200000, False)
+    payloads["png-nest-4mb"] = png_nest((4 << 20) // 53, False)
     payloads["gif-blocks-4mb"] = gif_block_chain(100000, 500000, False)
     payloads["gif-data-4mb"] = gif_data_chain(100000, 1000000, False)
+    payloads["gif-nest-4mb"] = gif_nest((4 << 20) // 29, True, False)
+    payloads["pe-headers-4mb"] = pe_headers(500000)
+    payloads["elf-windows-5mb"] = elf_windows(16384, 60000)
+    payloads["elf-worst-case-8mb"] = elf_worst_case(60000, 65535)
+    slowest = 0
     for label, payload in payloads.items():
         source.write_bytes(host + payload)
         dest = tmp_path / "out"
@@ -755,7 +1032,12 @@ def test_adversarial_input_stays_fast(c_binary, tmp_path):
         elapsed = time.monotonic() - started
         assert code == 0, (label, err)
         assert elapsed < 20, (label, len(payload), elapsed)
+        if label in ("elf-worst-case-8mb", "elf-windows-5mb", "pe-headers-4mb",
+                     "png-chain-4mb", "gif-data-4mb", "mz-8mb"):
+            assert '"embedded"' not in out, label           # nothing short-cut the work
+        slowest = max(slowest, elapsed)
         shutil.rmtree(dest)
+    assert slowest < 20
 
 
 # --- the HTTP API -----------------------------------------------------------------
@@ -777,7 +1059,8 @@ class Client:
 @pytest.fixture(scope="module")
 def c_client(c_binary):
     proc = subprocess.Popen([str(c_binary), "gui", "--no-browser", "--port", "0"],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=SANITIZER_ENV)
     found = None
     deadline = time.time() + 30
     while time.time() < deadline:
@@ -842,18 +1125,51 @@ def test_api_split_matches_python(c_client, py_client, tmp_path, name):
     assert c_status == py_status == 200
     assert (c_data["dest"], py_data["dest"]) == (str(c_dest), str(py_dest))
     assert without_resources(c_data) == without_resources(py_data)
-    c_tree, py_tree = tree(c_dest), tree(py_dest)
+    written = tree(c_dest)
+    c_tree, py_tree = dict(written), tree(py_dest)
     if any(p["kind"] == "resource" for p in py_data["pieces"]):
         c_index, py_index = c_tree.pop("index.txt"), py_tree.pop("index.txt")
         assert (without_resource_rows(c_index, py_data)
                 == without_resource_rows(py_index, py_data))
+        assert c_index == expected_without_resources(fixture_path(name))[1]["index.txt"]
     assert c_tree == py_tree
     # A second time into the same folder is refused, by both, the same way.
     c_again = c_client.call("POST", "split", path=fixture_path(name), dest=c_dest)
     py_again = py_client.call("POST", "split", path=fixture_path(name), dest=py_dest)
     assert c_again == (400, {"error": f"{c_dest} {NOT_EMPTY}"})
     assert py_again == (400, {"error": f"{py_dest} {NOT_EMPTY}"})
-    assert tree(c_dest) == c_tree | ({"index.txt": c_index} if "index.txt" not in c_tree else {})
+    assert tree(c_dest) == written
+
+
+def test_api_split_with_embedded_files_matches_python(c_client, py_client, tmp_path):
+    source = tmp_path / "planted.bin"
+    source.write_bytes(build_input(fixture_bytes("resdemo.exe"),
+                                   list(planted_files().values()) + list(near_misses().values())))
+    c_preview = c_client.call("GET", "split", path=source)
+    py_preview = py_client.call("GET", "split", path=source)
+    assert c_preview[0] == py_preview[0] == 200
+    assert without_resources(c_preview[1]) == without_resources(py_preview[1])
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["planted.bin"]
+    c_done = c_client.call("POST", "split", path=source, dest=tmp_path / "c")
+    py_done = py_client.call("POST", "split", path=source, dest=tmp_path / "py")
+    assert c_done[0] == py_done[0] == 200
+    assert without_resources(c_done[1]) == without_resources(py_done[1])
+    result, files, resources = expected_without_resources(source)
+    assert resources > 0 and tree(tmp_path / "c") == files
+    c_tree, py_tree = tree(tmp_path / "c"), tree(tmp_path / "py")
+    del c_tree["index.txt"], py_tree["index.txt"]
+    assert c_tree == py_tree and any(k.startswith("embedded/") for k in c_tree)
+
+
+def test_api_relative_folder_is_reported_absolute(c_client, tmp_path):
+    """The folder is used as given (relative to where the server runs) and
+    reported as an absolute path, as server.py does."""
+    relative = os.path.relpath(tmp_path / "rel")
+    status, data = c_client.call("POST", "split", path=fixture_path("sample.dll"), dest=relative)
+    assert status == 200 and data["dest"] == str(tmp_path / "rel")
+    assert (tmp_path / "rel" / "index.txt").is_file()
+    status, data = c_client.call("POST", "split", path=fixture_path("sample.dll"), dest=relative)
+    assert (status, data) == (400, {"error": f"{relative} {NOT_EMPTY}"})
 
 
 def test_api_errors_match_python(c_client, py_client, tmp_path):

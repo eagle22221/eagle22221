@@ -493,13 +493,17 @@ static uint64_t embedded_at(Carver *c, uint64_t o, const char **ext) {
 
 /* --- pieces --------------------------------------------------------------------- */
 
-/* Every character outside [A-Za-z0-9._-] becomes "_" (one per character,
- * not per byte, as re.sub does on a Python str). */
+enum { MAX_NAME = 64 };             /* characters of a region name kept in a file name */
+
+/* A region name as part of a file name: every character outside
+ * [A-Za-z0-9._-] becomes "_" (one per character, not per byte, as re.sub
+ * does on a Python str), and no more than MAX_NAME of them are kept, so no
+ * name taken from the file can leave the folder or be too long to create. */
 static Str safe_name(Arena *a, Str name) {
     Buf out;
     buf_init(&out, a);
     size_t at = 0;
-    while (at < name.n) {
+    while (at < name.n && out.n < MAX_NAME) {
         uint32_t c = utf8_next(name.p, name.n, &at);
         bool keep = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
                     c == '.' || c == '_' || c == '-';
@@ -507,6 +511,21 @@ static Str safe_name(Arena *a, Str name) {
     }
     if (out.n == 0)
         buf_addc(&out, "unnamed");
+    return buf_str(&out);
+}
+
+/* Text for one cell of index.txt: printable ASCII, so that no name taken
+ * from a hostile file can start a new line or steer a terminal. */
+static Str plain_text(Arena *a, Str text) {
+    Buf out;
+    buf_init(&out, a);
+    size_t at = 0;
+    while (at < text.n) {
+        uint32_t c = utf8_next(text.p, text.n, &at);
+        buf_addch(&out, c >= 0x20 && c <= 0x7E ? (char)c : '?');
+    }
+    if (out.n == 0)
+        return str_c("");
     return buf_str(&out);
 }
 
@@ -531,7 +550,8 @@ static void add_parts(Arena *a, const Binary *b, Pieces *pieces) {
         piece.size = j_number(j_get(r, "size"));
         piece.note = str_c("");
         /* A hostile header can describe a region that starts or ends past
-         * the end of the file; what is saved is the part that exists. */
+         * the end of the file; what is saved is the part that exists (as a
+         * Python slice of the file would be). */
         big start = piece.offset < 0 ? 0 : piece.offset;
         big end = piece.offset + piece.size;
         if (start > (big)b->size)
@@ -542,7 +562,9 @@ static void add_parts(Arena *a, const Binary *b, Pieces *pieces) {
             end = start;
         piece.data = b->data + (uint64_t)start;
         piece.length = (uint64_t)(end - start);
-        if (strcmp(piece.kind, "padding") == 0 && all_zero(piece.data, piece.length)) {
+        if (strcmp(piece.kind, "padding") == 0 && (big)piece.length == piece.size &&
+            all_zero(piece.data, piece.length)) {
+            piece.kind = "padding";
             piece.path = STR_NONE;
             piece.note = str_c("zero padding, not saved");
         } else {
@@ -567,16 +589,12 @@ static void add_embedded(Arena *a, const Binary *b, Pieces *pieces) {
             o++;
             continue;
         }
-        /* The part that holds this offset. Parts are in file order, and so
-         * are the hits, so the search never goes back. */
-        while (part < nparts) {
-            const SplitPiece *p = &pieces->v[part];
-            if ((big)o < p->offset + p->size)
-                break;
+        /* The part it is inside: the last one that starts at or before this
+         * offset. Parts are in file order, and so are the hits, so the search
+         * never goes back. */
+        while (part + 1 < nparts && pieces->v[part + 1].offset <= (big)o)
             part++;
-        }
-        Str where = part < nparts && pieces->v[part].offset <= (big)o ? pieces->v[part].name
-                                                                    : str_c("the file");
+        Str where = nparts ? pieces->v[part].name : str_c("");
         SplitPiece piece;
         memset(&piece, 0, sizeof piece);
         piece.kind = "embedded";
@@ -637,51 +655,113 @@ JVal *split_view(Arena *a, const Split *split, const char *dest) {
 
 /* --- index.txt ------------------------------------------------------------------ */
 
+enum { INDEX_COLUMNS = 6 };
+
+/* Rows first..last-1 of the index, aligned among themselves. */
+static void index_rows(Buf *out, Str (*rows)[INDEX_COLUMNS], size_t first, size_t last) {
+    size_t widths[INDEX_COLUMNS] = {0};
+    for (size_t r = first; r < last; r++)
+        for (size_t i = 0; i < INDEX_COLUMNS; i++)
+            if (rows[r][i].n > widths[i])
+                widths[i] = rows[r][i].n;
+    for (size_t r = first; r < last; r++) {
+        size_t line = out->n;
+        for (size_t i = 0; i < INDEX_COLUMNS; i++) {
+            Str cell = rows[r][i];
+            if (i)
+                buf_addc(out, "  ");
+            if (i == 1)                         /* sizes are right-aligned */
+                for (size_t k = cell.n; k < widths[i]; k++)
+                    buf_addch(out, ' ');
+            buf_adds(out, cell);
+            if (i != 1)
+                for (size_t k = cell.n; k < widths[i]; k++)
+                    buf_addch(out, ' ');
+        }
+        while (out->n > line && out->p[out->n - 1] == ' ')
+            out->n--;
+        buf_addch(out, '\n');
+    }
+}
+
+/* A line about the source file, then one row per piece. Each group (parts,
+ * embedded files) is aligned on its own, so its rows do not depend on what
+ * the other groups hold. */
 Str split_index(Arena *a, const Split *split) {
     const Binary *b = split->binary;
     char digest[65], number[44];
     sha256_hex(b->data, b->size, digest);
     Buf out;
     buf_init(&out, a);
-    buf_printf(&out, "%s  %s bytes  sha256 %s\n", b->path ? platform_basename(b->path) : "",
+    buf_printf(&out, "%s: %s bytes, SHA-256 %s\n",
+               plain_text(a, str_c(b->path ? platform_basename(b->path) : "<memory>")).p,
                dec_big(number, b->size), digest);
+    Str (*rows)[INDEX_COLUMNS] = arena_array(a, split->npieces ? split->npieces : 1, sizeof *rows);
+    size_t parts = 0;
     for (size_t i = 0; i < split->npieces; i++) {
         const SplitPiece *p = &split->pieces[i];
-        char offset[40];
-        buf_printf(&out, "%s  %s  %s  %s  %s  %s\n", hex_big(offset, p->offset),
-                   dec_big(number, p->size), p->kind, p->path.p ? p->path.p : "-", p->name.p,
-                   p->note.p);
+        if (strcmp(p->kind, "embedded") != 0)
+            parts = i + 1;                      /* the parts all come first */
+        rows[i][0] = p->offset >= 0 && p->offset <= (big)UINT64_MAX
+                         ? str_printf(a, "0x%08" PRIx64, (uint64_t)p->offset)
+                         : str_printf(a, "0x%s", dec_big(number, p->offset));
+        rows[i][1] = str_printf(a, "%s", dec_big(number, p->size));
+        rows[i][2] = str_c(p->kind);
+        rows[i][3] = p->path.p ? p->path : str_c("-");
+        rows[i][4] = plain_text(a, p->name);
+        rows[i][5] = plain_text(a, p->note);
     }
+    index_rows(&out, rows, 0, parts);
+    index_rows(&out, rows, parts, split->npieces);
     return buf_str(&out);
 }
 
 /* --- writing -------------------------------------------------------------------- */
 
-/* os.makedirs(path, exist_ok=True): the folder, after any missing parents. */
+/* os.makedirs(path, exist_ok=True): the folder, after any missing parents.
+ * False with errno when it cannot be made. */
 static bool make_folders(Arena *a, const char *path) {
-    if (fs_mkdir(path) || fs_kind(path, true) == FS_DIR)
+    /* os.path.split(): the last component and what is before it. */
+    size_t end = strlen(path);
+    while (end > 0 && fs_is_separator(path[end - 1]))
+        end--;
+    size_t tail = end;
+    while (tail > 0 && !fs_is_separator(path[tail - 1]))
+        tail--;
+    size_t head = tail;
+    while (head > 0 && fs_is_separator(path[head - 1]))
+        head--;
+    if (head == 0)
+        head = tail;                    /* "/name": the parent is the root itself */
+    if (head > 0 && end > tail) {
+        const char *parent = str_copy(a, path, head).p;
+        if (fs_kind(parent, true) == FS_MISSING) {
+            if (!make_folders(a, parent) && errno != EEXIST)
+                return false;
+            if (end - tail == 1 && path[tail] == '.')
+                return true;            /* "new/." is made once "new" is */
+        }
+    }
+    if (fs_mkdir(path))
         return true;
     int code = errno;
-    size_t n = strlen(path);
-    while (n > 0 && fs_is_separator(path[n - 1]))
-        n--;
-    while (n > 0 && !fs_is_separator(path[n - 1]))
-        n--;
-    while (n > 0 && fs_is_separator(path[n - 1]))
-        n--;
-    if (n == 0) {                       /* no parent left to make */
-        errno = code;
-        return false;
-    }
-    if (!make_folders(a, str_copy(a, path, n).p))
-        return false;
-    return fs_mkdir(path) || fs_kind(path, true) == FS_DIR;
+    if (fs_kind(path, true) == FS_DIR)
+        return true;
+    errno = code;
+    return false;
 }
 
-static void write_file(Err *err, const char *path, const uint8_t *data, uint64_t size) {
-    FILE *f = fs_create(path);
+static NORETURN void cannot_write(Err *err, const char *shown, int code) {
+    err_throw(err, ERR_OTHER, "cannot write to %s: %s", shown, strerror(code));
+}
+
+/* A new file with these bytes. A name that is already taken is an error,
+ * whatever is there (Python: open(path, "xb")). */
+static void write_file(Err *err, const char *shown, const char *path, const uint8_t *data,
+                       uint64_t size) {
+    FILE *f = fs_create_new(path);
     if (f == NULL)
-        err_throw(err, ERR_OS, "cannot write %s: %s", path, strerror(errno));
+        cannot_write(err, shown, errno);
     bool ok = true;
     int code = 0;
     /* In pieces: fwrite() of several gigabytes at once is not reliable everywhere. */
@@ -698,21 +778,29 @@ static void write_file(Err *err, const char *path, const uint8_t *data, uint64_t
         code = errno;
     }
     if (!ok)
-        err_throw(err, ERR_OS, "cannot write %s: %s", path, strerror(code));
+        cannot_write(err, shown, code);
 }
 
-void split_write(Arena *a, Err *err, const Split *split, const char *folder,
-                 const char *shown) {
-    FsKind kind = fs_kind(folder, true);
-    if (kind == FS_MISSING) {
-        if (!make_folders(a, folder))
-            err_throw(err, ERR_OS, "cannot create %s: %s", shown, strerror(errno));
-    } else {
-        FsEntry *entries = NULL;
-        size_t count = 0;
-        if (kind != FS_DIR || !fs_list(a, folder, 1, &entries, &count) || count > 0)
-            err_throw(err, ERR_OTHER, "%s is not empty; choose a new or empty folder", shown);
+void split_check_folder(Arena *a, Err *err, const char *folder) {
+    if (!platform_exists(folder))
+        return;                         /* it will be created */
+    FsEntry *entries = NULL;
+    size_t count = 0;
+    bool listed = false;
+    if (fs_kind(folder, true) == FS_DIR) {
+        errno = 0;
+        if (!fs_list(a, folder, 1, &entries, &count))
+            cannot_write(err, folder, errno ? errno : EACCES);
+        listed = true;
     }
+    if (!listed || count > 0)
+        err_throw(err, ERR_OTHER, "%s is not empty; choose a new or empty folder", folder);
+}
+
+void split_write(Arena *a, Err *err, const Split *split, const char *folder) {
+    split_check_folder(a, err, folder);
+    if (!make_folders(a, folder))
+        cannot_write(err, folder, errno);
     bool made_parts = false, made_embedded = false;
     for (size_t i = 0; i < split->npieces; i++) {
         const SplitPiece *p = &split->pieces[i];
@@ -722,12 +810,14 @@ void split_write(Arena *a, Err *err, const Split *split, const char *folder,
         if (!*made) {
             const char *sub = str_printf(a, "%s/%s", folder,
                                          made == &made_parts ? "parts" : "embedded").p;
-            if (!fs_mkdir(sub) && fs_kind(sub, false) != FS_DIR)
-                err_throw(err, ERR_OS, "cannot create %s: %s", sub, strerror(errno));
+            if (!make_folders(a, sub))
+                cannot_write(err, folder, errno);
             *made = true;
         }
-        write_file(err, str_printf(a, "%s/%s", folder, p->path.p).p, p->data, p->length);
+        write_file(err, folder, str_printf(a, "%s/%s", folder, p->path.p).p, p->data,
+                   p->length);
     }
     Str index = split_index(a, split);
-    write_file(err, str_printf(a, "%s/index.txt", folder).p, (const uint8_t *)index.p, index.n);
+    write_file(err, folder, str_printf(a, "%s/index.txt", folder).p, (const uint8_t *)index.p,
+               index.n);
 }

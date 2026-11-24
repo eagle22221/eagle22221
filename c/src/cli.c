@@ -328,13 +328,14 @@ static void cmd_report(Session *s) {
     cli_emit(s, d, render_report);
 }
 
-/* Port of cli.py's split command: the pieces are worked out first, so a
- * file that cannot be read leaves no folder behind. */
+/* Port of cli.py's _cmd_split. */
 static void cmd_split(Session *s) {
     const char *folder = s->positional[1];
     const Binary *b = cli_load(s, s->positional[0]);
+    /* Refused before any work is done on the file, as split.py does. */
+    split_check_folder(s->a, s->err, folder);
     const Split *split = split_plan(s->a, b);
-    split_write(s->a, s->err, split, folder, folder);
+    split_write(s->a, s->err, split, folder);
     JVal *d = split_view(s->a, split, platform_abspath(s->a, folder));
     if (!s->json)
         j_set(s->a, d, "message", j_str(s->a, str_printf(s->a, "Saved %" PRIu64 " files to %s",
@@ -776,9 +777,17 @@ static void parse_arguments(Session *s, int argc, char **argv, bool *want_help) 
         cli_usage_error(s, "the following arguments are required: ACTION");
     if (s->command == NULL)
         cli_usage_error(s, "the following arguments are required: COMMAND");
-    if (s->npositional < (size_t)s->command->min_positional)
-        cli_usage_error(s, "the following arguments are required: %s",
-                        s->command->positional_names);
+    if (s->npositional < (size_t)s->command->min_positional) {
+        /* Only the names that are still missing, as argparse lists them. */
+        const char *missing = s->command->positional_names;
+        for (size_t given = 0; given < s->npositional; given++) {
+            const char *comma = strstr(missing, ", ");
+            if (comma == NULL)
+                break;
+            missing = comma + 2;
+        }
+        cli_usage_error(s, "the following arguments are required: %s", missing);
+    }
 }
 
 static bool use_colour(const Session *s) {

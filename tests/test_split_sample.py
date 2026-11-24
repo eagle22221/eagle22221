@@ -176,3 +176,16 @@ def test_vex_still_loads_the_bundle_as_a_64_bit_windows_program():
     assert b.entry == 0x140001060
     assert b.image_base == 0x140000000
     assert [s.name for s in b.sections] == [s.name for s in original.sections]
+
+
+def test_split_finds_exactly_the_three_attached_files(tmp_path):
+    split = pytest.importorskip("vex.split")
+    import vex
+    result = split.split(vex.load(str(BUNDLE)), str(tmp_path / "out"))
+    found = [(p["path"].rsplit(".", 1)[1], p["offset"], p["size"])
+             for p in result["pieces"] if p["kind"] == "embedded"]
+    assert found == [("png", 3072, 3172), ("wav", 6244, 2044), ("zip", 8288, 259)]
+    data = BUNDLE.read_bytes()
+    for p in result["pieces"]:
+        if p["kind"] == "embedded":
+            assert (tmp_path / "out" / p["path"]).read_bytes() == data[p["offset"]:p["offset"] + p["size"]]

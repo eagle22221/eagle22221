@@ -167,6 +167,25 @@ FILE *fs_create(const char *path) {
     return f;
 }
 
+FILE *fs_create_new(const char *path) {
+    wchar_t *wide = to_wide(path);
+    if (wide == NULL) {
+        errno = ENOENT;
+        return NULL;
+    }
+    int fd = _wopen(wide, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
+    free(wide);
+    if (fd < 0)
+        return NULL;
+    FILE *f = _fdopen(fd, "wb");
+    if (f == NULL) {
+        int code = errno;
+        _close(fd);
+        errno = code;
+    }
+    return f;
+}
+
 FILE *fs_create_temp(Arena *a, const char *dest, const char **name) {
     static unsigned counter;
     for (int attempt = 0; attempt < 100; attempt++) {
@@ -214,8 +233,14 @@ bool fs_list(Arena *a, const char *dir, size_t limit, FsEntry **entries, size_t 
     WIN32_FIND_DATAW data;
     HANDLE h = FindFirstFileW(wide, &data);
     free(wide);
-    if (h == INVALID_HANDLE_VALUE)
-        return false;
+    if (h == INVALID_HANDLE_VALUE) {
+        /* The root of an empty drive has no entries at all, not even ".". */
+        if (GetLastError() != ERROR_FILE_NOT_FOUND)
+            return false;
+        *entries = NULL;
+        *count = 0;
+        return true;
+    }
     do {
         if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0)
             continue;
@@ -314,6 +339,19 @@ bool fs_mkdir(const char *path) {
 
 FILE *fs_create(const char *path) {
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
+    if (fd < 0)
+        return NULL;
+    FILE *f = fdopen(fd, "wb");
+    if (f == NULL) {
+        int code = errno;
+        close(fd);
+        errno = code;
+    }
+    return f;
+}
+
+FILE *fs_create_new(const char *path) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
     if (fd < 0)
         return NULL;
     FILE *f = fdopen(fd, "wb");

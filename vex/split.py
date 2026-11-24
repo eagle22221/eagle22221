@@ -44,7 +44,7 @@ _BLOCK = 256                                # ELF table entries summarised per c
 _MAX_BLOCKS = 1 << 16
 
 # Marks left on visited positions: a later walk that reaches one stops there.
-_PNG_SEEN, _GIF_SOFT, _GIF_HARD, _SUB_SOFT, _SUB_HARD = 1, 2, 4, 8, 16
+_PNG_SEEN, _GIF_SOFT, _GIF_HARD = 1, 2, 4
 
 
 def _elf_layouts() -> Dict[Tuple[int, int], tuple]:
@@ -124,15 +124,13 @@ class _Carver:
         data, size = self.data, self.size
         if o + 13 > size:
             return None
-        # Marks, as for PNG, with one twist: a walk that has not met an image
-        # yet fails at the trailer, one that has does not. "Soft" marks are
-        # left by the first kind and only stop walks of that kind; "hard"
-        # marks are left by the second kind and stop every walk.
+        # Marks, as for PNG, on the data sub-blocks every block but the last
+        # leads into. One twist: a walk that has not met an image yet fails at
+        # the trailer, one that has does not. "Soft" marks are left by the
+        # first kind and only stop walks of that kind; "hard" marks are left
+        # by the second kind and stop every walk.
         marks, at, image = self._marked(), o + 13 + _colour_table(data[o + 10]), False
         while at < size:
-            if marks[at] & (_GIF_HARD if image else _GIF_HARD | _GIF_SOFT):
-                return None
-            marks[at] |= _GIF_HARD if image else _GIF_SOFT
             kind = data[at]
             if kind == 0x3B:                            # trailer
                 return ("gif", at + 1 - o) if image else None
@@ -145,8 +143,8 @@ class _Carver:
                 at += 2
             else:
                 return None
-            stop, seen = (_SUB_HARD, _SUB_HARD) if image else \
-                (_SUB_HARD | _SUB_SOFT, _SUB_SOFT)
+            stop, seen = (_GIF_HARD, _GIF_HARD) if image else \
+                (_GIF_HARD | _GIF_SOFT, _GIF_SOFT)
             while True:                                 # data sub-blocks
                 if at >= size or marks[at] & stop:
                     return None
@@ -197,9 +195,8 @@ class _Carver:
         table = pe + 24 + optional
         if not 1 <= count <= 96 or table + 40 * count > size:
             return None
-        length = max(raw + pointer for raw, pointer in
-                     _PE_SECTION.iter_unpack(data[table:table + 40 * count]))
-        length = max(length, _LE32.unpack_from(data, pe + 84)[0])       # SizeOfHeaders
+        length = max(_LE32.unpack_from(data, pe + 84)[0],               # SizeOfHeaders
+                     max(map(sum, _PE_SECTION.iter_unpack(data[table:table + 40 * count]))))
         if length < 512 or o + length > size:
             return None
         return ("dll" if flags & _PE_DLL else "exe"), length

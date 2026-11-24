@@ -1177,11 +1177,13 @@ static void h_split_preview(Req *req) {
 }
 
 static void h_split(Req *req) {
+    /* The folder as it was given: server.py hands it on unchanged. */
+    const char *dest = q_need(req, "dest");
     const Binary *b = load_binary(req, "path", NULL);
-    const char *dest = abspath_param(req, "dest");
+    split_check_folder(req->a, req->err, dest);
     const Split *split = split_plan(req->a, b);
-    split_write(req->a, req->err, split, dest, dest);
-    req->result = split_view(req->a, split, dest);
+    split_write(req->a, req->err, split, dest);
+    req->result = split_view(req->a, split, platform_abspath(req->a, dest));
 }
 
 /* --- POST: patching ---------------------------------------------------------- */

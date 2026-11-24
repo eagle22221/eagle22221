@@ -83,3 +83,21 @@ Human-readable CLI output: the piece table, then `Saved N files to FOLDER`.
   `count` and `bytes` = what would be written; nothing touches the disk.
 - `POST /api/split?path=P&dest=D`   -> performs the split, returns the result.
   A non-empty folder is a 400 error with the message above.
+
+## Clarifications (as implemented by the Python edition, which is the reference)
+
+- Part file names: `<safe>` is cut to 64 characters.
+- PNG: only the IHDR CRC is checked; the file ends after the first IEND chunk.
+- RIFF: length is `size + 8`, with no even-padding adjustment.
+- ZIP: an end record counts only if all 22 bytes and its comment fit in the file.
+- PE: the 64-byte DOS header and `PE+88` bytes must be inside the file; the whole
+  section table must be inside the file; all sections count; DLL bit is 0x2000.
+- ELF: version means `e_ident[6] == 1`; program/section header entry sizes must be
+  exactly 32/56 and 40/64 when the counts are non-zero; both byte orders.
+- A destination that is an existing file is refused with the same "not empty" message.
+- Resources: skipped as a whole if any cannot be read; name collisions get `_2`, `_3`…;
+  a GROUP_ICON piece's size is the rebuilt `.ico` length.
+- index.txt: line 1 is `<basename>: <size> bytes, SHA-256 <hex>`; rows are
+  `0x%08x` offset, right-aligned size, kind, path or `-`, name, note, separated by
+  two spaces; each group (parts, embedded, resources) is aligned on its own;
+  characters outside 0x20–0x7E in names and notes are written as `?`.

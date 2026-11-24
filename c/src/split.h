@@ -33,11 +33,12 @@ Split *split_plan(Arena *a, const Binary *b);
 JVal *split_view(Arena *a, const Split *split, const char *dest);
 /* The text of index.txt. */
 Str split_index(Arena *a, const Split *split);
-/* Writes the pieces and index.txt into `folder`, which is created when it
- * does not exist and must be empty when it does (ERR_OTHER otherwise, with
- * nothing written). `shown` is the folder as the user named it, for
- * messages. Throws ERR_OTHER or ERR_OS. */
-void split_write(Arena *a, Err *err, const Split *split, const char *folder,
-                 const char *shown);
+/* Refuses (ERR_OTHER) a destination that exists and is anything but an
+ * empty folder. */
+void split_check_folder(Arena *a, Err *err, const char *folder);
+/* Writes the pieces and index.txt into `folder` (as the user named it),
+ * which is created when it does not exist and must be empty when it does;
+ * otherwise nothing is written. Throws ERR_OTHER. */
+void split_write(Arena *a, Err *err, const Split *split, const char *folder);
 
 #endif

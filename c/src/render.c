@@ -579,7 +579,7 @@ void render_report(Arena *a, const Style *st, const JVal *d, Lines *out) {
 
 /* The piece table of `vex split`, then the "Saved N files" line. */
 void render_split(Arena *a, const Style *st, const JVal *d, Lines *out) {
-    static const char *const headers[] = {"Offset", "Size", "Kind", "Saved as", "Name", "Note"};
+    static const char *const headers[] = {"Offset", "Size", "Kind", "File", "Name", "Note"};
     Table t;
     table_init(&t, a, headers, 6, 1u << 0 | 1u << 1);
     const JVal *pieces = j_get(d, "pieces");
