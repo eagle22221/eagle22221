@@ -306,37 +306,8 @@ def _aes_ctr(data, w, nr, nonce):
 
 # ---- AES-GCM --------------------------------------------------------------- #
 
-def _ghash(h, data):
-    r = 0xE1 << 120
-    y = 0
-    for i in range(0, len(data), 16):
-        block = data[i:i + 16]
-        if len(block) < 16:
-            block = block + b"\x00" * (16 - len(block))
-        y ^= int.from_bytes(block, "big")
-        # GF(2^128) multiply y * h.
-        z = 0
-        v = y
-        for _ in range(128):
-            if h & (1 << 127):
-                pass  # placeholder to keep structure; real loop below
-            break
-        # Multiply using h bit-by-bit (h fixed, scan its bits MSB->LSB).
-        z = 0
-        v = y
-        hh = h
-        for bit in range(128):
-            if (hh >> (127 - bit)) & 1:
-                z ^= v
-            if v & 1:
-                v = (v >> 1) ^ r
-            else:
-                v >>= 1
-        y = z
-    return y
-
-
 def _gf_mult(x, y):
+    """Multiply two elements of GF(2^128) under the GCM reduction polynomial."""
     r = 0xE1 << 120
     z = 0
     v = x
@@ -350,7 +321,7 @@ def _gf_mult(x, y):
     return z
 
 
-def _ghash_clean(h, data):
+def _ghash(h, data):
     y = 0
     for i in range(0, len(data), 16):
         block = data[i:i + 16]
@@ -368,7 +339,7 @@ def _gcm_j0(h, nonce):
     if len(padded) % 16 != 0:
         padded += b"\x00" * (16 - len(padded) % 16)
     padded += struct.pack(">QQ", 0, len(nonce) * 8)
-    return _ghash_clean(h, padded).to_bytes(16, "big")
+    return _ghash(h, padded).to_bytes(16, "big")
 
 
 def _gcm_ctr(data, w, nr, j0):
@@ -396,7 +367,7 @@ def _aes_gcm(data, w, nr, nonce, op, tag):
         if lenc % 16 != 0:
             padded += b"\x00" * (16 - lenc % 16)
         padded += struct.pack(">QQ", 0, lenc * 8)  # AAD length 0, ciphertext bit length
-        s = _ghash_clean(h, padded)
+        s = _ghash(h, padded)
         return _xor_bytes(s.to_bytes(16, "big"), e_j0)
 
     if op == "encrypt":

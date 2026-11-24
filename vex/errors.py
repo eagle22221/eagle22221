@@ -24,3 +24,7 @@ class UnsupportedError(VexError):
 
 class LocationError(VexError):
     """A symbol name or address given by the user could not be resolved."""
+
+
+class DecodeError(VexError):
+    """A decode/cipher operation rejected its input, parameters or key."""
