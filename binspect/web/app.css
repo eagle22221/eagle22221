@@ -475,6 +475,8 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
   .titleblock { grid-template-columns: repeat(2, 1fr); }
   .cell.w2, .cell.w3, .cell.w6 { grid-column: span 2; }
   .code-grid, .split { grid-template-columns: minmax(0, 1fr); }
+  /* keep multi-column tables legible: scroll the card, not the page */
+  .table-wrap table { min-width: 620px; }
   .pane-body { max-height: 52vh; }
   .insn { grid-template-columns: 8em minmax(0, 1fr); }
   .insn-comment { grid-column: 2; }
