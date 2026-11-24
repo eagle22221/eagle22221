@@ -19,6 +19,7 @@ A step-by-step beginner's guide with screenshots is in
 | Code | Disassembly (x86, x86-64, ARM64; ARM, MIPS, PowerPC best-effort) with names, strings and imports annotated |
 | Functions | Found from symbols, exports, the Windows exception table and call targets; `main` recovered in stripped Linux programs |
 | Cross-references | Every instruction that calls, jumps to or mentions an address, function, import or string |
+| Techniques | Flags protection and evasion techniques — packing/protectors, anti-debugging, VM/sandbox checks, process injection, API hooking, kernel drivers — with evidence and a plain explanation (useful for dissecting cheats and anti-cheat). Identifies only; never defeats them |
 | Game engines | Recognises Unity, Unreal, Godot, GameMaker, Ren'Py, RPG Maker, Electron and others, and says where the assets are |
 | Asset packs | Browse, extract, replace and repack ZIP-family packs, Quake PAK, Doom WAD, Godot PCK, Electron ASAR, Ren'Py RPA |
 | Windows resources | List, extract and replace icons, version info, manifests and embedded data |
@@ -70,6 +71,7 @@ binspect disasm FILE [LOCATION] [-n COUNT]
 binspect xrefs FILE TARGET             who uses this function, import or address
 binspect xrefs FILE --string TEXT      who uses strings containing TEXT
 binspect hexdump FILE [LOCATION] [--offset N] [-n BYTES]
+binspect techniques FILE               protection and evasion techniques in a program
 ```
 
 `LOCATION` and `TARGET` accept a function, symbol or import name (`main`, `puts`,
@@ -124,6 +126,32 @@ Rules the modding features follow:
 
 Only modify software you are allowed to modify, and keep to single-player or offline use where a
 game's rules require it.
+
+## Dissecting cheats and anti-cheat
+
+```
+binspect techniques FILE
+binspect report FILE          # includes the techniques section
+```
+
+`techniques` statically flags the protection and evasion techniques a program uses, each with the
+evidence it was found from and a plain explanation:
+
+- **Packing / protectors** — compressed or protected code (UPX, VMProtect, Themida, …), spotted
+  from packer section names or executable high-entropy code.
+- **Anti-debugging** — checks for a debugger (`IsDebuggerPresent`, `NtQueryInformationProcess`,
+  `ptrace`, …).
+- **VM / sandbox checks** — looks for VirtualBox, VMware, QEMU, Sandboxie and similar artifacts.
+- **Process injection** — writing into and running code in another process
+  (`VirtualAllocEx` + `WriteProcessMemory` + `CreateRemoteThread`, …).
+- **API / input hooking** — `SetWindowsHookEx` and friends.
+- **Kernel driver** — a native-subsystem driver, driver-only imports, or `DeviceIoControl`.
+
+These techniques appear in anti-cheat, DRM, cheats and malware alike, so this is a research view
+on both sides: what a cheat does to your machine, and what techniques an anti-cheat uses. It is
+tuned to stay quiet on ordinary software. **binspect only identifies these techniques — it never
+disables, bypasses or defeats them, and there is nothing here for evading anti-cheat or building
+cheats.**
 
 ## Safety
 
