@@ -53,15 +53,7 @@ def _rotr32(x, n):
 
 
 def _build_sbox():
-    # Multiplicative inverse via exp/log tables over generator 0x03.
-    exp = [0] * 256
-    log = [0] * 256
-    x = 1
-    for i in range(255):
-        exp[i] = x
-        log[x] = i
-        x ^= _gmul(x, 2) if False else 0  # placeholder, replaced below
-    # (Rebuild cleanly: multiply by the generator 3 each step.)
+    # Multiplicative inverse via exp/log tables over the generator 0x03.
     exp = [0] * 256
     log = [0] * 256
     x = 1
