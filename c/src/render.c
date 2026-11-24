@@ -1,5 +1,6 @@
 /* Text renderers (port of the _render_* functions in cli.py). */
 #include "render.h"
+#include "techniques.h"
 
 /* --- styling ------------------------------------------------------------------ */
 
@@ -540,6 +541,11 @@ void render_layout(Arena *a, const Style *st, const JVal *d, Lines *out) {
 
 void render_report(Arena *a, const Style *st, const JVal *d, Lines *out) {
     render_info(a, st, j_get(d, "info"), out);
+    const JVal *techniques = j_get(d, "techniques");
+    if (j_len(techniques) > 0) {
+        heading(a, st, out, "Techniques");
+        render_techniques(a, st, techniques, out);
+    }
     heading(a, st, out, "Sections");
     render_sections(a, st, j_get(d, "sections"), out);
     heading(a, st, out, "Imports");

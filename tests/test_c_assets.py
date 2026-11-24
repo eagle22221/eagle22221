@@ -473,9 +473,10 @@ def test_hostile_input_is_safe_under_asan(asan, tmp_path):
         for _ in range(10):
             exercise(data[:8] + rng.randbytes(rng.randrange(0, 200)))
 
-    # nothing was created in tmp_path outside the destination directory
+    # nothing was created in tmp_path outside the destination directory (the
+    # fuzz input file this test writes is its own, expected artifact)
     after = sorted(p.name for p in tmp_path.iterdir())
-    assert set(after) - set(before) <= {"dest"}
+    assert set(after) - set(before) <= {"dest", "fuzz.bin"}
 
 
 # =============================================================================

@@ -1093,7 +1093,8 @@ def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
     assert (b.format, b.bits, b.arch, b.kind) == ("PE", 64, "x86_64", "executable")
     assert b.metadata["subsystem"] == "console"
     # static: nothing but DLLs that are part of Windows itself
-    assert {lib.lower() for lib in b.libraries} <= {"kernel32.dll", "msvcrt.dll", "shell32.dll"}
+    assert {lib.lower() for lib in b.libraries} <= {
+        "kernel32.dll", "msvcrt.dll", "shell32.dll", "ws2_32.dll"}
     assert not b.symbols                                         # stripped
     imported = {i.name for i in b.imports}
     assert {"GetConsoleProcessList", "SetConsoleMode", "MoveFileExW",

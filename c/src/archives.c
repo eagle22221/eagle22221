@@ -1015,6 +1015,7 @@ static void stream_entry(Ctx *c, FILE *f, uint64_t fsize, size_t rec_index, Sink
                   reprn(c->a_arena, r->name));
     if (!fs_seek(f, data_start))
         err_throw(c->err, ERR_PARSE, "%s: the file ends early", reprn(c->a_arena, r->name));
+    uint32_t crc = 0;           /* verified against the central-directory CRC */
     if (r->method == 0) {
         uint64_t left = r->comp_size, produced = 0;
         uint8_t *buf = arena_alloc(c->a_arena, CHUNK);
@@ -1025,14 +1026,20 @@ static void stream_entry(Ctx *c, FILE *f, uint64_t fsize, size_t rec_index, Sink
             size_t emit = want;
             if (produced + emit > r->size)
                 emit = (size_t)(r->size - produced);
-            if (emit && !sink(sctx, buf, emit))
-                err_throw(c->err, ERR_OS, "%s: write failed", reprn(c->a_arena, r->name));
+            if (emit) {
+                crc = bs_crc32(crc, buf, emit);
+                if (!sink(sctx, buf, emit))
+                    err_throw(c->err, ERR_OS, "%s: write failed", reprn(c->a_arena, r->name));
+            }
             produced += want;
             left -= want;
         }
         if (produced != r->size)
             err_throw(c->err, ERR_PARSE, "%s: the archive holds %" PRIu64 " bytes, its index says "
                       "%" PRIu64, reprn(c->a_arena, r->name), produced, r->size);
+        if (crc != r->crc)
+            err_throw(c->err, ERR_PARSE, "%s: corrupt ZIP entry: Bad CRC-32",
+                      reprn(c->a_arena, r->name));
         return;
     }
     if (r->method != 8)
@@ -1061,8 +1068,11 @@ static void stream_entry(Ctx *c, FILE *f, uint64_t fsize, size_t rec_index, Sink
             size_t emit = got;
             if (produced + emit > r->size)
                 emit = (size_t)(r->size - produced);
-            if (emit && !sink(sctx, outbuf, emit))
-                err_throw(c->err, ERR_OS, "%s: write failed", reprn(c->a_arena, r->name));
+            if (emit) {
+                crc = bs_crc32(crc, outbuf, emit);
+                if (!sink(sctx, outbuf, emit))
+                    err_throw(c->err, ERR_OS, "%s: write failed", reprn(c->a_arena, r->name));
+            }
             produced += got;
         }
         if (st == BS_INFLATE_ERROR)
@@ -1076,6 +1086,8 @@ static void stream_entry(Ctx *c, FILE *f, uint64_t fsize, size_t rec_index, Sink
     if (produced != r->size)
         err_throw(c->err, ERR_PARSE, "%s: the archive holds %" PRIu64 " bytes, its index says "
                   "%" PRIu64, reprn(c->a_arena, r->name), produced, r->size);
+    if (crc != r->crc)
+        err_throw(c->err, ERR_PARSE, "%s: corrupt ZIP entry: Bad CRC-32", reprn(c->a_arena, r->name));
 }
 
 static size_t lookup(Ctx *c, const char *name, const char *action) {
