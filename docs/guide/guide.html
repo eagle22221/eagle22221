@@ -107,6 +107,7 @@ td code { white-space: nowrap; }
     <li><span class="n">Lesson 5</span><span class="t">Imports</span><span class="d">What the program asks the system to do.</span></li>
     <li><span class="n">Lesson 6</span><span class="t">Games and asset packs</span><span class="d">Find the engine, browse a pack, swap in your own file.</span></li>
     <li><span class="n">Lesson 7</span><span class="t">Split a program into its parts</span><span class="d">Save each part as its own file in a folder.</span></li>
+    <li><span class="n">Lesson 8</span><span class="t">Decode and decipher data</span><span class="d">Decode, un-zip and decrypt data you already have.</span></li>
     <li><span class="n">Reference</span><span class="t">Command line and glossary</span><span class="d">The same features, typed instead of clicked.</span></li>
   </ol>
 
@@ -307,6 +308,39 @@ td code { white-space: nowrap; }
 </section>
 
 <section class="lesson">
+  <div class="lesson-no">Lesson 8</div>
+  <h2>Decode and decipher data</h2>
+  <p class="goal">Goal: turn encoded or encrypted data back into something readable, one step at a time.</p>
+  <p>Data is not always stored in the clear. A piece of text might be base64, a lump of bytes might be gzipped, and a string from a file might be scrambled with a cipher. The <b>Decode</b> view is a small workbench for turning such data back into something you can read — a little like having CyberChef built into vex. It works only on data you give it: some text you type, a hex or base64 blob you paste, or a range of the program you have open.</p>
+  <ol>
+    <li>Choose <b>Decode</b> on the left.</li>
+    <li>Say where the data comes from. Type or paste some text, paste a <b>hex</b> or <b>base64</b> blob, or pick a range of the open program by its offset and length. For a quick try, choose <b>Base64</b> and paste <code>H4sIAAAAAAAC/8tIzcnJV0grys9VKEut4AIA4cVYqQ8AAAA=</code>.</li>
+    <li>Build a <b>recipe</b> by adding operations one after another; vex applies them in order, top to bottom. For the blob above, add <b>Gunzip</b> — it was a gzipped message. (Starting instead from plain text, you would add <b>From Base64</b> first, then <b>Gunzip</b>.)</li>
+    <li>Read the result on the right: the data as text at the top, the raw bytes below, the size, and a short guess of what it is — <code>printable text</code>, <code>PNG image</code>, <code>gzip</code>, and so on. Here it reads <code>hello from vex</code>.</li>
+    <li>To decrypt, add a cipher step and type in the key you already have: for example <b>XOR</b> with its key, <b>AES</b> with its key and starting value (IV), or <b>ChaCha20</b> with its key and nonce. Steps the edition you are running cannot do are greyed out.</li>
+  </ol>
+  <figure class="crop-short"><img src="img/decode.png" alt="The Decode view"><figcaption>The Decode view: choose a source, stack up a recipe of steps, and read the result as text and bytes with a guess of the file type.</figcaption></figure>
+  <table>
+    <tr><th>Group</th><th>What it does</th></tr>
+    <tr><td>Text encodings</td><td>Turn base64, base32, hex, base85, URL or quoted-printable text back into bytes; also ROT13, reverse, and reading one character set as another.</td></tr>
+    <tr><td>Decompress</td><td>Expand zlib, gzip, bzip2 or xz data.</td></tr>
+    <tr><td>Classic ciphers</td><td>Caesar (ROT-N), Atbash, Vigenère, rail fence, substitution and repeating-key XOR.</td></tr>
+    <tr><td>With your key</td><td>AES, ChaCha20 and RC4 — decrypted only with the key you supply.</td></tr>
+    <tr><td>Digest</td><td>The MD5, SHA-1, SHA-256 or CRC32 of the data (one way, for checking — not a way to decode).</td></tr>
+  </table>
+  <p>There are also a few search tools (<b>Solve</b>) that try every Caesar shift or a short repeating-XOR key and rank the results by how English-like they look. They help with a simple puzzle; they are not an attack on real encryption, and they only ever work on the data you give them.</p>
+  <div class="box">
+    <h3>What decode does not do</h3>
+    <ul>
+      <li>It never recovers an unknown key and never breaks encryption. You supply the key; decryption works only with the key you already have.</li>
+      <li>It does not defeat protection. There is nothing here for DRM, licence checks or anti-cheat, and packed or encrypted content you do not have the key for stays unreadable.</li>
+      <li>It only transforms the data you give it. vex reads the text, blob or byte range you choose and never runs anything.</li>
+    </ul>
+  </div>
+  <p class="learned"><b>You learned:</b> how to chain decoding and decryption steps into a recipe and read the result — and where the line is: vex transforms data you provide, with a key you supply, and never breaks encryption or protection.</p>
+</section>
+
+<section class="lesson">
   <div class="lesson-no">Reference</div>
   <h2>Command line</h2>
   <p>Everything in the lessons is also available as a command. Put <code>--json</code> right after <code>vex</code> to get output other tools can read.</p>
@@ -331,6 +365,7 @@ td code { white-space: nowrap; }
     <tr><td><code>vex assets replace PACK NAME FILE -o NEW</code></td><td>Writes a new pack with one file swapped</td></tr>
     <tr><td><code>vex resources list FILE</code></td><td>Icons and version details in a Windows program</td></tr>
     <tr><td><code>vex split FILE FOLDER</code></td><td>Saves the parts of a program as files in a folder (lesson 7)</td></tr>
+    <tr><td><code>vex decode SOURCE [--recipe "op|op"]</code></td><td>Decodes, decompresses and deciphers data you give it (lesson 8)</td></tr>
   </table>
   <p>For any command, <code>vex COMMAND --help</code> lists its options.</p>
 

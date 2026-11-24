@@ -21,6 +21,9 @@ cp examples/demo_game/game.exe examples/demo_game/assets.pk3 "$ROOT/practice/dem
 # a program with a picture, a sound and a zip attached, for trying the split command
 python3 examples/make_split_sample.py >/dev/null 2>&1 || true
 cp examples/split_sample/bundle_pe64.exe "$ROOT/practice/"
+# a handful of encode/cipher puzzles for trying the decode command
+python3 examples/make_decode_sample.py >/dev/null 2>&1 || true
+cp examples/decode_sample/secrets.txt "$ROOT/practice/"
 for f in c/third_party/capstone*/LICENSE.TXT c/third_party/*/LICENSE.TXT; do
     [ -f "$f" ] && cp "$f" "$ROOT/licences/capstone-LICENSE.TXT" && break
 done

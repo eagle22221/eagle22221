@@ -20,7 +20,7 @@ The interface has an Overview (what the file is and how it is protected),
 Techniques (anti-debug, VM checks, injection, hooking, packing), Code (the
 instructions, grouped into functions), Strings, Imports, Sections, a Bytes
 view, Assets (game asset packs), Split (save the parts of the program as
-separate files), and Modify.
+separate files), Decode (a decode and cipher workbench), and Modify.
 
 Prefer the terminal? Everything is also a command (see below), including
 a report you can read without the browser:
@@ -58,6 +58,8 @@ an empty part of the folder and choose "Open PowerShell window here" (or
                                          (useful for cheats and anti-cheat)
     split FILE FOLDER                    save a program's parts, and the files
                                          found inside it, into a new folder
+    decode --text TEXT --recipe "op|op"  decode, un-zip and decipher data you
+                                         give it (ciphers need the key)
     engine FOLDER                        a game's engine and its asset packs
     assets list PACK                     files in a .pk3/.pak/.wad/.pck pack
     assets extract PACK FOLDER           unpack a pack
@@ -131,6 +133,14 @@ Good to know
   (index.txt notes any stretch of empty filler that was left out).
 - vex.exe saves the parts and the embedded files. Saving Windows resources
   (icons, version info) as files is in the Python edition.
+- "decode" is a workbench for turning encoded or encrypted data you already
+  have back into something readable: base64, hex and other encodings, un-zip
+  (gzip, zlib, bzip2, xz), classic ciphers, and decryption with a key you
+  supply. It never recovers an unknown key and never breaks encryption or
+  protection, so content you do not have the key for stays unreadable. This
+  vex.exe does the encodings, the classic ciphers, XOR, RC4 and ChaCha20; AES
+  and a few others are in the Python edition, and the Decode view greys out
+  whatever the edition you are running cannot do.
 - This one vex.exe does everything above - the browser interface, the
   analysis and disassembly, the techniques scan, game asset packs and patching -
   with nothing to install. The Python edition of vex adds a few extras:

@@ -26,6 +26,7 @@ A step-by-step beginner's guide with screenshots is in
 | Asset packs | Browse, extract, replace and repack ZIP-family packs, Quake PAK, Doom WAD, Godot PCK, Electron ASAR, Ren'Py RPA |
 | Windows resources | List, extract and replace icons, version info, manifests and embedded data |
 | Splitting | Save a program's parts (headers, code, data, appended data) as separate files in a folder, together with any complete files found inside it — pictures, sounds, ZIP archives, other programs — and an index of every piece |
+| Decoding | A decode and cipher workbench: decode base64, hex, base32, base85 and other encodings, un-gzip/zlib/bzip2/xz, run classic ciphers, and decrypt with a key you supply (AES, ChaCha20, RC4, XOR). Chain the steps into a recipe. Transforms data you provide; never recovers an unknown key |
 | Patching | Overwrite bytes, blank out instructions, or replace text, always into a copy or with a backup |
 
 ## Install
@@ -57,6 +58,7 @@ anywhere. Drop a file on the page or use **Open file or folder**.
 - **Imports**, **Sections**, **Bytes** — the supporting tables and a hex view.
 - **Assets** — the game engine, its asset packs, and resources inside Windows programs.
 - **Split** — lists the parts of the program and the complete files found inside it, and saves them as separate files in a folder you choose.
+- **Decode** — a decode and cipher workbench: paste or select some data, chain decoding and decryption steps into a recipe, and read the result as text, hex and a guessed file type.
 - **Modify** — save a patched copy.
 
 The strip across the top is the file drawn to scale: click any part to see its bytes.
@@ -78,6 +80,7 @@ vex xrefs FILE --string TEXT      who uses strings containing TEXT
 vex hexdump FILE [LOCATION] [--offset N] [-n BYTES]
 vex techniques FILE               protection and evasion techniques in a program
 vex split FILE FOLDER             save the parts of a program as separate files
+vex decode SOURCE [--recipe ...]  decode, decompress and decipher supplied data
 ```
 
 `LOCATION` and `TARGET` accept a function, symbol or import name (`main`, `puts`,
@@ -146,6 +149,45 @@ What to expect:
   file.
 - **It does not recover source code.** A program cannot be turned back into its source files; the
   code part holds the same machine instructions that `vex disasm` shows.
+
+## Decoding and ciphers
+
+```
+vex decode SOURCE [--recipe "op[:k=v,...]|op..."]   run a chain of steps
+vex decode SOURCE --solve NAME                      search for a simple shift or short key
+vex decode --list                                   the operations available
+```
+
+`decode` is a small workbench for turning encoded or encrypted data you already have back into
+something readable, like a local CyberChef built into vex. The `SOURCE` is the data to start from:
+typed text (`--text S`), a hex blob (`--hex S`), a base64 string (`--base64 S`), or a byte range of a
+file (`--file PATH [--offset O] [--length N]`). A recipe is one or more operations joined with `|`,
+applied left to right.
+
+```
+vex decode "H4sIAAAAAAAC/8tIzcnJV0grys9VKEut4AIA4cVYqQ8AAAA=" --recipe "from-base64|gunzip"
+vex decode --file blob.bin --offset 0x40 --length 256 --recipe "xor:key=3b1f"
+vex decode --hex "..." --recipe "aes:key=KEYHEX,mode=cbc,iv=IVHEX"
+```
+
+The operations cover text encodings (base64, base32, hex, base85, URL, quoted-printable, ROT13,
+reverse, character sets), decompression (zlib, gzip, bzip2, xz), classic ciphers (Caesar, Atbash,
+Vigenère, rail fence, substitution, XOR), and modern ciphers you decrypt with a key you supply
+(AES, ChaCha20, RC4). The output is shown as text, as hex, and with a short guess of what the data
+looks like (a PNG image, a gzip stream, printable text, and so on). `--out FILE` writes the raw
+bytes to a new file. `--solve` tries every Caesar shift or a short repeating XOR key and ranks the
+results by how English-like they look — a help for a simple puzzle, not an attack on real
+encryption.
+
+What `decode` does not do:
+
+- **It never recovers an unknown key, and never breaks encryption.** Strong ciphers (AES,
+  ChaCha20, RC4) are decrypted only with the key you already have and type in. `--solve` guesses a
+  Caesar shift or a short XOR key from the text itself; it does not attack real cryptography.
+- **It does not defeat protection.** There is nothing here for DRM, licence checks or anti-cheat.
+  Packed or encrypted content you do not have the key for stays unreadable.
+- **It only transforms data you give it.** It reads the text, blob or byte range you name, never
+  runs anything, and writes nothing unless you ask with `--out`.
 
 ## Games and modding
 
@@ -246,6 +288,8 @@ vex/
   resources.py         Windows resources
   split.py             saving a program's parts as separate files
   patch.py             byte, instruction and text patches
+  decode.py            decode and cipher recipes (the decode command and view)
+  crypto.py            supplied-key ciphers (AES, ChaCha20, RC4, …) used by decode.py
   views.py             JSON-ready views shared by the CLI and the web UI
   cli.py               command line
   server.py, web/      local web interface

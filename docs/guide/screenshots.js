@@ -45,6 +45,10 @@ const out = (name) => path.join(__dirname, 'img', name + '.png');
   await page.waitForTimeout(900);
   await page.screenshot({ path: out('imports') });
 
+  // the decode & cipher workbench, captured on the open practice program
+  await nav('Decode');
+  await page.screenshot({ path: out('decode') });
+
   if (bundle) {
     await page.goto(`${base}/#token=${token}&open=${encodeURIComponent(bundle)}`);
     await page.reload();
