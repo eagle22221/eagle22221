@@ -315,6 +315,13 @@ void platform_remove(const char *path) {
     free(wide);
 }
 
+void platform_rmdir(const char *path) {
+    wchar_t *wide = to_wide(path);
+    if (wide != NULL)
+        RemoveDirectoryW(wide);
+    free(wide);
+}
+
 #else /* POSIX */
 
 #include <errno.h>
@@ -487,6 +494,10 @@ bool platform_move_new(const char *from, const char *to) {
 
 void platform_remove(const char *path) {
     unlink(path);
+}
+
+void platform_rmdir(const char *path) {
+    rmdir(path);
 }
 
 #endif

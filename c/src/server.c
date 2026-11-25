@@ -65,6 +65,7 @@ typedef int socket_t;
 #include "techniques.h"
 #include "archives.h"
 #include "decode.h"
+#include "fswalk.h"
 #include "engines.h"
 #include "model.h"
 #include "platform.h"
@@ -2184,6 +2185,26 @@ static void nap_ms(int ms) {
 #endif
 }
 
+/* The session's scratch folder (uploads), removed when the server stops, as
+ * the Python edition's Workspace.close() does: its files, the folders in it,
+ * then itself. A link is removed as a link, never followed. */
+static void remove_session_folder(Arena *a, const char *dir, int depth) {
+    FsEntry *entries = NULL;
+    size_t count = 0;
+    if (depth <= 8 && fs_list(a, dir, 1000000, &entries, &count)) {
+        for (size_t i = 0; i < count; i++) {
+            const char *child = str_printf(a, "%s%c%s", dir, fs_separator(), entries[i].name).p;
+            if (entries[i].kind == FS_DIR)
+                remove_session_folder(a, child, depth + 1);
+            else if (entries[i].kind == FS_LINK && entries[i].target == FS_DIR)
+                platform_rmdir(child);          /* a junction or link to a folder */
+            else
+                platform_remove(child);
+        }
+    }
+    platform_rmdir(dir);
+}
+
 /* --- the server thread ------------------------------------------------------- */
 
 static void set_blocking(socket_t fd, bool blocking) {
@@ -2197,30 +2218,129 @@ static void set_blocking(socket_t fd, bool blocking) {
 #endif
 }
 
-/* One connection at a time, until the program is stopping. The listening
- * socket does not block (a connection that is gone again by the time it is
- * accepted must not hold the loop up); the connections themselves do. */
-static void serve_until_stopped(Server *srv) {
-    while (!gui_stopping()) {
-        int ready = wait_readable(srv->listen_fd, WAIT_SLICE_MS);
-        if (ready < 0)
-            nap_ms(WAIT_SLICE_MS);  /* a transient error: do not spin */
-        if (ready <= 0)
-            continue;
-        socket_t conn = accept(srv->listen_fd, NULL, NULL);
-        if (conn == BAD_SOCKET)
-            continue;
-        set_blocking(conn, true);
+/* Milliseconds from a fixed point, never going backwards. */
+static uint64_t clock_ms(void) {
 #ifdef _WIN32
-        DWORD tv = RECV_TIMEOUT_SECS * 1000;
-        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+    return (uint64_t)GetTickCount64();
 #else
-        struct timeval tv = {RECV_TIMEOUT_SECS, 0};
-        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
 #endif
-        handle_connection(srv, conn);
-        closesock(conn);
+}
+
+/* Connections are served in the order their requests arrive, not the order
+ * they were opened. A browser opens spare connections ahead of time and may
+ * send nothing on them for a long while; serving strictly in order would hold
+ * the real request up behind such a connection until it timed out. Accepted
+ * connections therefore wait here until they have something to read. One that
+ * sends nothing for RECV_TIMEOUT_SECS is closed, and when MAX_WAITING are
+ * waiting the oldest makes room. */
+#define MAX_WAITING 32
+
+typedef struct {
+    socket_t fd;
+    uint64_t since_ms;
+} Waiting;
+
+/* Wait up to `ms` for the listening socket or any waiting connection to have
+ * something to read. Sets *listen_ready and ready[i]; -1 on error. */
+static int wait_for_any(socket_t listen_fd, const Waiting *waiting, int count, int ms,
+                        bool *listen_ready, bool *ready) {
+    *listen_ready = false;
+    for (int i = 0; i < count; i++)
+        ready[i] = false;
+#ifdef _WIN32
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(listen_fd, &readable);
+    for (int i = 0; i < count; i++)
+        FD_SET(waiting[i].fd, &readable);
+    struct timeval tv = {ms / 1000, (ms % 1000) * 1000};
+    int n = select(0, &readable, NULL, NULL, &tv);
+    if (n <= 0)
+        return n;
+    *listen_ready = FD_ISSET(listen_fd, &readable) != 0;
+    for (int i = 0; i < count; i++)
+        ready[i] = FD_ISSET(waiting[i].fd, &readable) != 0;
+    return n;
+#else
+    struct pollfd polls[1 + MAX_WAITING];
+    polls[0].fd = listen_fd;
+    polls[0].events = POLLIN;
+    polls[0].revents = 0;
+    for (int i = 0; i < count; i++) {
+        polls[1 + i].fd = waiting[i].fd;
+        polls[1 + i].events = POLLIN;
+        polls[1 + i].revents = 0;
     }
+    int n = poll(polls, (nfds_t)(1 + count), ms);
+    if (n < 0 && errno == EINTR)
+        return 0;
+    if (n <= 0)
+        return n;
+    const short seen = POLLIN | POLLHUP | POLLERR;
+    *listen_ready = (polls[0].revents & seen) != 0;
+    for (int i = 0; i < count; i++)
+        ready[i] = (polls[1 + i].revents & (seen | POLLNVAL)) != 0;
+    return n;
+#endif
+}
+
+static void serve_connection(Server *srv, socket_t conn) {
+    set_blocking(conn, true);
+#ifdef _WIN32
+    DWORD tv = RECV_TIMEOUT_SECS * 1000;
+    setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+#else
+    struct timeval tv = {RECV_TIMEOUT_SECS, 0};
+    setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+#endif
+    handle_connection(srv, conn);
+    closesock(conn);
+}
+
+/* Serve until the program is stopping. The listening socket does not block (a
+ * connection that is gone again by the time it is accepted must not hold the
+ * loop up); a connection is served, blocking, once its request has begun. */
+static void serve_until_stopped(Server *srv) {
+    Waiting waiting[MAX_WAITING];
+    bool ready[MAX_WAITING];
+    int count = 0;
+    while (!gui_stopping()) {
+        bool listen_ready = false;
+        int n = wait_for_any(srv->listen_fd, waiting, count, WAIT_SLICE_MS, &listen_ready, ready);
+        if (n < 0) {
+            nap_ms(WAIT_SLICE_MS);  /* a transient error: do not spin */
+            continue;
+        }
+        uint64_t now = clock_ms();
+        int kept = 0;
+        for (int i = 0; i < count; i++) {
+            if (ready[i] && !gui_stopping())
+                serve_connection(srv, waiting[i].fd);
+            else if (gui_stopping() || now - waiting[i].since_ms >= RECV_TIMEOUT_SECS * 1000u)
+                closesock(waiting[i].fd);
+            else
+                waiting[kept++] = waiting[i];
+        }
+        count = kept;
+        for (int taken = 0; listen_ready && taken < MAX_WAITING && !gui_stopping(); taken++) {
+            socket_t conn = accept(srv->listen_fd, NULL, NULL);
+            if (conn == BAD_SOCKET)
+                break;              /* none left to take (the socket does not block) */
+            if (count == MAX_WAITING) {
+                closesock(waiting[0].fd);
+                memmove(waiting, waiting + 1, (size_t)(MAX_WAITING - 1) * sizeof *waiting);
+                count--;
+            }
+            waiting[count].fd = conn;
+            waiting[count].since_ms = clock_ms();
+            count++;
+        }
+    }
+    for (int i = 0; i < count; i++)
+        closesock(waiting[i].fd);
 }
 
 #ifdef _WIN32
@@ -2452,6 +2572,7 @@ void cmd_gui(Session *s) {
     window_trace("gui: stopping (%s)", stop_reason());
     join_server(&thread);
     closesock(fd);
+    remove_session_folder(s->a, srv.tempdir, 0);
     err_release(&srv.err);
     printf("\nstopped.\n");
     fflush(stdout);

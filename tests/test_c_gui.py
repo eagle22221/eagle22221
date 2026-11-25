@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import threading
@@ -485,3 +486,74 @@ def test_windows_build_is_a_console_exe():
     assert info["bits"] == 64
     assert info["kind"] == "executable"
     assert info["metadata"].get("subsystem") == "console"
+
+
+# --- idle connections --------------------------------------------------------
+# A browser opens spare connections ahead of time and may send nothing on them
+# for a long while. Serving connections strictly in the order they were opened
+# would then hold the real request up until the spare one timed out (20 s).
+
+@pytest.mark.parametrize("edition", ["c", "python"])
+@pytest.mark.parametrize("idle_count", [1, 5])
+def test_idle_connections_do_not_hold_up_a_request(c_client, py_client, edition, idle_count):
+    client = c_client if edition == "c" else py_client
+    idle = [socket.create_connection(("127.0.0.1", client.port), timeout=5)
+            for _ in range(idle_count)]
+    try:
+        time.sleep(0.3)                     # let the server take them first
+        started = time.monotonic()
+        status, _ctype, body = client.request("GET", "/", token=False)
+        elapsed = time.monotonic() - started
+        assert status == 200 and b"<title>" in body
+        assert elapsed < 3, f"the request waited {elapsed:.1f} s behind idle connections"
+    finally:
+        for sock in idle:
+            sock.close()
+
+
+def test_a_connection_that_sends_later_is_still_served(c_client):
+    sock = socket.create_connection(("127.0.0.1", c_client.port), timeout=10)
+    try:
+        time.sleep(1.0)                     # opened early, used later
+        sock.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nConnection: close\r\n\r\n"
+                     % c_client.port)
+        data = b""
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        assert data.startswith(b"HTTP/1.") and b" 200 " in data.split(b"\r\n", 1)[0]
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("stop", [signal.SIGINT, signal.SIGTERM])
+def test_session_folder_is_deleted_when_the_server_stops(tmp_path, stop):
+    # Uploads go into a scratch folder for the session; like the Python
+    # edition, the C edition must not leave it behind.
+    _make("all")
+    env = dict(os.environ, TMPDIR=str(tmp_path))
+    proc = subprocess.Popen([str(C_DIR / "build" / "vex"), "gui", "--no-browser", "--port", "0"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    try:
+        line = proc.stdout.readline()
+        while "#token=" not in line:
+            line = proc.stdout.readline()
+            assert line, "the C server did not print its address"
+        m = re.search(r"http://127\.0\.0\.1:(\d+)/#token=(\S+)", line)
+        client = Client(int(m.group(1)), m.group(2))
+        status, uploaded = client.call("POST", "upload", {"name": "sample.bin"}, body=b"\x7fELF" + bytes(60))
+        assert status == 200, uploaded
+        assert os.path.isfile(uploaded["path"])
+        assert [p.name for p in tmp_path.iterdir() if p.name.startswith("vex-")]
+        proc.send_signal(stop)
+        assert proc.wait(timeout=15) == 0
+        assert not os.path.exists(uploaded["path"])
+        assert [p.name for p in tmp_path.iterdir() if p.name.startswith("vex-")] == []
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()

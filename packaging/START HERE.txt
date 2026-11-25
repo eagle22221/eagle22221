@@ -78,6 +78,7 @@ an empty part of the folder and choose "Open PowerShell window here" (or
     assets replace PACK NAME FILE -o NEW write a new pack with a file replaced
     patch bytes FILE 0x1400.. "90 90"    change bytes (into a copy)
     gui                                  open the app window, like vex-app.exe
+    gui --browser                        open it in a web browser tab instead
 
 Add --json right after vex.exe to get output other tools can read:
 

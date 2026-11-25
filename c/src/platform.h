@@ -48,5 +48,7 @@ bool platform_replace(const char *from, const char *to);
  * or may not exist afterwards. */
 bool platform_move_new(const char *from, const char *to);
 void platform_remove(const char *path);
+/* Remove an empty folder; errors ignored. */
+void platform_rmdir(const char *path);
 
 #endif
