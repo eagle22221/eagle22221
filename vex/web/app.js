@@ -1,21 +1,24 @@
 'use strict';
 /* vex web interface. Everything shown comes from untrusted files, so
-   text is only ever inserted with textContent, never as HTML. */
+   text is only ever inserted with textContent, never as HTML. Styles are
+   set through the CSSOM (never style="" attributes), so the strict
+   Content-Security-Policy holds. */
 
+const VEX_VERSION = '0.1.0';
 const $ = (id) => document.getElementById(id);
 
 // A small inline SVG icon that points at a <symbol> in index.html's sprite.
 // Presentation only — no external requests, CSP-safe.
 const SVGNS = 'http://www.w3.org/2000/svg';
 function icon(name, cls) {
-  const svg = document.createElementNS(SVGNS, 'svg');
-  svg.setAttribute('class', 'ico' + (cls ? ' ' + cls : ''));
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
+  const el = document.createElementNS(SVGNS, 'svg');
+  el.setAttribute('class', 'ico' + (cls ? ' ' + cls : ''));
+  el.setAttribute('viewBox', '0 0 24 24');
+  el.setAttribute('aria-hidden', 'true');
   const use = document.createElementNS(SVGNS, 'use');
   use.setAttribute('href', '#i-' + name);
-  svg.appendChild(use);
-  return svg;
+  el.appendChild(use);
+  return el;
 }
 
 function h(tag, attrs, ...children) {
@@ -36,20 +39,55 @@ function h(tag, attrs, ...children) {
   return el;
 }
 
+// The same for SVG elements (charts, the file tile): attributes only.
+function svg(tag, attrs, ...children) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
+    else el.setAttribute(key, String(value));
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    el.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return el;
+}
+
 // append()/replaceChildren() would print a literal "null" for skipped children
 const present = (children) => children.flat().filter((c) => c !== null && c !== undefined && c !== false);
 function add(parent, ...children) { parent.append(...present(children)); }
 function fill(parent, ...children) { parent.replaceChildren(...present(children)); }
 
-const state = {
-  token: '', path: null, kind: null, info: null, view: 'overview',
-  code: { at: null, history: [], filter: '' },
-  bytes: { offset: 0 },
-  archivePath: null,
-  modify: {},
-  split: null,
-  decode: null,
-};
+// --- state ------------------------------------------------------------------
+// Several files can be open at once, one per tab. Everything that belongs to
+// a file lives on its tab; state.path, state.info, state.view and the rest
+// read and write the active tab, so the views below need not know about tabs.
+
+const FILE_KEYS = ['path', 'kind', 'name', 'info', 'layout', 'view', 'code', 'bytes', 'archivePath',
+  'modify', 'split', 'decode', 'loadMs', 'status', 'error', 'stringsPreset'];
+
+function blankFile(path, kind, name) {
+  return {
+    path, kind, name, info: null, layout: null,
+    view: kind === 'binary' ? 'overview' : 'assets',
+    code: { at: null, history: [], filter: '' },
+    bytes: { offset: 0 },
+    archivePath: kind === 'archive' ? path : null,
+    modify: {}, split: null, decode: null,
+    loadMs: null, status: path ? 'loading' : 'idle', error: null, stringsPreset: null,
+  };
+}
+
+const NO_FILE = blankFile(null, null, '');
+const state = { token: '', tabs: [], tab: null, codeShow: null };
+for (const key of FILE_KEYS) {
+  Object.defineProperty(state, key, {
+    get() { return (state.tab || NO_FILE)[key]; },
+    set(value) { (state.tab || NO_FILE)[key] = value; },
+    enumerable: true,
+  });
+}
 
 // --- server calls -----------------------------------------------------------
 
@@ -67,7 +105,9 @@ async function api(name, params, options) {
   if (!res.ok) {
     let message = res.statusText;
     try { message = (await res.json()).error || message; } catch (e) { /* not JSON */ }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = res.status;
+    throw error;
   }
   return opts.raw ? res.blob() : res.json();
 }
@@ -93,6 +133,8 @@ function bytesText(n) {
 }
 
 const hex = (n) => '0x' + n.toString(16);
+const hexU = (n) => '0x' + n.toString(16).toUpperCase();
+const grouped = (n) => Number(n).toLocaleString('en-US');
 
 function busy(text) { return h('p', { class: 'busy', text: text || 'Working…' }); }
 
@@ -114,6 +156,22 @@ function suggestOutput(path, word) {
   const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
   const dot = path.lastIndexOf('.');
   return dot > slash ? `${path.slice(0, dot)}.${word}${path.slice(dot)}` : `${path}.${word}`;
+}
+
+async function copyText(text, label) {
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (e) {
+    const area = h('textarea', { class: 'sr-only', value: text, readOnly: true, 'aria-hidden': 'true' });
+    add(document.body, area);
+    area.select();
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    area.remove();
+  }
+  if (ok) toast(`Copied the ${label} to the clipboard.`);
+  else toast('The clipboard is not available here. Select the text and copy it instead.', true);
 }
 
 // A small in-page dialog that asks for a path: resolves to the text, or null.
@@ -142,50 +200,355 @@ function ask(title, note, value, okLabel) {
   });
 }
 
+// --- popover menus ------------------------------------------------------------
+// One menu open at a time; Escape or a click elsewhere closes it, arrow keys
+// move between its items.
+
+let openMenu = null;
+
+function closeMenu(returnFocus) {
+  if (!openMenu) return;
+  const { button, panel } = openMenu;
+  panel.hidden = true;
+  button.setAttribute('aria-expanded', 'false');
+  openMenu = null;
+  if (returnFocus) button.focus();
+}
+
+function toggleMenu(button, panel) {
+  if (openMenu && openMenu.button === button) { closeMenu(); return; }
+  closeMenu();
+  panel.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  openMenu = { button, panel };
+  const first = panel.querySelector('[role="menuitem"]:not([disabled]), button:not([disabled]), input:not([disabled])');
+  if (first) first.focus();
+}
+
+// A button with a drop-down list of actions: [{ label, icon, run, hint }].
+function menuButton(label, iconName, items, extraClass) {
+  const panel = h('div', { class: 'popover', role: 'menu', hidden: true, 'aria-label': label });
+  const button = h('button', {
+    type: 'button', class: 'btn' + (extraClass ? ' ' + extraClass : ''), 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+    onclick: () => toggleMenu(button, panel),
+  }, iconName ? icon(iconName) : null, label, icon('chevdown', 'btn-caret'));
+  for (const item of items) {
+    add(panel, h('button', {
+      type: 'button', class: 'menu-item', role: 'menuitem', 'aria-current': item.current ? 'page' : null,
+      onclick: () => { closeMenu(); item.run(); },
+    }, icon(item.icon), h('span', { text: item.label }), item.hint ? h('small', { text: item.hint }) : null));
+  }
+  return h('div', { class: 'menu-wrap' }, button, panel);
+}
+
+document.addEventListener('click', (e) => {
+  if (openMenu && !openMenu.panel.contains(e.target) && !openMenu.button.contains(e.target)) closeMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (!openMenu) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); return; }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const items = [...openMenu.panel.querySelectorAll('[role="menuitem"]:not([disabled])')];
+  if (!items.length) return;
+  e.preventDefault();
+  const at = items.indexOf(document.activeElement);
+  const next = e.key === 'ArrowDown' ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+  items[next].focus();
+});
+
 // --- views registry ---------------------------------------------------------
+// The order is the sidebar's: Overview, then the Analysis, Resources and
+// Advanced groups. `side` is the longer name the sidebar shows.
 
 const VIEWS = {
-  overview: { label: 'Overview', render: renderOverview, kinds: ['binary'], icon: 'overview' },
-  techniques: { label: 'Techniques', render: renderTechniques, kinds: ['binary'], icon: 'techniques' },
-  code: { label: 'Code', render: renderCode, kinds: ['binary'], icon: 'code' },
-  strings: { label: 'Strings', render: renderStrings, kinds: ['binary'], icon: 'strings' },
-  imports: { label: 'Imports', render: renderImports, kinds: ['binary'], icon: 'imports' },
-  sections: { label: 'Sections', render: renderSections, kinds: ['binary'], icon: 'sections' },
-  bytes: { label: 'Bytes', render: renderBytes, kinds: ['binary'], icon: 'bytes' },
-  assets: { label: 'Assets', render: renderAssets, kinds: ['binary', 'archive', 'folder'], icon: 'assets' },
-  split: { label: 'Split', render: renderSplit, kinds: ['binary'], icon: 'split' },
-  decode: { label: 'Decode', render: renderDecode, kinds: ['binary'], icon: 'decode' },
-  modify: { label: 'Modify', render: renderModify, kinds: ['binary'], icon: 'modify' },
+  overview: { label: 'Overview', group: null, render: renderOverview, kinds: ['binary'], icon: 'overview' },
+  techniques: { label: 'Techniques', group: 'analysis', render: renderTechniques, kinds: ['binary'], icon: 'techniques' },
+  code: { label: 'Code', side: 'Code (Disassembly)', group: 'analysis', render: renderCode, kinds: ['binary'], icon: 'code' },
+  strings: { label: 'Strings', group: 'analysis', render: renderStrings, kinds: ['binary'], icon: 'strings' },
+  imports: { label: 'Imports', group: 'analysis', render: renderImports, kinds: ['binary'], icon: 'imports' },
+  exports: { label: 'Exports', group: 'analysis', render: renderExports, kinds: ['binary'], icon: 'exports' },
+  sections: { label: 'Sections', group: 'analysis', render: renderSections, kinds: ['binary'], icon: 'sections' },
+  bytes: { label: 'Bytes', side: 'Bytes (Hex)', group: 'analysis', render: renderBytes, kinds: ['binary'], icon: 'bytes' },
+  assets: { label: 'Assets', group: 'resources', render: renderAssets, kinds: ['binary', 'archive', 'folder'], icon: 'assets' },
+  entropy: { label: 'Entropy', group: 'advanced', render: renderEntropy, kinds: ['binary'], icon: 'entropy' },
+  split: { label: 'Split', group: 'advanced', render: renderSplit, kinds: ['binary'], icon: 'split' },
+  decode: { label: 'Decode', group: 'advanced', render: renderDecode, kinds: ['binary'], icon: 'decode' },
+  modify: { label: 'Modify', side: 'Patching / Modify', group: 'advanced', render: renderModify, kinds: ['binary'], icon: 'modify' },
 };
+const NAV_GROUPS = [
+  { id: 'analysis', title: 'Analysis' },
+  { id: 'resources', title: 'Resources' },
+  { id: 'advanced', title: 'Advanced' },
+];
+// The row of view tabs under the file header; the tools (Split, Decode,
+// Modify) join it while one of them is open.
+const TAB_ROW = ['overview', 'sections', 'code', 'strings', 'imports', 'exports', 'bytes', 'entropy', 'techniques', 'assets'];
+const TOOLS = ['split', 'decode', 'modify', 'assets'];
+
+const viewAllowed = (id) => Boolean(state.path) && VIEWS[id].kinds.includes(state.kind);
 
 function renderNav() {
   const nav = $('nav');
   fill(nav);
-  for (const [id, view] of Object.entries(VIEWS)) {
-    if (!view.kinds.includes(state.kind)) continue;
-    add(nav, h('button', {
-      type: 'button', class: 'nav-item',
-      'aria-current': state.view === id ? 'page' : null,
-      onclick: () => show(id),
-    }, icon(view.icon, 'nav-ico'), h('span', { class: 'nav-label', text: view.label })));
+  if (!state.path) {
+    add(nav, h('div', { class: 'nav-empty' },
+      h('p', { text: 'No file is open yet. Open a program, a game folder or an asset pack to explore it.' }),
+      h('button', { type: 'button', class: 'btn btn-primary btn-small', onclick: openDialog }, icon('open'), 'Open File')));
+    return;
   }
-  nav.hidden = !state.path;
+  const item = (id, extra) => h('button', {
+    type: 'button', class: 'nav-item' + (extra ? ' ' + extra : ''),
+    'aria-current': state.view === id ? 'page' : null,
+    onclick: () => show(id),
+  }, icon(VIEWS[id].icon, 'nav-ico'), h('span', { class: 'nav-label', text: VIEWS[id].side || VIEWS[id].label }));
+  if (viewAllowed('overview')) add(nav, item('overview', 'nav-home'));
+  for (const group of NAV_GROUPS) {
+    const ids = Object.keys(VIEWS).filter((id) => VIEWS[id].group === group.id && viewAllowed(id));
+    if (!ids.length) continue;
+    add(nav, h('div', { class: 'nav-group', role: 'group', 'aria-label': group.title },
+      h('p', { class: 'nav-title', text: group.title }), ids.map((id) => item(id))));
+  }
+}
+
+function renderViewTabs() {
+  const row = $('viewtabs');
+  fill(row);
+  if (!state.path || state.status !== 'ready') { row.hidden = true; return; }
+  const ids = TAB_ROW.filter(viewAllowed);
+  if (!ids.includes(state.view) && viewAllowed(state.view)) ids.push(state.view);
+  for (const id of ids) {
+    add(row, h('button', {
+      type: 'button', class: 'viewtab', 'aria-current': state.view === id ? 'page' : null,
+      onclick: () => show(id),
+    }, icon(VIEWS[id].icon), VIEWS[id].label));
+  }
+  row.hidden = false;
+  // keep the current view's tab in sight when the row scrolls sideways
+  const active = row.querySelector('[aria-current="page"]');
+  if (active && row.scrollWidth > row.clientWidth) {
+    const left = active.offsetLeft - 8;
+    const right = active.offsetLeft + active.offsetWidth + 8 - row.clientWidth;
+    row.scrollLeft = Math.min(Math.max(row.scrollLeft, right), left);
+  }
 }
 
 let renderSerial = 0;
+let viewObservers = [];
+
 async function show(view) {
+  if (!state.path || !VIEWS[view] || !viewAllowed(view)) return;
+  const changed = state.view !== view;
   state.view = view;
+  state.codeShow = null;
+  closeSidebar();
   renderNav();
+  renderViewTabs();
+  if (state.status !== 'ready') return;          // the load in progress shows it when done
+  for (const observer of viewObservers) observer.disconnect();
+  viewObservers = [];
   const main = $('main');
   const serial = ++renderSerial;
+  if (changed) {
+    const scroller = $('scroller');
+    const tabs = $('viewtabs');
+    if (scroller.scrollTop > tabs.offsetTop) scroller.scrollTop = tabs.offsetTop - 8;
+  }
   fill(main, busy('Loading…'));
-  const box = h('div');
+  const box = h('div', { class: `view view-${view}` });
   try {
     await VIEWS[view].render(box);
   } catch (error) {
     fill(box, h('p', { class: 'notice is-error', text: error.message }));
   }
   if (serial === renderSerial) fill(main, box);
+}
+
+// --- tabs, file header and status bar -----------------------------------------
+
+function fileTypeTile(info, kind, path) {
+  if (kind === 'folder') return 'DIR';
+  if (kind === 'archive') {
+    const ext = extension(path || '');
+    return (ext || 'PAK').slice(0, 4).toUpperCase();
+  }
+  if (!info) return '…';
+  if (info.format === 'PE') return info.kind === 'dll' ? 'DLL' : info.kind === 'driver' ? 'SYS' : 'EXE';
+  if (info.kind === 'shared library') return 'SO';
+  if (info.kind === 'relocatable') return 'O';
+  if (info.kind === 'core') return 'CORE';
+  return 'ELF';
+}
+
+const formatName = (info) => `${info.format}${info.bits}`;
+const platformName = (info) => `${info.format === 'ELF' ? 'Linux' : 'Windows'} ${formatName(info)}`;
+const typeText = (info) => `${info.format === 'ELF' ? 'Linux' : 'Windows'} ${info.kind}, ${info.bits}-bit ${info.arch}`;
+
+let svgSerial = 0;
+function fileDoc() {
+  const id = 'doc-grad-' + (++svgSerial);
+  return svg('svg', { class: 'filedoc', viewBox: '0 0 52 64', 'aria-hidden': 'true' },
+    svg('defs', {}, svg('linearGradient', { id, x1: '0', y1: '0', x2: '0.4', y2: '1' },
+      svg('stop', { offset: '0', class: 'doc-stop-a' }), svg('stop', { offset: '1', class: 'doc-stop-b' }))),
+    svg('path', { d: 'M9 1.5h23.5L50.5 19.5V56a6.5 6.5 0 0 1-6.5 6.5H9A6.5 6.5 0 0 1 2.5 56V8A6.5 6.5 0 0 1 9 1.5z', fill: `url(#${id})`, class: 'doc-body' }),
+    svg('path', { d: 'M32.5 1.5v12a6 6 0 0 0 6 6h12z', class: 'doc-fold' }),
+    svg('path', { d: 'M11 20h15M11 26.5h22M11 33h18', class: 'doc-lines' }));
+}
+
+function renderTabs() {
+  const box = $('filetabs');
+  fill(box);
+  for (const tab of state.tabs) {
+    const active = tab === state.tab;
+    add(box, h('div', { class: 'filetab' + (active ? ' is-active' : '') + (tab.status === 'loading' ? ' is-loading' : ''), role: 'presentation' },
+      h('button', {
+        type: 'button', class: 'filetab-open', role: 'tab', 'aria-selected': active ? 'true' : 'false',
+        title: tab.path, onclick: () => switchTab(tab),
+      }, icon('file'), h('span', { class: 'filetab-name', text: tab.name })),
+      h('button', {
+        type: 'button', class: 'filetab-close', 'aria-label': `Close ${tab.name}`, title: 'Close',
+        onclick: () => closeTab(tab),
+      }, icon('close'))));
+  }
+}
+
+function renderFileHead() {
+  const head = $('filehead');
+  fill(head);
+  if (!state.path) { head.hidden = true; return; }
+  const info = state.info;
+  const binary = state.kind === 'binary';
+  const badges = [];
+  if (binary && info) {
+    badges.push(h('span', { class: 'badge' }, icon(info.format === 'PE' ? 'windows' : 'terminal', info.format === 'PE' ? 'ico-windows' : ''), platformName(info)));
+    badges.push(h('span', { class: 'badge' }, icon('code'), info.arch));
+    badges.push(h('span', { class: 'badge', title: `${grouped(info.size)} bytes` }, icon('report'), bytesText(info.size)));
+  } else if (!binary) {
+    badges.push(h('span', { class: 'badge' }, icon(state.kind === 'folder' ? 'open' : 'assets'), state.kind === 'folder' ? 'Game folder' : 'Asset pack'));
+  }
+  const actions = h('div', { class: 'filehead-actions' },
+    h('button', { type: 'button', class: 'btn btn-primary', onclick: openDialog }, icon('open'), 'Open File'),
+    h('button', { type: 'button', class: 'btn', onclick: refreshFile, disabled: state.status === 'loading' }, icon('refresh'), 'Refresh'),
+    binary ? menuButton('Export Report', 'report', [
+      { label: 'Markdown report', hint: '.md', icon: 'report', run: () => exportReport('md') },
+      { label: 'JSON data', hint: '.json', icon: 'code', run: () => exportReport('json') },
+    ]) : null,
+    binary ? menuButton('Tools', null, TOOLS.map((id) => ({
+      label: VIEWS[id].side || VIEWS[id].label, icon: VIEWS[id].icon, current: state.view === id, run: () => show(id),
+    }))) : null);
+  if (binary && state.status !== 'ready') for (const b of actions.querySelectorAll('.menu-wrap .btn')) b.disabled = true;
+  add(head,
+    h('div', { class: 'filetile', 'aria-hidden': 'true' }, fileDoc(), h('span', { class: 'filetile-label', text: fileTypeTile(info, state.kind, state.path) })),
+    h('div', { class: 'filehead-text' },
+      h('h1', { class: 'filehead-name', text: state.name }),
+      h('div', { class: 'filehead-path', text: state.path, title: state.path }),
+      badges.length ? h('div', { class: 'badges' }, badges) : null),
+    actions);
+  head.hidden = false;
+}
+
+function statusItem(iconName, text, cls) {
+  return h('span', { class: 'status-item' + (cls ? ' ' + cls : '') }, icon(iconName), h('span', { text }));
+}
+
+function renderStatus() {
+  const bar = $('statusbar');
+  fill(bar);
+  if (!state.path) {
+    add(bar, statusItem('sparkle', 'Ready', 'status-state'), statusItem('open', 'Open a file to begin'));
+    return;
+  }
+  if (state.status === 'loading') {
+    add(bar, statusItem('clock', `Analysing ${state.name}…`, 'status-state is-busy'));
+    return;
+  }
+  if (state.status === 'error') {
+    add(bar, statusItem('close', 'Could not analyse this file', 'status-state is-error'), statusItem('file', state.name));
+    return;
+  }
+  const info = state.info;
+  const right = h('div', { class: 'status-right' },
+    state.loadMs !== null ? statusItem('clock', `${(state.loadMs / 1000).toFixed(2)} s`) : null,
+    info ? statusItem('chip', bytesText(info.size)) : null,
+    info ? statusItem(info.format === 'PE' ? 'windows' : 'terminal', `${formatName(info)} (${info.arch})`)
+      : statusItem(state.kind === 'folder' ? 'open' : 'assets', state.kind === 'folder' ? 'Game folder' : 'Asset pack'));
+  add(bar, statusItem('check', 'Analysis complete', 'status-state'), statusItem('file', state.name), right);
+}
+
+function renderChrome() {
+  renderTabs();
+  renderNav();
+  renderFileHead();
+  renderViewTabs();
+  renderStatus();
+  $('goto').hidden = state.kind !== 'binary' || state.status !== 'ready';
+  document.title = state.path ? `${state.name} · vex` : 'vex';
+}
+
+function switchTab(tab) {
+  if (tab === state.tab) return;
+  closeMenu();
+  state.tab = tab;
+  state.codeShow = null;
+  renderChrome();
+  $('scroller').scrollTop = 0;
+  if (tab.status === 'ready') show(tab.view);
+  else if (tab.status === 'error') showLoadError();
+  else fill($('main'), busy(`Reading ${tab.name}…`));
+}
+
+function closeTab(tab) {
+  const at = state.tabs.indexOf(tab);
+  if (at < 0) return;
+  state.tabs.splice(at, 1);
+  if (tab !== state.tab) { renderTabs(); return; }
+  const next = state.tabs[Math.min(at, state.tabs.length - 1)] || null;
+  state.tab = null;
+  if (next) { switchTab(next); return; }
+  renderChrome();
+  renderWelcome();
+}
+
+function showLoadError() {
+  fill($('main'), h('div', { class: 'notice is-error' },
+    h('strong', { text: `vex could not read ${state.name}. ` }), state.error || '',
+    ' ', h('button', { class: 'link', type: 'button', text: 'Try again', onclick: refreshFile })));
+}
+
+// Read (or re-read) the active tab's file: the info and layout every view
+// uses, timed for the status bar.
+async function loadFile() {
+  const tab = state.tab;
+  if (!tab) return;
+  const started = performance.now();
+  tab.status = 'loading';
+  tab.error = null;
+  renderChrome();
+  fill($('main'), busy(`Reading ${tab.name}…`));
+  if (tab.kind === 'binary') {
+    try {
+      const [info, layout] = await Promise.all([api('info', { path: tab.path }), api('layout', { path: tab.path })]);
+      tab.info = info;
+      tab.layout = layout;
+    } catch (error) {
+      tab.status = 'error';
+      tab.error = error.message;
+      tab.loadMs = null;
+      if (state.tab === tab) { renderChrome(); showLoadError(); }
+      return;
+    }
+  }
+  tab.loadMs = performance.now() - started;
+  tab.status = 'ready';
+  if (state.tab !== tab) { renderTabs(); return; }
+  renderChrome();
+  show(tab.view);
+}
+
+function refreshFile() {
+  if (!state.tab) return;
+  forgetEntropy(state.path);
+  state.codeShow = null;
+  loadFile();
 }
 
 // --- opening things ---------------------------------------------------------
@@ -195,6 +558,8 @@ async function openPath(path) {
   try {
     opened = await api('open', { path });
   } catch (error) { fail(error); return; }
+  const existing = state.tabs.find((t) => t.path === opened.path);
+  if (existing) { switchTab(existing); return; }
   if (opened.kind === 'unknown') {
     try {
       await api('archive/list', { path: opened.path, limit: 1 });
@@ -204,31 +569,13 @@ async function openPath(path) {
       return;
     }
   }
-  state.path = opened.path;
-  state.kind = opened.kind;
-  state.info = null;
-  state.code = { at: null, history: [], filter: '' };
-  state.bytes = { offset: 0 };
-  state.archivePath = opened.kind === 'archive' ? opened.path : null;
-  state.modify = {};
-  state.split = null;
-  state.decode = null;
   const name = opened.path.split(/[\\/]/).filter(Boolean).pop() || opened.path;
-  $('file-name').textContent = name;
-  $('file-path').textContent = opened.path;
-  $('bar-file').hidden = false;
-  document.title = `${name} · vex`;
-  $('goto').hidden = opened.kind !== 'binary';
-  $('map').hidden = true;
-  if (opened.kind === 'binary') {
-    try {
-      state.info = await api('info', { path: state.path });
-      renderMap(await api('layout', { path: state.path }));
-    } catch (error) { fail(error); return; }
-    show('overview');
-  } else {
-    show('assets');
-  }
+  const tab = blankFile(opened.path, opened.kind, name);
+  state.tabs.push(tab);
+  state.tab = tab;
+  state.codeShow = null;
+  $('scroller').scrollTop = 0;
+  await loadFile();
 }
 
 async function uploadFile(file) {
@@ -246,7 +593,7 @@ async function browse(dir) {
   } catch (error) { fail(error); return; }
   $('path-input').value = listing.path;
   const places = $('places');
-  fill(places, 
+  fill(places,
     listing.parent ? h('button', { type: 'button', class: 'btn btn-small', text: 'Up one folder', onclick: () => browse(listing.parent) }) : null,
     h('button', { type: 'button', class: 'btn btn-small', text: 'Home', onclick: () => browse(listing.home) }),
     listing.roots.map((root) => h('button', { type: 'button', class: 'btn btn-small', text: root, onclick: () => browse(root) })),
@@ -272,22 +619,28 @@ async function browse(dir) {
   }
 }
 
+function welcomeCard(title, text, ...rest) {
+  return h('div', { class: 'welcome' }, h('section', { class: 'box welcome-hero' },
+    h('img', { class: 'welcome-mark', src: '/static/logo.svg', alt: '', width: 64, height: 64 }),
+    h('h1', { text: title }), h('p', { text }), rest));
+}
+
 function renderWelcome() {
   const drop = h('div', { class: 'drop' },
     h('strong', { text: 'Drop a program, game file or asset pack here' }),
     h('span', { class: 'muted', text: 'Linux (ELF) and Windows (EXE, DLL) programs; ZIP, PAK, WAD, PCK, ASAR and RPA packs.' }),
-    h('button', { type: 'button', class: 'btn btn-primary', text: 'Open file or folder', onclick: openDialog }));
-  fill($('main'), h('div', { class: 'welcome' },
-    h('h1', { text: 'Take a program apart and see how it works' }),
-    h('p', { text: 'vex reads a compiled program without running it and shows what is inside: its layout, the code, the text it contains and the functions it borrows from the system. It can also open game asset packs and save modified copies.' }),
+    h('button', { type: 'button', class: 'btn btn-primary', onclick: openDialog }, icon('open'), 'Open File'));
+  fill($('main'), welcomeCard('Take a program apart and see how it works',
+    'vex reads a compiled program without running it and shows what is inside: its layout, the code, the text it contains and the functions it borrows from the system. It can also open game asset packs and save modified copies.',
     drop,
     h('ol', { class: 'steps' },
-      h('li', {}, h('span', {}, h('b', { text: 'Open something. ' }), 'Pick a program, or a game folder to find its engine and asset packs.')),
-      h('li', {}, h('span', {}, h('b', { text: 'Read the overview. ' }), 'What kind of file it is, how it is protected and which libraries it needs.')),
-      h('li', {}, h('span', {}, h('b', { text: 'Follow a thread. ' }), 'Find an interesting string, see which code uses it, then read that function.')))));
+      h('li', {}, h('span', {}, h('b', { text: 'Open something' }), 'Pick a program, or a game folder to find its engine and asset packs.')),
+      h('li', {}, h('span', {}, h('b', { text: 'Read the overview' }), 'What kind of file it is, how it is protected and which libraries it needs.')),
+      h('li', {}, h('span', {}, h('b', { text: 'Follow a thread' }), 'Find an interesting string, see which code uses it, then read that function.')))));
 }
 
 function openDialog() {
+  closeMenu();
   const dialog = $('open-dialog');
   if (!dialog.open) dialog.showModal();
   const start = state.path ? state.path.replace(/[\\/][^\\/]*$/, '') : '';
@@ -297,136 +650,497 @@ function openDialog() {
 // --- file map ---------------------------------------------------------------
 
 const KIND_NAMES = {
-  headers: 'Headers', code: 'Code', data: 'Data', meta: 'Tables and debug info',
+  headers: 'Headers', code: 'Code', data: 'Data', meta: 'Tables / debug info',
   overlay: 'Appended data', padding: 'Padding',
 };
 
-function renderMap(layout) {
-  const strip = $('map-strip');
-  const readout = h('span', { class: 'map-readout' });
-  fill(strip);
-  const kinds = new Set();
+// Names vex gives regions itself ("headers", "symbol table") read better
+// capitalised; section names are shown exactly as the file spells them.
+const regionName = (region) => (/^[a-z][a-z ]*$/.test(region.name) && region.kind !== 'code' && region.kind !== 'data'
+  ? region.name.replace(/\b[a-z]/g, (c) => c.toUpperCase()) : region.name);
+
+function boxHead(iconName, title, extra, iconClass) {
+  return h('div', { class: 'box-head' }, icon(iconName, 'box-ico' + (iconClass ? ' ' + iconClass : '')), h('h3', { text: title }), extra);
+}
+
+function mapCard(layout) {
+  const strip = h('div', { class: 'map-strip' });
+  const readout = h('span', { class: 'map-readout', 'aria-live': 'polite', text: 'Select a region to see its bytes' });
+  const kinds = new Map();
   for (const region of layout.regions) {
-    kinds.add(region.kind);
-    const describe = `${region.name}: offset ${hex(region.offset)}, ${bytesText(region.size)}`;
+    if (!kinds.has(region.kind)) kinds.set(region.kind, []);
+    kinds.get(region.kind).push(region.name);
+    const describe = `${regionName(region)}: offset ${hex(region.offset)}, ${bytesText(region.size)}`;
     const button = h('button', {
       type: 'button', class: `region kind-${region.kind}`, title: describe,
       'aria-label': describe, style: { flexGrow: String(Math.max(region.size, 1)), flexBasis: '0' },
       onmouseenter: () => { readout.textContent = describe; },
       onfocus: () => { readout.textContent = describe; },
-      onclick: () => { state.bytes.offset = region.offset; show('bytes'); },
+      onclick: () => { state.bytes = { offset: region.offset }; show('bytes'); },
     });
-    if (region.kind !== 'padding' && region.size / layout.size > 0.06) add(button, h('span', { class: 'region-label', text: region.name }));
+    if (region.kind !== 'padding' && region.size / layout.size > 0.06) add(button, h('span', { class: 'region-label', text: regionName(region) }));
     add(strip, button);
   }
-  const scale = $('map-scale');
-  fill(scale);
+  // a label is shown only where its region is wide enough to hold all of it
+  const fitLabels = new ResizeObserver(() => {
+    for (const label of strip.querySelectorAll('.region-label')) {
+      label.hidden = false;
+      label.hidden = label.scrollWidth > label.clientWidth + 1;
+    }
+  });
+  fitLabels.observe(strip);
+  viewObservers.push(fitLabels);
+  const scale = h('div', { class: 'map-scale', 'aria-hidden': 'true' });
   for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
     add(scale, h('span', {
       class: 'tick' + (fraction === 1 ? ' tick-end' : ''),
-      text: hex(Math.round(layout.size * fraction)),
+      text: hexU(Math.round(layout.size * fraction)),
       style: { left: `${fraction * 100}%` },
     }));
   }
-  const legend = $('map-legend');
-  fill(legend);
+  const legend = h('div', { class: 'map-legend' });
   for (const kind of Object.keys(KIND_NAMES)) {
     if (!kinds.has(kind)) continue;
-    add(legend, h('span', { class: 'legend-item' },
-      h('span', { class: `swatch kind-${kind}` }), KIND_NAMES[kind]));
+    const names = kinds.get(kind);
+    const detail = (kind === 'code' || kind === 'data') && names.length
+      ? ` (${names.slice(0, 3).join(', ')}${names.length > 3 ? ', …' : ''})` : '';
+    add(legend, h('span', { class: 'legend-item' }, h('span', { class: `swatch kind-${kind}` }), KIND_NAMES[kind] + detail));
   }
-  add(legend, readout);
-  $('map').hidden = false;
+  return h('section', { class: 'box ov-map', 'aria-label': 'File layout, drawn to scale' },
+    h('div', { class: 'map' },
+      h('div', { class: 'map-main' }, boxHead('layout', 'Binary Layout (Memory Map)', readout), strip, scale),
+      legend));
+}
+
+// --- entropy ----------------------------------------------------------------
+// GET /api/entropy?path=P&points=N -> { size, block, overall, points: [{ offset, entropy }] }
+// in bits per byte (0-8). An older server answers 404 (or fails): the charts
+// are then left out and the overall figure from /api/info is shown alone.
+
+let entropyRoute = true;
+const entropyCache = new Map();
+
+function entropyData(points) {
+  if (!entropyRoute || !state.path) return Promise.resolve(null);
+  const key = `${state.path}\n${points}`;
+  if (!entropyCache.has(key)) {
+    const request = api('entropy', { path: state.path, points }).then((data) =>
+      (data && Array.isArray(data.points) && data.points.length ? data : null)
+    ).catch((error) => {
+      entropyCache.delete(key);
+      if (error.status === 404 && /unknown API endpoint/i.test(error.message)) entropyRoute = false;
+      if (error.status === 404 || error.status >= 500 || !error.status) return null;
+      throw error;
+    });
+    entropyCache.set(key, request);
+  }
+  return entropyCache.get(key);
+}
+
+function forgetEntropy(path) {
+  for (const key of [...entropyCache.keys()]) if (key.startsWith(path + '\n')) entropyCache.delete(key);
+}
+
+// Draw the chart when its box has a size, and again whenever that changes.
+function chartBox(cls, draw, attrs) {
+  const el = h('div', Object.assign({ class: 'chart ' + (cls || '') }, attrs || {}));
+  let width = 0;
+  const observer = new ResizeObserver((entries) => {
+    const w = Math.round(entries[0].contentRect.width);
+    if (w > 0 && w !== width) { width = w; draw(el, w, el.clientHeight); }
+  });
+  observer.observe(el);
+  viewObservers.push(observer);
+  return el;
+}
+
+let chartSerial = 0;
+
+function drawEntropy(el, data, W, H, opts) {
+  const large = Boolean(opts.large);
+  const pad = { l: 34, r: 10, t: 10, b: large ? 40 : 6 };
+  const iw = Math.max(10, W - pad.l - pad.r);
+  const ih = Math.max(10, H - pad.t - pad.b);
+  const size = Math.max(1, data.size || 1);
+  const pts = data.points;
+  const n = pts.length;
+  const centre = pts.map((p, i) => {
+    const end = i + 1 < n ? pts[i + 1].offset : size;
+    return p.offset + Math.max(0, end - p.offset) / 2;
+  });
+  const X = (offset) => pad.l + (offset / size) * iw;
+  const Y = (e) => pad.t + (1 - Math.max(0, Math.min(8, e)) / 8) * ih;
+  const id = 'ent-' + (++chartSerial);
+  const xs = centre.map(X);
+  const ys = pts.map((p) => Y(p.entropy));
+  const line = xs.map((x, i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${ys[i].toFixed(1)}`).join(' ');
+  const area = n ? `${line} L${xs[n - 1].toFixed(1)} ${Y(0)} L${xs[0].toFixed(1)} ${Y(0)} Z` : '';
+
+  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img',
+    'aria-label': `Entropy across the file, ${n} blocks of ${data.block} bytes; overall ${data.overall.toFixed(2)} of 8` },
+  svg('defs', {},
+    svg('linearGradient', { id: id + '-line', gradientUnits: 'userSpaceOnUse', x1: pad.l, y1: 0, x2: pad.l + iw, y2: 0 },
+      svg('stop', { offset: '0', class: 'stop-teal' }), svg('stop', { offset: '1', class: 'stop-violet' })),
+    svg('linearGradient', { id: id + '-fade', x1: '0', y1: '0', x2: '0', y2: '1' },
+      svg('stop', { offset: '0', class: 'stop-fade-a' }), svg('stop', { offset: '1', class: 'stop-fade-b' })),
+    svg('mask', { id: id + '-mask' }, svg('rect', { x: 0, y: 0, width: W, height: H, fill: `url(#${id}-fade)` }))));
+
+  if (large && opts.regions) {
+    for (const region of opts.regions) {
+      if (region.kind === 'padding') continue;
+      const x0 = X(region.offset);
+      const w = Math.max(1, X(region.offset + region.size) - x0);
+      add(root, svg('rect', { class: `band band-${region.kind}`, x: x0, y: pad.t, width: w, height: ih }));
+      if (w > 46) add(root, svg('text', { class: 'band-label', x: x0 + 4, y: pad.t + ih + 30 }, regionName(region)));
+    }
+  }
+  for (const v of [0, 2, 4, 6, 8]) {
+    add(root, svg('line', { class: v === 0 ? 'axis-line' : 'grid-line', x1: pad.l, x2: pad.l + iw, y1: Y(v), y2: Y(v) }),
+      svg('text', { x: pad.l - 8, y: Y(v) + 4, 'text-anchor': 'end' }, v.toFixed(1)));
+  }
+  add(root, svg('line', { class: 'axis-line', x1: pad.l, x2: pad.l, y1: pad.t, y2: pad.t + ih }));
+  if (large) {
+    add(root, svg('line', { class: 'limit-line', x1: pad.l, x2: pad.l + iw, y1: Y(7.2), y2: Y(7.2) }),
+      svg('text', { class: 'limit-text', x: pad.l + iw - 4, y: Y(7.2) - 6, 'text-anchor': 'end' }, 'above 7.2: compressed or encrypted'));
+    for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+      add(root, svg('text', { x: pad.l + f * iw, y: pad.t + ih + 15, 'text-anchor': f === 0 ? 'start' : f === 1 ? 'end' : 'middle' }, hexU(Math.round(size * f))));
+    }
+  }
+  if (n) {
+    add(root, svg('path', { d: area, fill: `url(#${id}-line)`, class: 'chart-area', mask: `url(#${id}-mask)` }),
+      svg('path', { d: line, stroke: `url(#${id}-line)`, class: 'chart-line' }));
+    if (n <= 80) for (let i = 0; i < n; i++) add(root, svg('circle', { class: 'chart-dot', cx: xs[i], cy: ys[i], r: large ? 3.2 : 2.8, fill: `url(#${id}-line)` }));
+  }
+
+  if (opts.onPick && n) {
+    const guide = svg('line', { class: 'guide', x1: 0, x2: 0, y1: pad.t, y2: pad.t + ih, visibility: 'hidden' });
+    const dot = svg('circle', { class: 'hover-dot', r: 5, cx: 0, cy: 0, visibility: 'hidden' });
+    const mark = (i) => {
+      el.dataset.index = String(i);
+      for (const node of [guide, dot]) node.setAttribute('visibility', 'visible');
+      guide.setAttribute('x1', xs[i]); guide.setAttribute('x2', xs[i]);
+      dot.setAttribute('cx', xs[i]); dot.setAttribute('cy', ys[i]);
+      if (opts.onHover) opts.onHover(pts[i], i);
+    };
+    const nearest = (clientX) => {
+      const rect = root.getBoundingClientRect();
+      const x = (clientX - rect.left) * (W / rect.width);
+      let best = 0;
+      for (let i = 1; i < n; i++) if (Math.abs(xs[i] - x) < Math.abs(xs[best] - x)) best = i;
+      return best;
+    };
+    add(root, guide, dot, svg('rect', {
+      x: pad.l, y: pad.t, width: iw, height: ih, fill: 'transparent',
+      onmousemove: (e) => mark(nearest(e.clientX)),
+      onclick: (e) => opts.onPick(pts[nearest(e.clientX)]),
+    }));
+    el.onkeydown = (e) => {
+      let i = el.dataset.index === undefined ? -1 : Number(el.dataset.index);
+      if (e.key === 'ArrowRight') i = Math.min(n - 1, i + 1);
+      else if (e.key === 'ArrowLeft') i = Math.max(0, i < 0 ? 0 : i - 1);
+      else if (e.key === 'Home') i = 0;
+      else if (e.key === 'End') i = n - 1;
+      else if (e.key === 'Enter' && i >= 0) { opts.onPick(pts[i]); return; } else return;
+      e.preventDefault();
+      mark(i);
+    };
+    if (el.dataset.index !== undefined && Number(el.dataset.index) < n) mark(Number(el.dataset.index));
+  }
+  fill(el, root);
+}
+
+function entropyBig(value, note) {
+  return h('div', { class: 'entropy-big' },
+    h('span', { class: 'entropy-big-label', text: 'Entropy' }),
+    h('span', { class: 'entropy-big-value' }, value.toFixed(2), h('small', { text: '/ 8' })),
+    note ? h('span', { class: 'entropy-big-note', text: note }) : null);
+}
+
+function goToOffset(offset) {
+  state.bytes = { offset: Math.max(0, Math.floor(offset / 16) * 16) };
+  show('bytes');
+}
+
+async function renderEntropy(box) {
+  const info = state.info;
+  add(box, h('div', { class: 'view-head' }, h('h2', { text: 'Entropy' }),
+    h('p', { text: 'How random the bytes are, block by block, from 0 (all the same) to 8 bits per byte. Packed, compressed or encrypted data sits near 8; code and text much lower. Point at the chart to read a block, click it to see its bytes.' })));
+  const [data, sections] = await Promise.all([
+    entropyData(480),
+    api('sections', { path: state.path }).catch(() => []),
+  ]);
+  const sectionTable = sections.length ? h('section', { class: 'box' },
+    boxHead('sections', 'Entropy by section'),
+    h('div', { class: 'box-body' }, h('table', { class: 'table-plain' },
+      h('thead', {}, h('tr', {}, ['Section', 'File offset', 'Size', 'Entropy'].map((t, i) => h('th', { scope: 'col', text: t, class: i === 1 || i === 2 ? 'num' : '' })))),
+      h('tbody', {}, sections.map((s) => h('tr', {},
+        h('td', { class: 'mono strong' }, h('button', { class: 'link', type: 'button', text: s.name || '(unnamed)', onclick: () => goToOffset(s.offset) })),
+        h('td', { class: 'num mono', text: hex(s.offset) }),
+        h('td', { class: 'num', text: bytesText(s.size) }),
+        h('td', {}, h('div', { class: 'bar-cell' },
+          h('span', { class: 'meter' + (s.entropy > 7.2 ? ' is-high' : '') }, h('i', { style: { width: `${(s.entropy / 8) * 100}%` } })),
+          h('span', { class: 'mono', text: s.entropy.toFixed(2) }))))))))) : null;
+
+  if (!data) {
+    add(box, h('p', { class: 'notice', text: 'This vex server does not offer the block-by-block entropy chart. The figures below come from the whole file and from each section.' }),
+      h('div', { class: 'stack' }, h('div', { class: 'entropy-stats' }, entropyBig(info.entropy, info.entropy > 7.2 ? 'Likely packed or encrypted' : 'Whole file')), sectionTable));
+    return;
+  }
+  let highest = data.points[0];
+  for (const p of data.points) if (p.entropy > highest.entropy) highest = p;
+  const hot = data.points.filter((p) => p.entropy > 7.2).length;
+  const readout = h('div', { class: 'entropy-readout', 'aria-live': 'polite' },
+    h('span', { text: 'Point at the chart, or focus it and use the arrow keys.' }));
+  const chart = chartBox('chart-large', (el, w, hgt) => drawEntropy(el, data, w, hgt, {
+    large: true, regions: state.layout ? state.layout.regions : null,
+    onHover: (p, i) => fill(readout,
+      h('span', {}, 'Block ', h('b', { text: `${i + 1} of ${data.points.length}` })),
+      h('span', {}, 'Offset ', h('b', { text: hexU(p.offset) })),
+      h('span', {}, 'Entropy ', h('b', { text: p.entropy.toFixed(2) })),
+      h('span', { class: 'muted', text: 'Click or press Enter to see these bytes' })),
+    onPick: (p) => goToOffset(p.offset),
+  }), { tabIndex: 0, 'aria-label': 'Entropy chart. Use the arrow keys to move between blocks and Enter to see a block’s bytes.' });
+  add(box, h('div', { class: 'stack' },
+    h('div', { class: 'entropy-layout' },
+      h('section', { class: 'box' }, boxHead('entropy', 'Entropy across the file'),
+        h('div', { class: 'box-body' }, readout, chart,
+          h('p', { class: 'chart-note', text: `${data.points.length} blocks of ${grouped(data.block)} bytes. Shaded bands show the file’s regions, coloured as in the layout map.` }))),
+      h('div', { class: 'entropy-stats' },
+        entropyBig(data.overall, data.overall > 7.2 ? 'Likely packed or encrypted' : 'Whole file'),
+        h('div', { class: 'stat' }, h('span', { text: 'Highest block' }), h('b', { text: highest.entropy.toFixed(2) }),
+          h('button', { class: 'link', type: 'button', text: `at ${hexU(highest.offset)}`, onclick: () => goToOffset(highest.offset) })),
+        h('div', { class: 'stat' }, h('span', { text: 'Blocks above 7.2' }), h('b', { text: String(hot) }),
+          h('span', { text: hot ? 'May hold compressed or encrypted data' : 'Nothing looks packed or encrypted' })),
+        h('div', { class: 'stat' }, h('span', { text: 'Block size' }), h('b', { text: bytesText(data.block) }),
+          h('span', { text: `${bytesText(data.size)} in total` })))),
+    sectionTable));
 }
 
 // --- overview ---------------------------------------------------------------
 
-function cell(label, value, extraClass) {
-  return h('div', { class: 'cell ' + (extraClass || '') },
-    h('div', { class: 'cell-label', text: label }),
-    h('div', { class: 'cell-value' + ((extraClass || '').includes('is-mono') ? ' mono' : ''), text: value }));
+function securityIcon(row) {
+  const value = String(row.value).toLowerCase();
+  const yes = !['no', 'none', 'off', 'false', 'absent'].includes(value);
+  return h('span', { class: 'state-dot' }, icon(yes ? 'check' : 'close'));
+}
+
+function flagBadge(p) {
+  const perms = p || '---';
+  const w = perms[1] === 'w', x = perms[2] === 'x';
+  const any = /[rwx]/.test(perms);
+  const cls = w && x ? 'flag flag-wx' : w ? 'flag flag-w' : any ? 'flag' : 'flag flag-none';
+  const words = [perms[0] === 'r' ? 'read' : null, w ? 'write' : null, x ? 'run' : null].filter(Boolean).join(', ') || 'not loaded';
+  return h('span', { class: cls, text: perms.toUpperCase(), title: words });
+}
+
+const BUILD_NAMES = {
+  interpreter: 'Loader', compiler: 'Compiler', source_files: 'Source files', soname: 'Library name',
+  subsystem: 'Subsystem', linker_version: 'Linker version', dll_name: 'Internal name',
+  pdb_path: 'Debug file path', imphash: 'Import hash', rpath: 'RPATH', runpath: 'RUNPATH',
+};
+
+function buildDetails(md) {
+  const rows = [];
+  for (const [key, label] of Object.entries(BUILD_NAMES)) {
+    if (md[key] === undefined) continue;
+    rows.push([label, Array.isArray(md[key]) ? md[key].join(', ') : String(md[key])]);
+  }
+  if (md.overlay) rows.push(['Appended data', `${bytesText(md.overlay.size)} after the program, at offset ${hex(md.overlay.offset)}`]);
+  return rows;
 }
 
 async function renderOverview(box) {
   const info = state.info;
   const md = info.metadata;
-  const block = h('div', { class: 'titleblock' },
-    cell('File', info.name, 'w3 cell-name'),
-    cell('Type', `${info.format === 'ELF' ? 'Linux' : 'Windows'} ${info.kind}, ${info.bits}-bit ${info.arch}`, 'w3'),
-    cell('Entry point', info.entry || 'none', 'is-mono'),
-    cell('Image base', info.image_base, 'is-mono'),
-    cell('Size', bytesText(info.size)),
-    cell('Entropy', `${info.entropy.toFixed(2)} of 8` + (info.entropy > 7.2 ? ' (packed?)' : '')),
-    cell(md.timestamp ? 'Built' : 'Build ID', md.timestamp || md.build_id || 'not recorded', 'w2 is-mono'),
-    cell('SHA-256', info.hashes.sha256, 'w6 is-mono'),
-    cell('MD5', info.hashes.md5, 'w3 is-mono'),
-    cell('SHA-1', info.hashes.sha1, 'w3 is-mono'));
+  const path = state.path;
 
-  const checks = h('ul', { class: 'checks' }, info.security_details.map((row) =>
-    h('li', {}, h('span', { text: row.label }),
-      h('span', { class: `state state-${row.state}`, text: row.value }))));
-
-  const libs = info.libraries.length
-    ? h('ul', { class: 'plain-list' }, info.libraries.map((lib) => h('li', { class: 'mono', text: lib })))
-    : h('p', { class: 'muted', text: 'None. This program is self-contained.' });
-
-  const details = [];
-  const names = {
-    interpreter: 'Loader', compiler: 'Compiler', source_files: 'Source files', soname: 'Library name',
-    subsystem: 'Subsystem', linker_version: 'Linker version', dll_name: 'Internal name',
-    pdb_path: 'Debug file path', imphash: 'Import hash', rpath: 'RPATH', runpath: 'RUNPATH',
-  };
-  for (const [key, label] of Object.entries(names)) {
-    if (md[key] === undefined) continue;
-    const value = Array.isArray(md[key]) ? md[key].join(', ') : String(md[key]);
-    details.push(h('li', {}, h('span', { class: 'muted', text: label + ': ' }), h('span', { class: 'mono', text: value })));
-  }
-  if (md.overlay) {
-    details.push(h('li', {}, h('span', { class: 'muted', text: 'Appended data: ' }),
-      `${bytesText(md.overlay.size)} after the program, at offset ${hex(md.overlay.offset)}`));
-  }
-
-  const notable = h('div', {}, busy('Looking for links, addresses and paths…'));
-  api('strings', { path: state.path, tagged: 1, limit: 12 }).then((found) => {
-    if (!found.items.length) {
-      fill(notable, h('p', { class: 'muted', text: 'No links, network addresses or file paths found.' }));
-      return;
-    }
-    fill(notable, h('ul', { class: 'plain-list' }, found.items.map((s) =>
-      h('li', {}, s.tags.map((t) => h('span', { class: `tag tag-${t}`, text: t })), h('span', { class: 'mono', text: s.text })))),
-    found.total > found.items.length
-      ? h('p', {}, h('button', { class: 'link', type: 'button', text: `All ${found.total} notable strings`, onclick: () => show('strings') }))
-      : null);
-  }).catch(() => fill(notable));
-
-  const techNote = h('div');
-  api('techniques', { path: state.path }).then((rows) => {
+  const notes = h('div', { class: 'ov-notes' },
+    info.warnings.length ? h('div', { class: 'notice' }, h('strong', { text: 'This file is damaged or unusual. ' }), info.warnings.join(' · ')) : null);
+  api('techniques', { path }).then((rows) => {
     if (!rows.length) return;
-    fill(techNote, h('p', { class: 'notice' },
+    notes.prepend(h('p', { class: 'notice' },
       h('strong', { text: `vex found ${rows.length} protection or evasion technique${rows.length === 1 ? '' : 's'}: ` }),
       rows.map((t) => t.title).join(', ') + '. ',
       h('button', { class: 'link', type: 'button', text: 'See the evidence', onclick: () => show('techniques') })));
   }).catch(() => {});
-
-  const engineNote = h('div');
-  api('engine', { path: state.path }).then((result) => {
+  api('engine', { path }).then((result) => {
     if (!result.matches.length) return;
     const best = result.matches[0];
-    fill(engineNote, h('p', { class: 'notice is-ok' },
+    add(notes, h('p', { class: 'notice is-ok' },
       `This looks like a ${best.engine} game (${best.confidence} confidence). `,
       h('button', { class: 'link', type: 'button', text: 'See its assets', onclick: () => show('assets') })));
   }).catch(() => {});
 
-  add(box, 
-    techNote,
-    engineNote,
-    info.warnings.length ? h('div', { class: 'notice' }, h('strong', { text: 'This file is damaged or unusual. ' }), info.warnings.join(' · ')) : null,
-    block,
-    h('div', { class: 'columns' },
-      h('section', { class: 'panel' }, h('h3', { text: 'Protections' }), checks),
-      h('section', { class: 'panel' }, h('h3', { text: `Libraries it needs (${info.libraries.length})` }), libs),
-      h('section', { class: 'panel' }, h('h3', { text: 'Notable strings' }), notable),
-      details.length ? h('section', { class: 'panel' }, h('h3', { text: 'Build details' }), h('ul', { class: 'plain-list' }, details)) : null));
+  // File Information
+  const built = md.timestamp ? ['Built', md.timestamp, false] : ['Build ID', md.build_id || 'not recorded', Boolean(md.build_id)];
+  const kv = (label, value, mono) => h('tr', {}, h('th', { scope: 'row', text: label }), h('td', { class: mono ? 'mono' : null }, value));
+  const infoCard = h('section', { class: 'box ov-info' }, boxHead('file', 'File Information'),
+    h('div', { class: 'box-body' }, h('table', { class: 'kv' }, h('tbody', {},
+      kv('File Name', info.name),
+      kv('Type', typeText(info)),
+      kv('Entry Point', info.entry || 'none'),
+      kv('Image Base', info.image_base),
+      kv('Size', `${bytesText(info.size)} (${grouped(info.size)} bytes)`),
+      kv('Entropy', h('div', { class: 'entropy-cell' },
+        h('span', { text: `${info.entropy.toFixed(2)} of 8` + (info.entropy > 7.2 ? ' (packed?)' : '') }),
+        h('span', { class: 'meter' + (info.entropy > 7.2 ? ' is-high' : ''), role: 'img', 'aria-label': `${info.entropy.toFixed(2)} of 8` },
+          h('i', { style: { width: `${(info.entropy / 8) * 100}%` } })))),
+      kv(built[0], built[1], built[2])))));
+
+  // Protections & Security
+  const protCard = h('section', { class: 'box ov-prot' }, boxHead('shield', 'Protections & Security', null, 'is-good'),
+    h('div', { class: 'box-body' }, h('ul', { class: 'checks' }, info.security_details.map((row) =>
+      h('li', {}, h('span', { text: row.label }),
+        h('span', { class: `state state-${row.state}` }, securityIcon(row), h('span', { text: row.value })))))));
+
+  // Quick Insights
+  const libs = info.libraries;
+  const insight = (iconName, title, text, view, iconClass) => h('div', { class: 'insight' },
+    h('span', { class: 'insight-ico' + (iconClass ? ' ' + iconClass : '') }, icon(iconName)),
+    h('span', { class: 'insight-title', text: title }),
+    view ? h('button', { type: 'button', class: 'icon-btn insight-go', 'aria-label': `Show ${VIEWS[view].label}`, title: `Show ${VIEWS[view].label}`, onclick: view === 'strings' ? () => { state.stringsPreset = { tagged: true }; show('strings'); } : () => show(view) }, icon('chevright')) : null,
+    h('span', { class: 'insight-text', text, title: text }));
+  const stringsRow = insight('quote', 'Notable Strings', 'Looking for links, addresses and paths…', 'strings', 'is-violet');
+  api('strings', { path, tagged: 1, limit: 12 }).then((found) => {
+    stringsRow.querySelector('.insight-title').textContent = `Notable Strings (${found.total})`;
+    const text = found.items.length ? found.items[0].text : 'No links, network addresses or file paths found.';
+    const el = stringsRow.querySelector('.insight-text');
+    el.textContent = text;
+    el.title = found.items.map((s) => s.text).join('\n');
+  }).catch(() => { stringsRow.querySelector('.insight-text').textContent = 'Not available.'; });
+  const hashRow = (label, value) => [
+    h('span', { class: 'hash-name', text: label }),
+    h('span', { class: 'hash-value', text: value, title: value }),
+    h('button', { type: 'button', class: 'icon-btn copy-btn', 'aria-label': `Copy the ${label} hash`, title: `Copy ${label}`, onclick: () => copyText(value, `${label} hash`) }, icon('copy'))];
+  const insightsCard = h('section', { class: 'box ov-insights' }, boxHead('bolt', 'Quick Insights'),
+    h('div', { class: 'box-body' },
+      insight('library', `Libraries (${libs.length})`, libs.length ? libs.join(', ') : 'None. This program is self-contained.', 'imports'),
+      stringsRow,
+      h('div', { class: 'insight insight-hashes' },
+        h('span', { class: 'insight-ico' }, icon('fingerprint')),
+        h('span', { class: 'insight-title', text: 'Hashes' }),
+        h('div', { class: 'hashes' }, hashRow('SHA-256', info.hashes.sha256), hashRow('MD5', info.hashes.md5), hashRow('SHA-1', info.hashes.sha1)))));
+
+  // Entropy Analysis
+  const entropyBody = h('div', { class: 'box-body entropy-box' }, h('div', { class: 'chart' }), entropyBig(info.entropy));
+  const entropyCard = h('section', { class: 'box ov-entropy' },
+    boxHead('entropy', 'Entropy Analysis', h('button', { type: 'button', class: 'box-link', onclick: () => show('entropy') }, 'Explore', icon('arrowright'))),
+    entropyBody);
+  entropyData(48).then((data) => {
+    if (!data) { entropyBody.firstChild.remove(); entropyBody.classList.add('is-single'); return; }
+    entropyBody.firstChild.replaceWith(chartBox('', (el, w, hgt) => drawEntropy(el, data, w, hgt, {})));
+  }).catch(() => { entropyBody.firstChild.remove(); entropyBody.classList.add('is-single'); });
+
+  // Section Overview
+  const sectionsBody = h('div', { class: 'box-body' }, busy('Reading the section table…'));
+  const sectionsCard = h('section', { class: 'box ov-sections' },
+    boxHead('table', 'Section Overview', h('button', { type: 'button', class: 'box-link', onclick: () => show('sections') }, 'View All Sections', icon('arrowright'))),
+    sectionsBody);
+  api('sections', { path }).then((sections) => {
+    if (!sections.length) { fill(sectionsBody, h('p', { class: 'pane-note', text: 'This file has no section table. The Sections view lists its segments.' })); return; }
+    const shown = sections.length > 7 ? sections.slice(0, 6) : sections;
+    fill(sectionsBody, h('div', { class: 'table-scroll' }, h('table', { class: 'table-plain' },
+      h('thead', {}, h('tr', {}, ['Section', 'Virtual Size', 'Raw Size', 'Entropy', 'Flags'].map((t) => h('th', { scope: 'col', text: t })))),
+      h('tbody', {}, shown.map((s) => h('tr', {},
+        h('td', { class: 'strong' }, h('button', { class: 'link link-plain', type: 'button', text: s.name || '(unnamed)', title: `Show the bytes of ${s.name || 'this section'}`, onclick: () => { state.bytes = { offset: s.offset }; show('bytes'); } })),
+        h('td', { class: 'tnum', text: hexU(s.vsize) }),
+        h('td', { class: 'tnum', text: hexU(s.size) }),
+        h('td', { class: 'tnum', text: s.entropy.toFixed(2) }),
+        h('td', {}, flagBadge(s.perms))))))),
+    sections.length > shown.length ? h('p', { class: 'chart-note', text: `Showing ${shown.length} of ${sections.length} sections.` }) : null);
+  }).catch((error) => fill(sectionsBody, h('p', { class: 'pane-note', text: error.message })));
+
+  const details = buildDetails(md);
+  add(box, h('div', { class: 'ov' },
+    notes,
+    state.layout ? mapCard(state.layout) : null,
+    h('div', { class: 'ov-row ov-row-3' }, infoCard, protCard, insightsCard),
+    h('div', { class: 'ov-row ov-row-2' }, entropyCard, sectionsCard),
+    details.length ? h('section', { class: 'box ov-build' }, boxHead('chip', 'Build Details'),
+      h('div', { class: 'box-body build-grid' }, h('table', { class: 'kv' }, h('tbody', {}, details.map(([k, v]) => kv(k, v, true)))))) : null));
+}
+
+// --- report -----------------------------------------------------------------
+// Export Report builds a Markdown or JSON summary in the page, from the same
+// API calls the views make, and downloads it named after the file.
+
+const mdCell = (value) => String(value === null || value === undefined ? '' : value)
+  .replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ').replace(/`/g, 'ʼ');
+
+function mdTable(headers, rows) {
+  if (!rows.length) return '_None._\n';
+  return [`| ${headers.map(mdCell).join(' | ')} |`, `| ${headers.map(() => '---').join(' | ')} |`,
+    ...rows.map((r) => `| ${r.map(mdCell).join(' | ')} |`)].join('\n') + '\n';
+}
+
+async function collectReport() {
+  const path = state.path;
+  const info = state.info;
+  const soft = (promise, fallback) => promise.catch(() => fallback);
+  const [sections, segments, imports, exports_, techniques, strings, entropy] = await Promise.all([
+    soft(api('sections', { path }), []), soft(api('segments', { path }), []),
+    soft(api('imports', { path }), []), soft(api('exports', { path }), []),
+    soft(api('techniques', { path }), []), soft(api('strings', { path, tagged: 1, limit: 200 }), { items: [], total: 0 }),
+    soft(entropyData(64), null),
+  ]);
+  return {
+    generator: `vex ${VEX_VERSION}`, generated: new Date().toISOString(),
+    file: info, layout: state.layout, sections, segments, imports, exports: exports_, techniques,
+    notable_strings: { total: strings.total, items: strings.items }, entropy,
+  };
+}
+
+function reportMarkdown(r) {
+  const info = r.file;
+  const md = info.metadata;
+  const out = [];
+  out.push(`# vex report: ${info.name}`, '',
+    `Generated by ${r.generator} on ${r.generated}. vex reads files without running them.`, '');
+  out.push('## File', '', mdTable(['Field', 'Value'], [
+    ['Name', info.name], ['Path', info.path], ['Type', typeText(info)],
+    ['Size', `${bytesText(info.size)} (${grouped(info.size)} bytes)`],
+    ['Entry point', info.entry || 'none'], ['Image base', info.image_base],
+    ['Entropy', `${info.entropy.toFixed(2)} of 8`],
+    [md.timestamp ? 'Built' : 'Build ID', md.timestamp || md.build_id || 'not recorded'],
+    ['SHA-256', info.hashes.sha256], ['SHA-1', info.hashes.sha1], ['MD5', info.hashes.md5],
+    ...buildDetails(md),
+  ]));
+  out.push('## Protections', '', ...info.security_details.map((row) => `- ${row.label}: **${row.value}**${row.state === 'bad' ? ' (weak)' : ''}`), '');
+  if (info.warnings.length) out.push('## Warnings', '', ...info.warnings.map((w) => `- ${mdCell(w)}`), '');
+  out.push(`## Sections (${r.sections.length})`, '', mdTable(['Name', 'Address', 'Virtual size', 'Raw size', 'File offset', 'Flags', 'Entropy'],
+    r.sections.map((s) => [s.name, s.address || '', hexU(s.vsize), hexU(s.size), hex(s.offset), (s.perms || '').toUpperCase(), s.entropy.toFixed(2)])));
+  if (r.segments.length) {
+    out.push(`## Segments (${r.segments.length})`, '', mdTable(['Type', 'Address', 'Size in file', 'Size in memory', 'File offset', 'Flags'],
+      r.segments.map((s) => [s.type, s.address, bytesText(s.size), bytesText(s.vsize), hex(s.offset), (s.perms || '').toUpperCase()])));
+  }
+  out.push(`## Libraries (${info.libraries.length})`, '', info.libraries.length ? info.libraries.map((l) => `- ${mdCell(l)}`).join('\n') + '\n' : '_None. The program is self-contained._\n');
+  out.push(`## Imports (${r.imports.length})`, '', mdTable(['Library', 'Function', 'Slot address'], r.imports.map((i) => [i.library || '', i.name, i.address || ''])));
+  out.push(`## Exports (${r.exports.length})`, '', mdTable(['Number', 'Name', 'Address', 'Passed on to'], r.exports.map((e) => [e.ordinal === null ? '' : e.ordinal, e.name, e.address || '', e.forwarder || ''])));
+  out.push(`## Techniques (${r.techniques.length})`, '');
+  if (!r.techniques.length) out.push('_No notable protection or evasion techniques found._', '');
+  for (const t of r.techniques) out.push(`### ${mdCell(t.title)} (${t.confidence} confidence)`, '', mdCell(t.explanation), '', ...t.evidence.map((e) => `- ${mdCell(e)}`), '');
+  out.push(`## Notable strings (${r.notable_strings.total})`, '', mdTable(['Address', 'Kind', 'Text'],
+    r.notable_strings.items.map((s) => [s.address || `file ${hex(s.offset)}`, s.tags.join(', '), s.text])));
+  if (r.entropy) {
+    let highest = r.entropy.points[0];
+    for (const p of r.entropy.points) if (p.entropy > highest.entropy) highest = p;
+    out.push('## Entropy', '', `Overall ${r.entropy.overall.toFixed(2)} bits per byte over ${r.entropy.points.length} blocks of ${grouped(r.entropy.block)} bytes; highest ${highest.entropy.toFixed(2)} at ${hexU(highest.offset)}.`, '');
+  }
+  return out.join('\n');
+}
+
+async function exportReport(kind) {
+  if (!state.info) return;
+  const name = state.name;
+  toast('Building the report…');
+  try {
+    const report = await collectReport();
+    const blob = kind === 'json'
+      ? new Blob([JSON.stringify(report, null, 2) + '\n'], { type: 'application/json' })
+      : new Blob([reportMarkdown(report)], { type: 'text/markdown' });
+    saveBlob(blob, `${name}.vex-report.${kind === 'json' ? 'json' : 'md'}`);
+    toast(`Saved ${name}.vex-report.${kind === 'json' ? 'json' : 'md'} to your downloads.`);
+  } catch (error) { fail(error); }
 }
 
 // --- code -------------------------------------------------------------------
@@ -581,7 +1295,9 @@ async function renderCode(box) {
 // --- strings ----------------------------------------------------------------
 
 async function renderStrings(box) {
-  const options = { q: '', tagged: false, encoding: 'all', min: 4, shown: 300 };
+  const preset = state.stringsPreset || {};
+  state.stringsPreset = null;
+  const options = { q: '', tagged: Boolean(preset.tagged), encoding: 'all', min: 4, shown: 300 };
   const tbody = h('tbody');
   const count = h('span', { class: 'count' });
   const more = h('button', { type: 'button', class: 'btn', text: 'Show more', hidden: true });
@@ -627,7 +1343,7 @@ async function renderStrings(box) {
       h('p', { text: 'Readable text stored in the file: messages, file names, web addresses. Often the fastest way in.' })),
     h('div', { class: 'toolbar' },
       h('input', { type: 'text', placeholder: 'Search text', 'aria-label': 'Search text', oninput: (e) => { options.q = e.target.value; reload(); } }),
-      h('label', { class: 'check' }, h('input', { type: 'checkbox', onchange: (e) => { options.tagged = e.target.checked; reload(); } }), 'Only links, addresses and paths'),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: options.tagged, onchange: (e) => { options.tagged = e.target.checked; reload(); } }), 'Only links, addresses and paths'),
       h('label', { class: 'check' }, 'Kind',
         h('select', { onchange: (e) => { options.encoding = e.target.value; reload(); } },
           h('option', { value: 'all', text: 'All' }), h('option', { value: 'ascii', text: 'Plain (ASCII)' }), h('option', { value: 'utf16', text: 'Wide (UTF-16)' }))),
@@ -700,8 +1416,7 @@ async function renderTechniques(box) {
 }
 
 async function renderImports(box) {
-  const [imports, exports_] = await Promise.all([
-    api('imports', { path: state.path }), api('exports', { path: state.path })]);
+  const imports = await api('imports', { path: state.path });
   const rows = [];
   let current;
   for (const imp of imports) {
@@ -730,19 +1445,22 @@ async function renderImports(box) {
       h('p', { text: 'Functions this program borrows from the system and other libraries. They show what it is able to do.' })),
     imports.length ? h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Slot address', 'Function', 'Called from'].map((t) => h('th', { scope: 'col', text: t })))),
-      h('tbody', {}, rows))) : h('p', { class: 'muted', text: 'This file imports nothing.' }));
-  if (exports_.length) {
-    add(box, 
-      h('div', { class: 'view-head', style: { marginTop: '26px' } }, h('h2', { text: `Exports (${exports_.length})` }),
-        h('p', { text: 'Functions this file offers to other programs.' })),
-      h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['Number', 'Address', 'Name', 'Passed on to'].map((t) => h('th', { scope: 'col', text: t })))),
-        h('tbody', {}, exports_.map((e) => h('tr', {},
-          h('td', { class: 'num mono', text: e.ordinal === null ? '' : String(e.ordinal) }),
-          h('td', { class: 'mono' }, e.address ? h('button', { class: 'link', type: 'button', text: e.address, onclick: () => goTo(e.address) }) : ''),
-          h('td', { class: 'mono wrap', text: e.name }),
-          h('td', { class: 'mono', text: e.forwarder || '' })))))));
-  }
+      h('tbody', {}, rows))) : h('p', { class: 'notice', text: 'This file imports nothing.' }));
+}
+
+async function renderExports(box) {
+  const exports_ = await api('exports', { path: state.path });
+  add(box,
+    h('div', { class: 'view-head' }, h('h2', { text: `Exports (${exports_.length})` }),
+      h('p', { text: 'Functions this file offers to other programs. Libraries (DLL, .so) list theirs here; most programs export nothing.' })),
+    exports_.length ? h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Number', 'Address', 'Name', 'Passed on to'].map((t) => h('th', { scope: 'col', text: t })))),
+      h('tbody', {}, exports_.map((e) => h('tr', {},
+        h('td', { class: 'num mono', text: e.ordinal === null ? '' : String(e.ordinal) }),
+        h('td', { class: 'mono' }, e.address ? h('button', { class: 'link', type: 'button', text: e.address, onclick: () => goTo(e.address) }) : ''),
+        h('td', { class: 'mono wrap', text: e.name }),
+        h('td', { class: 'mono', text: e.forwarder || '' }))))))
+      : h('p', { class: 'notice', text: 'This file exports nothing.' }));
 }
 
 // --- sections ---------------------------------------------------------------
@@ -763,14 +1481,14 @@ async function renderSections(box) {
         h('td', { class: 'num mono', text: bytesText(s.size) }),
         h('td', { class: 'num mono', text: bytesText(s.vsize) }),
         h('td', { class: 'num mono', text: hex(s.offset) }),
-        h('td', { text: perms(s.perms) }),
+        h('td', {}, h('span', { class: 'perm-cell' }, flagBadge(s.perms), h('span', { class: 'muted', text: perms(s.perms) }))),
         h('td', {}, h('div', { class: 'bar-cell' },
           h('span', { class: 'meter' + (s.entropy > 7.2 ? ' is-high' : '') }, h('i', { style: { width: `${(s.entropy / 8) * 100}%` } })),
           h('span', { class: 'mono', text: s.entropy.toFixed(2) })))))))) :
       h('p', { class: 'notice', text: 'This file has no section table (it was removed). The segments below still describe what gets loaded.' }));
   if (segments.length) {
     add(box, 
-      h('div', { class: 'view-head', style: { marginTop: '26px' } }, h('h2', { text: `Segments (${segments.length})` }),
+      h('div', { class: 'view-head is-sub' }, h('h2', { text: `Segments (${segments.length})` }),
         h('p', { text: 'How Linux maps the file into memory when it starts.' })),
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, ['Type', 'Address', 'Size in file', 'Size in memory', 'File offset', 'Access'].map((t, i) =>
@@ -778,7 +1496,8 @@ async function renderSections(box) {
         h('tbody', {}, segments.map((s) => h('tr', {},
           h('td', { class: 'mono', text: s.type }), h('td', { class: 'mono', text: s.address }),
           h('td', { class: 'num mono', text: bytesText(s.size) }), h('td', { class: 'num mono', text: bytesText(s.vsize) }),
-          h('td', { class: 'num mono', text: hex(s.offset) }), h('td', { text: perms(s.perms) })))))));
+          h('td', { class: 'num mono', text: hex(s.offset) }),
+          h('td', {}, h('span', { class: 'perm-cell' }, flagBadge(s.perms), h('span', { class: 'muted', text: perms(s.perms) })))))))));
   }
 }
 
@@ -993,7 +1712,7 @@ async function renderResources(box) {
   add(box, h('section', {},
     h('div', { class: 'view-head' }, h('h2', { text: `Built-in resources (${found.items.length})` }),
       h('p', { text: 'Icons, version details and data stored inside this Windows program.' })),
-    version.length ? h('ul', { class: 'plain-list', style: { marginBottom: '14px', maxWidth: '70ch' } }, version.map(([k, v]) =>
+    version.length ? h('ul', { class: 'versions' }, version.map(([k, v]) =>
       h('li', {}, h('span', { class: 'muted', text: k + ': ' }), v))) : null,
     h('div', { class: 'split' },
       h('div', { class: 'table-wrap' }, h('table', {},
@@ -1599,12 +2318,38 @@ async function renderDecode(box) {
 
 // --- start ------------------------------------------------------------------
 
+// Settings are remembered per browser; storage can be missing or refuse
+// (private windows, blocked site data), and the page works the same without it.
+function remember(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }
+}
+function recall(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  const button = $('theme-toggle');
-  button.textContent = theme === 'dark' ? 'Light' : 'Dark';
-  button.setAttribute('aria-pressed', String(theme === 'dark'));
-  try { localStorage.setItem('vex-theme', theme); } catch (e) { /* private mode */ }
+  $('theme-dark').setAttribute('aria-pressed', String(theme === 'dark'));
+  $('theme-light').setAttribute('aria-pressed', String(theme === 'light'));
+  remember('vex-theme', theme);
+}
+
+const reducedMotion = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+function applyMotion(on) {
+  document.documentElement.dataset.motion = on ? 'on' : 'off';
+  const toggle = $('motion-toggle');
+  const reduced = Boolean(reducedMotion && reducedMotion.matches);
+  toggle.checked = on && !reduced;
+  toggle.disabled = reduced;
+  $('motion-note').hidden = !reduced;
+}
+
+function closeSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar.classList.contains('is-open')) return;
+  sidebar.classList.remove('is-open');
+  $('sidebar-toggle').setAttribute('aria-expanded', 'false');
 }
 
 function start() {
@@ -1615,15 +2360,31 @@ function start() {
   try { sessionStorage.setItem('vex-token', state.token); } catch (e) { /* ignore */ }
   if (location.hash) history.replaceState(null, '', location.pathname);
 
-  let theme = null;
-  try { theme = localStorage.getItem('vex-theme'); } catch (e) { /* ignore */ }
-  applyTheme(theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-  $('theme-toggle').addEventListener('click', () =>
-    applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+  applyTheme(recall('vex-theme') === 'light' ? 'light' : 'dark');
+  applyMotion(recall('vex-motion') !== 'off');
+  if (reducedMotion && reducedMotion.addEventListener) {
+    reducedMotion.addEventListener('change', () => applyMotion(recall('vex-motion') !== 'off'));
+  }
+  $('theme-dark').addEventListener('click', () => applyTheme('dark'));
+  $('theme-light').addEventListener('click', () => applyTheme('light'));
+  $('motion-toggle').addEventListener('change', (e) => {
+    remember('vex-motion', e.target.checked ? 'on' : 'off');
+    applyMotion(e.target.checked);
+  });
+  $('settings-button').addEventListener('click', () => toggleMenu($('settings-button'), $('settings-menu')));
 
-  $('open-button').addEventListener('click', openDialog);
-  const railOpen = $('rail-open');
-  if (railOpen) railOpen.addEventListener('click', openDialog);
+  $('about-version').textContent = `Version ${VEX_VERSION}`;
+  $('help-button').addEventListener('click', () => { closeMenu(); $('about-dialog').showModal(); });
+  $('about-dialog').querySelector('button').addEventListener('click', (e) => { e.preventDefault(); $('about-dialog').close(); });
+
+  $('sidebar-toggle').addEventListener('click', () => {
+    const sidebar = document.querySelector('.sidebar');
+    const open = !sidebar.classList.contains('is-open');
+    sidebar.classList.toggle('is-open', open);
+    $('sidebar-toggle').setAttribute('aria-expanded', String(open));
+  });
+
+  $('tab-add').addEventListener('click', openDialog);
   $('open-dialog').querySelector('.dialog-head button').addEventListener('click', (e) => { e.preventDefault(); $('open-dialog').close(); });
   $('path-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1641,15 +2402,18 @@ function start() {
   window.addEventListener('dragleave', () => { const d = document.querySelector('.drop'); if (d) d.classList.remove('is-over'); });
   window.addEventListener('drop', (e) => {
     e.preventDefault();
+    const d = document.querySelector('.drop');
+    if (d) d.classList.remove('is-over');
     const file = e.dataTransfer && e.dataTransfer.files[0];
     if (file) uploadFile(file);
   });
 
+  renderChrome();
   if (!state.token) {
-    fill($('main'), h('div', { class: 'welcome' },
-      h('h1', { text: 'This page needs its session link' }),
-      h('p', { text: 'Start vex from a terminal with “vex gui” and open the link it prints. The link carries a one-time key so that no other web page can use this tool.' })));
-    $('open-button').disabled = true;
+    fill($('main'), welcomeCard('This page needs its session link',
+      'Start vex from a terminal with “vex gui” and open the link it prints. The link carries a one-time key so that no other web page can use this tool.'));
+    $('tab-add').disabled = true;
+    for (const b of $('nav').querySelectorAll('button')) b.disabled = true;
     return;
   }
   renderWelcome();
