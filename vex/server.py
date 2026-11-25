@@ -218,6 +218,11 @@ def _api_techniques(ws, p, body):
     return views.techniques(ws.binary(p.need("path")))
 
 
+def _api_entropy(ws, p, body):
+    points = p.number("points", 64)
+    return views.entropy_profile(ws.binary(p.need("path")), points)
+
+
 def _api_hexdump(ws, p, body):
     length = max(1, min(p.number("length", 512), 65536))
     return views.hexdump(ws.binary(p.need("path")), p.number("address"),
@@ -536,6 +541,7 @@ GET_ROUTES: Dict[str, Callable] = {
     "segments": _api_segments, "imports": _api_imports, "exports": _api_exports,
     "symbols": _api_symbols, "strings": _api_strings, "functions": _api_functions,
     "disasm": _api_disasm, "xrefs": _api_xrefs, "hexdump": _api_hexdump, "techniques": _api_techniques,
+    "entropy": _api_entropy,
     "open": _api_open, "browse": _api_browse,
     "engine": _api_engine, "archive/list": _api_archive_list,
     "archive/file": _api_archive_file, "resources": _api_resources,

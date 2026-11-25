@@ -425,3 +425,34 @@ JVal *view_layout(Arena *a, const Binary *b) {
     j_set(a, d, "regions", regions);
     return d;
 }
+
+JVal *view_entropy(Arena *a, const Binary *b, big points) {
+    if (points < 1)
+        points = 1;
+    if (points > 1024)
+        points = 1024;
+    uint64_t size = b->size, count = (uint64_t)points;
+    uint64_t block = size / count + (size % count != 0);    /* ceil(size / points) */
+    if (block < 256)
+        block = 256;
+    JVal *rows = j_list(a);
+    for (uint64_t offset = 0; offset < size; offset += block) {
+        uint64_t length = size - offset < block ? size - offset : block;
+        JVal *row = j_dict(a);
+        j_set(a, row, "offset", j_int(a, (big)offset));
+        j_set(a, row, "entropy", j_float(a, entropy(b->data + offset, length)));
+        j_push(a, rows, row);
+    }
+    JVal *d = j_dict(a);
+    j_set(a, d, "size", j_int(a, (big)size));
+    j_set(a, d, "block", j_int(a, (big)block));
+    j_set(a, d, "overall", j_float(a, entropy(b->data, size)));
+    j_set(a, d, "points", rows);
+    return d;
+}
+
+big view_entropy_points(const PyInt *requested) {
+    big limit = (big)1 << 62;
+    big value = requested->huge ? limit : (big)requested->magnitude;
+    return requested->negative ? -value : value;
+}

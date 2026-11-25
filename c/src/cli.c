@@ -45,6 +45,10 @@ static const char HELP[] =
     "  hexdump FILE [LOCATION] [--offset N] [-n BYTES]\n"
     "                            raw bytes at an address or file offset\n"
     "  layout FILE               the file as consecutive regions\n"
+    "  entropy FILE [--points N]\n"
+    "                            how random the bytes are along the file, in N\n"
+    "                            blocks (1 to 1024, default 64): packed or\n"
+    "                            encrypted parts come close to 8 bits per byte\n"
     "  techniques FILE           protection and evasion techniques: packing,\n"
     "                            anti-debug, anti-VM, injection, hooking, drivers\n"
     "  report FILE               everything at a glance\n"
@@ -219,6 +223,21 @@ static void cmd_exports(Session *s) {
 
 static void cmd_layout(Session *s) {
     cli_emit(s, view_layout(s->a, cli_load(s, s->positional[0])), render_layout);
+}
+
+/* --points N, read as int(text, 0) like argparse's type=_int in cli.py. */
+static void cmd_entropy(Session *s) {
+    big points = 64;
+    const char *text = cli_option(s, "points");
+    if (text != NULL) {
+        Str value = wtf8_from_argument(s->a, text);
+        PyInt requested;
+        if (!py_int_parse(value, &requested))
+            cli_usage_error(s, "argument --points: invalid _int value: %s",
+                            py_repr_str(s->a, value).p);
+        points = view_entropy_points(&requested);
+    }
+    cli_emit(s, view_entropy(s->a, cli_load(s, s->positional[0]), points), render_entropy);
 }
 
 static void cmd_symbols(Session *s) {
@@ -674,6 +693,7 @@ static const OptSpec STRINGS_OPTIONS[] = {
 static const OptSpec DISASM_OPTIONS[] = {{"count", 'n', true}};
 static const OptSpec XREFS_OPTIONS[] = {{"string", 0, true}};
 static const OptSpec HEXDUMP_OPTIONS[] = {{"offset", 0, true}, {"length", 'n', true}};
+static const OptSpec ENTROPY_OPTIONS[] = {{"points", 0, true}};
 static const OptSpec PATCH_OPTIONS[] = {
     {"offset", 0, false}, {"output", 'o', true}, {"in-place", 0, false}};
 static const OptSpec PATCH_STRING_OPTIONS[] = {
@@ -700,6 +720,7 @@ static const Command COMMANDS[] = {
     {"xrefs", NULL, 1, 2, "FILE", XREFS_OPTIONS, 1, cmd_xrefs},
     {"hexdump", NULL, 1, 2, "FILE", HEXDUMP_OPTIONS, 2, cmd_hexdump},
     {"layout", NULL, 1, 1, "FILE", NULL, 0, cmd_layout},
+    {"entropy", NULL, 1, 1, "FILE", ENTROPY_OPTIONS, 1, cmd_entropy},
     {"report", NULL, 1, 1, "FILE", NULL, 0, cmd_report},
     {"split", NULL, 2, 2, "FILE, FOLDER", NULL, 0, cmd_split},
     {"decode", NULL, 0, 1, "TEXT", DECODE_OPTIONS, 10, cmd_decode},

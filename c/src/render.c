@@ -539,6 +539,42 @@ void render_layout(Arena *a, const Style *st, const JVal *d, Lines *out) {
     table_render(&t, st, out);
 }
 
+/* Bits per byte with two decimals; + 0.0 turns -0.0 into 0.0 ("0.00"). */
+static Str entropy_bits(Arena *a, double value) {
+    return str_printf(a, "%.2f", value + 0.0);
+}
+
+void render_entropy(Arena *a, const Style *st, const JVal *d, Lines *out) {
+    /* The bar column's heading: a full bar of 40 # is 8 bits per byte. */
+    static const char *const headers[] = {"Offset", "Entropy",
+                                          "0                                      8"};
+    add(a, out, str_printf(a, "Size %s bytes, block %s bytes, overall entropy %s bits/byte",
+                           dec_number(a, j_number(j_get(d, "size"))).p,
+                           dec_number(a, j_number(j_get(d, "block"))).p,
+                           entropy_bits(a, j_get(d, "overall")->u.real).p));
+    const JVal *points = j_get(d, "points");
+    if (j_len(points) == 0)
+        return;
+    add(a, out, str_c(""));
+    Table t;
+    table_init(&t, a, headers, 3, 1u << 0 | 1u << 1);
+    for (size_t i = 0; i < j_len(points); i++) {
+        const JVal *p = j_at(points, i);
+        double value = j_get(p, "entropy")->u.real;
+        int bar = (int)(value * 5);         /* int(entropy * 5) in cli.py */
+        if (bar < 0)
+            bar = 0;
+        if (bar > 40)
+            bar = 40;
+        char hashes[41];
+        memset(hashes, '#', (size_t)bar);
+        table_cell(&t, hex_number(a, j_number(j_get(p, "offset"))));
+        table_cell(&t, entropy_bits(a, value));
+        table_cell(&t, str_copy(a, hashes, (size_t)bar));
+    }
+    table_render(&t, st, out);
+}
+
 void render_report(Arena *a, const Style *st, const JVal *d, Lines *out) {
     render_info(a, st, j_get(d, "info"), out);
     const JVal *techniques = j_get(d, "techniques");

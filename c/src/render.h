@@ -26,6 +26,7 @@ void render_disassembly(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_xrefs(Arena *a, const Style *st, const JVal *rows, Lines *out);
 void render_hexdump(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_layout(Arena *a, const Style *st, const JVal *d, Lines *out);
+void render_entropy(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_report(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_split(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_done(Arena *a, const Style *st, const JVal *d, Lines *out);

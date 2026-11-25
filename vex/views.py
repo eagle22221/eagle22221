@@ -96,6 +96,20 @@ def sections(b: Binary) -> List[dict]:
     } for s in b.sections]
 
 
+def entropy_profile(b: Binary, points: int = 64) -> dict:
+    """Entropy along the file, for drawing it: one point per block of
+    max(256, ceil(size / points)) bytes (the last block may be shorter), plus
+    the whole file. `points` is clamped to 1..1024. Values are bits per byte,
+    rounded like the sections view."""
+    points = max(1, min(points, 1024))
+    size = b.size
+    block = max(256, -(-size // points))
+    return {"size": size, "block": block, "overall": round(entropy(b.data), 3),
+            "points": [{"offset": offset,
+                        "entropy": round(entropy(b.data[offset:offset + block]), 3)}
+                       for offset in range(0, size, block)]}
+
+
 def segments(b: Binary) -> List[dict]:
     return [{"type": s.type, "address": hx(s.vaddr), "vsize": s.vsize,
              "offset": s.offset, "size": s.size, "perms": s.perms} for s in b.segments]

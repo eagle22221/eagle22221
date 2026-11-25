@@ -7,6 +7,7 @@
 
 #include "json.h"
 #include "model.h"
+#include "pystr.h"
 #include "strings.h"
 
 JVal *view_info(Arena *a, const Binary *b);
@@ -25,5 +26,12 @@ JVal *view_hexdump(Arena *a, const Binary *b, const big *address, const big *off
                    big length);
 /* The file as consecutive, non-overlapping regions. */
 JVal *view_layout(Arena *a, const Binary *b);
+/* Entropy along the file (port of views.entropy_profile): one point per block
+ * of max(256, ceil(size / points)) bytes, the last one possibly shorter, and
+ * the whole file. `points` is clamped to 1..1024. */
+JVal *view_entropy(Arena *a, const Binary *b, big points);
+/* The number of points asked for, as int(text, 0) read it, brought into the
+ * range of `big` (a value too large for it is far outside 1..1024 anyway). */
+big view_entropy_points(const PyInt *requested);
 
 #endif

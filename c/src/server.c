@@ -857,6 +857,20 @@ static void h_hexdump(Req *req) {
                                has_offset ? &offset : NULL, length);
 }
 
+/* ?points= is read as server.py's Params.number reads it: int(value, 0), of
+ * any size, the default when blank. view_entropy clamps it to 1..1024. */
+static void h_entropy(Req *req) {
+    big points = 64;
+    const char *v = q_get(req, "points");
+    if (v != NULL && v[0] != '\0') {
+        PyInt requested;
+        if (!py_int_parse(str_c(v), &requested))
+            api_error(req, 400, "parameter points must be a number");
+        points = view_entropy_points(&requested);
+    }
+    req->result = view_entropy(req->a, load_binary(req, "path", NULL), points);
+}
+
 static void h_techniques(Req *req) {
     Binary *b = load_binary(req, "path", NULL);
     req->result = tech_view(req->a, b);
@@ -1789,6 +1803,7 @@ static const Route ROUTES[] = {
     {"GET", "segments", h_segments}, {"GET", "imports", h_imports}, {"GET", "exports", h_exports},
     {"GET", "symbols", h_symbols}, {"GET", "strings", h_strings}, {"GET", "functions", h_functions},
     {"GET", "disasm", h_disasm}, {"GET", "xrefs", h_xrefs}, {"GET", "hexdump", h_hexdump}, {"GET", "techniques", h_techniques},
+    {"GET", "entropy", h_entropy},
     {"GET", "open", h_open}, {"GET", "browse", h_browse}, {"GET", "engine", h_engine},
     {"GET", "archive/list", h_archive_list}, {"GET", "archive/file", h_archive_file},
     {"GET", "resources", h_resources}, {"GET", "resource/data", h_resource_unavailable},

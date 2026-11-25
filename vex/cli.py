@@ -119,6 +119,23 @@ def _render_sections(rows: List[dict], st: Style) -> List[str]:
         st, right=(2, 3, 4, 6))
 
 
+# Heading of the bar column: a full bar of 40 # is 8 bits per byte.
+_ENTROPY_SCALE = "0" + "8".rjust(39)
+
+
+def _render_entropy(d: dict, st: Style) -> List[str]:
+    def bits(value: float) -> str:
+        return f"{value + 0.0:.2f}"         # + 0.0: never "-0.00"
+    out = [f"Size {d['size']} bytes, block {d['block']} bytes, "
+           f"overall entropy {bits(d['overall'])} bits/byte"]
+    if d["points"]:
+        out += [""] + _table(
+            ["Offset", "Entropy", _ENTROPY_SCALE],
+            [(f"{p['offset']:#x}", bits(p["entropy"]), "#" * int(p["entropy"] * 5))
+             for p in d["points"]], st, right=(0, 1))
+    return out
+
+
 def _render_imports(rows: List[dict], st: Style) -> List[str]:
     if not rows:
         return ["(no imports)"]
@@ -260,6 +277,10 @@ def _cmd_info(args, st):
 
 def _cmd_sections(args, st):
     return views.sections(load(args.file)), _render_sections
+
+
+def _cmd_entropy(args, st):
+    return views.entropy_profile(load(args.file), args.points), _render_entropy
 
 
 def _cmd_imports(args, st):
@@ -726,6 +747,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="0x address or name (default: entry point)")
     sp.add_argument("--offset", type=_int, metavar="N", help="file offset instead of address")
     sp.add_argument("-n", "--length", type=_int, default=256, metavar="BYTES")
+    sp = add("entropy", _cmd_entropy, "how random the bytes are along the file: packed or "
+             "encrypted parts come close to 8 bits per byte")
+    sp.add_argument("--points", type=_int, default=64, metavar="N",
+                    help="how many blocks to measure, 1 to 1024 (default 64)")
     add("techniques", _cmd_techniques,
         "protection and evasion techniques: packing, anti-debug, anti-VM, "
         "injection, hooking, drivers")
