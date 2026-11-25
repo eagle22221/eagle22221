@@ -24,6 +24,8 @@
 #include <windows.h>
 #include <ole2.h>               /* everything the SDK header itself includes... */
 #include <eventtoken.h>         /* ...so that only its own declarations follow */
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -61,10 +63,30 @@ static struct {
     bool failed;        /* gave up before that */
 } g;
 
+/* A step-by-step record of how the window came up, appended to the file named
+ * by %VEX_WINDOW_LOG% when that is set. A windowed program has nowhere to
+ * print, so this is how a start-up problem gets diagnosed. */
+static void trace(const char *format, ...) {
+    wchar_t path[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"VEX_WINDOW_LOG", path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH)
+        return;
+    FILE *log = _wfopen(path, L"a");
+    if (log == NULL)
+        return;
+    va_list args;
+    va_start(args, format);
+    vfprintf(log, format, args);
+    va_end(args);
+    fputc('\n', log);
+    fclose(log);
+}
+
 /* Give up on the native window (only ever before it is shown). */
 static void fail(void) {
     if (g.shown || g.failed)
         return;
+    trace("giving up on the native window");
     g.failed = true;
     if (g.hwnd != NULL)
         DestroyWindow(g.hwnd);
@@ -133,6 +155,7 @@ static HRESULT STDMETHODCALLTYPE controller_invoke(
     ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *self, HRESULT result,
     ICoreWebView2Controller *controller) {
     (void)self;
+    trace("controller: result 0x%08lx", (unsigned long)result);
     if (g.failed || g.hwnd == NULL) {           /* too late: the window has gone */
         if (SUCCEEDED(result) && controller != NULL)
             ICoreWebView2Controller_Close(controller);
@@ -169,7 +192,9 @@ static HRESULT STDMETHODCALLTYPE controller_invoke(
     EventRegistrationToken token;
     ICoreWebView2_add_DocumentTitleChanged(g.webview, &g_title_handler, &token);
 
-    if (FAILED(ICoreWebView2_Navigate(g.webview, g.url))) {
+    HRESULT navigated = ICoreWebView2_Navigate(g.webview, g.url);
+    trace("navigate: result 0x%08lx", (unsigned long)navigated);
+    if (FAILED(navigated)) {
         fail();
         return S_OK;
     }
@@ -197,6 +222,7 @@ static HRESULT STDMETHODCALLTYPE environment_invoke(
     ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *self, HRESULT result,
     ICoreWebView2Environment *environment) {
     (void)self;
+    trace("environment: result 0x%08lx", (unsigned long)result);
     if (g.failed || g.hwnd == NULL)
         return S_OK;
     if (FAILED(result) || environment == NULL ||
@@ -255,6 +281,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPAR
     case WM_TIMER:
         if (wparam == STARTUP_TIMER) {
             KillTimer(hwnd, STARTUP_TIMER);
+            trace("the engine did not answer in time");
             fail();                             /* the engine never answered */
         }
         return 0;
@@ -372,6 +399,7 @@ NativeResult native_window_run(const char *url) {
     memset(&g, 0, sizeof g);
     CreateEnvironmentFn create_environment = load_loader();
     wchar_t data[MAX_PATH + 64];
+    trace("native window: loader %s", create_environment != NULL ? "found" : "not found");
     if (create_environment == NULL || url == NULL || !data_folder(data, MAX_PATH + 64))
         return NATIVE_UNAVAILABLE;
 
@@ -414,7 +442,9 @@ NativeResult native_window_run(const char *url) {
         place_window(g.hwnd);
         match_system_theme(g.hwnd);
         SetTimer(g.hwnd, STARTUP_TIMER, STARTUP_TIMEOUT_MS, NULL);
-        if (FAILED(create_environment(NULL, data, NULL, &g_environment_handler)))
+        HRESULT asked = create_environment(NULL, data, NULL, &g_environment_handler);
+        trace("create environment: result 0x%08lx", (unsigned long)asked);
+        if (FAILED(asked))
             fail();                             /* e.g. the engine is not installed */
 
         /* Runs until the window is destroyed - closed by the user, or by
@@ -431,6 +461,7 @@ NativeResult native_window_run(const char *url) {
     free(g.url);
     g.url = NULL;
     CoUninitialize();
+    trace("native window: %s", g.shown ? "closed by the user" : "unavailable");
     return g.shown ? NATIVE_CLOSED : NATIVE_UNAVAILABLE;
 }
 
