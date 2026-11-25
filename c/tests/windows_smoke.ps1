@@ -1,6 +1,6 @@
-# Runs vex's Windows programs on a real Windows machine and checks that they
-# behave: the native window opens, shows the page, and closing it ends the
-# program. Used by .github/workflows/windows-test.yml.
+# Runs vex's Windows programs on a Windows PC and checks that they behave: the
+# native window opens, shows the page, and closing it ends the program.
+# Screenshots and window logs are saved in the results folder.
 #
 #   pwsh c/tests/windows_smoke.ps1 -Dir FOLDER_WITH_THE_PROGRAMS -Out FOLDER_FOR_RESULTS
 param([Parameter(Mandatory)][string]$Dir, [string]$Out = "smoke-output")

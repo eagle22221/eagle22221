@@ -1,6 +1,6 @@
 /* A probe for the native window on its own (Windows): shows a fixed page in
- * vex's window, with no server behind it. Used by the Windows test to tell a
- * problem with the window from a problem with anything else.
+ * vex's window, with no server behind it, to tell a problem with the window
+ * from a problem with anything else (see c/tests/windows_smoke.ps1).
  *
  *   appwin-probe.exe [URL]
  *
