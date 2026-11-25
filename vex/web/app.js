@@ -471,7 +471,7 @@ function renderStatus() {
     info ? statusItem('chip', bytesText(info.size)) : null,
     info ? statusItem(info.format === 'PE' ? 'windows' : 'terminal', `${formatName(info)} (${info.arch})`)
       : statusItem(state.kind === 'folder' ? 'open' : 'assets', state.kind === 'folder' ? 'Game folder' : 'Asset pack'));
-  add(bar, statusItem('check', 'Analysis complete', 'status-state'), statusItem('file', state.name), right);
+  add(bar, statusItem('checkcircle', 'Analysis complete', 'status-state'), statusItem('file', state.name), right);
 }
 
 function renderChrome() {

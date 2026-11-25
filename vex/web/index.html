@@ -9,6 +9,8 @@
 <link rel="icon" type="image/png" sizes="48x48" href="/static/icon-48.png">
 <link rel="icon" type="image/png" sizes="256x256" href="/static/icon-256.png">
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/intro.css">
+<script src="/static/intro.js"></script>
 </head>
 <body>
 
@@ -117,6 +119,9 @@
   <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M5.5 12.5l4 4 9-9"/>
   </symbol>
+  <symbol id="i-checkcircle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="8.5"/><path d="M8.2 12.3l2.6 2.6 5-5.2"/>
+  </symbol>
   <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
   </symbol>
@@ -159,7 +164,7 @@
 <div class="app">
   <aside class="sidebar" aria-label="vex">
     <div class="sidebar-head">
-      <img class="brand-logo" src="/static/logo.svg" alt="" width="56" height="56">
+      <img class="brand-logo" src="/static/logo.svg" alt="" width="56" height="56" data-intro-target>
       <div class="brand-text">
         <span class="brand-name">vex <span class="brand-pro">Pro</span></span>
         <span class="brand-sub">Binary Analysis Suite</span>

@@ -162,12 +162,12 @@ a { color: var(--link); }
    sidebar's wave flows. Only transform and opacity are animated, each
    element on its own compositor layer, so nothing is repainted.
    The motion is so slow (a few pixels a second) that it is stepped rather
-   than run at the display's frame rate: the glows move four times a second
-   and the motes and the wave eight times, all on one shared 125 ms clock
-   (every duration and delay is a multiple of it), so the screen is redrawn
-   at most eight times a second — still smooth to the eye at this speed,
-   and a small fraction of the work, which matters where the compositor
-   has no GPU. */
+   than run at the display's frame rate: everything moves four times a
+   second, on one shared 250 ms clock (every step, duration and delay is a
+   multiple of it), so the screen is redrawn at most four times a second.
+   A step is about a pixel, too little to see at this speed, and it is a
+   small fraction of the work — which matters where the compositor has no
+   GPU (software rendering, remote desktops, virtual machines). */
 .backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; contain: strict;
   background: radial-gradient(120% 80% at 50% -10%, var(--paper-2), var(--paper) 60%); }
 .glow { position: absolute; border-radius: 50%; will-change: transform, opacity; }
@@ -192,19 +192,19 @@ a { color: var(--link); }
 .mote:nth-child(17) { left: 47%; top: 29%; } .mote:nth-child(18) { left: 81%; top: 51%; }
 
 @media (prefers-reduced-motion: no-preference) {
-  /* glows: 4 steps a second, each keyframe segment = duration / 2 */
+  /* glows: steps per keyframe segment (= duration / 2) x 250 ms */
   :root:not([data-motion="off"]) .glow-a { animation: drift-a 38s steps(76) infinite alternate; }
   :root:not([data-motion="off"]) .glow-b { animation: drift-b 46s steps(92) infinite alternate; }
   :root:not([data-motion="off"]) .glow-c { animation: drift-c 54s steps(108) infinite alternate; }
-  /* motes: 8 steps a second */
-  :root:not([data-motion="off"]) .mote { animation: float 12s steps(48) infinite alternate; }
-  :root:not([data-motion="off"]) .mote:nth-child(2n) { animation-duration: 15s; animation-timing-function: steps(60); animation-delay: -5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(3n) { animation-duration: 18s; animation-timing-function: steps(72); animation-delay: -9.5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(5n) { animation-duration: 10s; animation-timing-function: steps(40); animation-delay: -2.5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(7n) { animation-delay: -7.25s; }
-  /* the wave: 8 steps a second, one tile (one sidebar width) per cycle */
-  :root:not([data-motion="off"]) .wave-a { animation: flow 40s steps(320) infinite; }
-  :root:not([data-motion="off"]) .wave-b { animation: flow 64s steps(512) infinite reverse; }
+  /* motes: two keyframe segments too */
+  :root:not([data-motion="off"]) .mote { animation: float 12s steps(24) infinite alternate; }
+  :root:not([data-motion="off"]) .mote:nth-child(2n) { animation-duration: 15s; animation-timing-function: steps(30); animation-delay: -5s; }
+  :root:not([data-motion="off"]) .mote:nth-child(3n) { animation-duration: 18s; animation-timing-function: steps(36); animation-delay: -9.5s; }
+  :root:not([data-motion="off"]) .mote:nth-child(5n) { animation-duration: 10s; animation-timing-function: steps(20); animation-delay: -2.5s; }
+  :root:not([data-motion="off"]) .mote:nth-child(7n) { animation-delay: -7.5s; }
+  /* the wave: one tile (one sidebar width) per cycle, a single segment */
+  :root:not([data-motion="off"]) .wave-a { animation: flow 60s steps(240) infinite; }
+  :root:not([data-motion="off"]) .wave-b { animation: flow 96s steps(384) infinite reverse; }
 }
 @keyframes drift-a {
   0% { transform: translate3d(0, 0, 0) scale(1); opacity: .82; }
@@ -224,7 +224,7 @@ a { color: var(--link); }
 @keyframes float {
   0% { transform: translate3d(0, 0, 0); opacity: .12; }
   50% { opacity: .85; }
-  100% { transform: translate3d(6px, -46px, 0); opacity: .2; }
+  100% { transform: translate3d(4px, -30px, 0); opacity: .2; }
 }
 @keyframes flow { to { transform: translate3d(-50%, 0, 0); } }
 
@@ -294,10 +294,10 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
   background: linear-gradient(180deg, var(--card-top), transparent 30%), var(--surface);
   border: 1px solid var(--line-2); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow);
 }
-.sidebar-head { padding: 14px 14px 12px; display: flex; align-items: center; gap: 12px; }
-.brand-logo { width: 54px; height: 54px; flex: none; filter: drop-shadow(0 0 12px rgba(110, 120, 255, .45)); }
+.sidebar-head { padding: 14px 12px 12px 14px; display: flex; align-items: center; gap: 12px; }
+.brand-logo { width: 58px; height: 58px; flex: none; filter: drop-shadow(0 0 12px rgba(110, 120, 255, .45)); }
 .brand-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.brand-name { font: 700 24px/1 var(--display); letter-spacing: -.02em; color: var(--ink); white-space: nowrap; }
+.brand-name { font: 700 25px/1 var(--display); letter-spacing: -.02em; color: var(--ink); white-space: nowrap; }
 .brand-pro {
   background: linear-gradient(95deg, #9C6BFF, #B57BFF); -webkit-background-clip: text; background-clip: text;
   color: transparent; -webkit-text-fill-color: transparent;
@@ -442,7 +442,7 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
 }
 .viewtabs::-webkit-scrollbar { display: none; }
 .viewtab {
-  display: inline-flex; align-items: center; gap: 9px; flex: none; border: 1px solid transparent; background: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px; flex: 1 0 auto; border: 1px solid transparent; background: none; cursor: pointer;
   font: 500 13.5px/1 var(--ui); color: var(--ink-2); padding: 8px 14px; border-radius: var(--r-md);
   transition: background-color .15s ease, color .15s ease;
 }
@@ -612,7 +612,6 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
   position: relative; min-width: 3px; border: 0; padding: 0; margin: 0; cursor: pointer;
   border-right: 1px solid var(--line-2); background-color: transparent; overflow: hidden;
   font: 500 12px/1 var(--ui); color: var(--ink); text-align: left;
-  transition: filter .15s ease;
 }
 .region:last-child { border-right: 0; }
 .region:hover { filter: brightness(1.2); }
