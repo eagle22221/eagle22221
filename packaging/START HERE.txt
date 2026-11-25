@@ -2,19 +2,24 @@ vex for Windows
 ===============
 Developed by SS
 
-vex.exe takes a program apart and shows what is inside it, without
-running it. It reads Windows programs (.exe, .dll) and Linux programs.
-It is one file: nothing to install, and it does not need Python.
+vex takes a program apart and shows what is inside it, without running
+it. It reads Windows programs (.exe, .dll) and Linux programs. There is
+nothing to install, and it does not need Python.
 
 
 The quickest start
 ------------------
 
-Double-click vex.exe. It opens a graphical interface in your web
-browser, served from your own computer (nothing is uploaded, and the
-file you look at is never run). Choose "Open file or folder" and pick a
-program, or drag any .exe or .dll onto vex.exe to open it straight
-away. Try it with practice\hello_pe64.exe.
+Double-click vex-app.exe. vex opens in a window of its own, with its own
+title bar, icon and taskbar button, like any installed program: no web
+browser and no console window. Everything happens on your own computer
+(nothing is uploaded, and the file you look at is never run). Choose
+"Open file or folder" and pick a program, or drag any .exe or .dll onto
+vex-app.exe to open it straight away. Try it with practice\hello_pe64.exe.
+Closing the window quits vex.
+
+The first start on a computer can take a few seconds; the window says
+"Starting vex..." while it gets ready.
 
 The interface has an Overview (what the file is and how it is protected),
 Techniques (anti-debug, VM checks, injection, hooking, packing), Code (the
@@ -22,8 +27,15 @@ instructions, grouped into functions), Strings, Imports, Sections, a Bytes
 view, Assets (game asset packs), Split (save the parts of the program as
 separate files), Decode (a decode and cipher workbench), and Modify.
 
+This folder holds three program files:
+
+    vex-app.exe          the app: double-click it to start vex
+    vex.exe              the same tool for the terminal (all the commands)
+    WebView2Loader.dll   a small Microsoft file the app needs; it must stay
+                         in the same folder as vex-app.exe
+
 Prefer the terminal? Everything is also a command (see below), including
-a report you can read without the browser:
+a report you can read without the app:
 
     .\vex.exe report practice\hello_pe64.exe
 
@@ -38,7 +50,7 @@ an empty part of the folder and choose "Open PowerShell window here" (or
     .\vex.exe info practice\hello_pe64.exe
 
     Command                              Shows
-    -----------------------------------  ---------------------------------------
+    -----------------------------------  -------------------------------------
     info FILE                            what the file is, hashes, protections
     report FILE                          everything at a glance
     sections FILE                        the parts of the file, with entropy
@@ -63,9 +75,9 @@ an empty part of the folder and choose "Open PowerShell window here" (or
     engine FOLDER                        a game's engine and its asset packs
     assets list PACK                     files in a .pk3/.pak/.wad/.pck pack
     assets extract PACK FOLDER           unpack a pack
-    assets replace PACK NAME FILE -o NEW write a new pack with one file swapped
+    assets replace PACK NAME FILE -o NEW write a new pack with a file replaced
     patch bytes FILE 0x1400.. "90 90"    change bytes (into a copy)
-    gui                                  open the browser interface
+    gui                                  open the app window, like vex-app.exe
 
 Add --json right after vex.exe to get output other tools can read:
 
@@ -111,13 +123,22 @@ Good to know
 ------------
 
 - vex never runs the file you give it. It only reads it.
-- Windows may warn about vex.exe the first time ("unknown publisher"),
-  because the file is not digitally signed. Choose "More info", then
-  "Run anyway" if you trust where you got it.
+- Keep vex-app.exe, vex.exe and WebView2Loader.dll together in one folder.
+  If you move vex, move the whole folder.
+- Windows may warn about vex-app.exe or vex.exe the first time ("Windows
+  protected your PC", "unknown publisher"), because they are not digitally
+  signed. Choose "More info", then "Run anyway" if you trust where you got
+  them.
+- The window uses Microsoft Edge WebView2, the web engine built into
+  Windows 11 and into Windows 10 computers that have Microsoft Edge. If it
+  is missing, vex opens in a plain Edge or Chrome app window instead (still
+  no tabs or address bar). If neither browser is there, vex opens in your
+  normal web browser, and a small "vex is running" box lets you stop it.
+  Whichever way it opens, everything stays on your own computer.
 - The practice folder has more to try: sample.dll and libsample.so (a Linux
-  library) for "exports"; evasion_pe64.exe, a harmless sample that trips every
-  check, for "techniques"; and demo_game\ (a pretend game) for "engine" and the
-  Assets view, e.g.  .\vex.exe engine practice\demo_game
+  library) for "exports"; evasion_pe64.exe, a harmless sample that trips
+  every check, for "techniques"; and demo_game\ (a pretend game) for
+  "engine" and the Assets view, e.g.  .\vex.exe engine practice\demo_game
 - "split" saves the parts of a program as separate files. To try it, use
   practice\bundle_pe64.exe, a harmless hello-world program with a picture, a
   sound and a zip archive attached to its end:
@@ -131,20 +152,20 @@ Good to know
   exactly as stored, and it cannot turn a program back into source code.
   Joining the files in "parts" in order gives the original file again
   (index.txt notes any stretch of empty filler that was left out).
-- vex.exe saves the parts and the embedded files. Saving Windows resources
-  (icons, version info) as files is in the Python edition.
+- This edition saves the parts and the embedded files. Saving Windows
+  resources (icons, version info) as files is in the Python edition.
 - "decode" is a workbench for turning encoded or encrypted data you already
   have back into something readable: base64, hex and other encodings, un-zip
   (gzip, zlib, bzip2, xz), classic ciphers, and decryption with a key you
   supply. It never recovers an unknown key and never breaks encryption or
   protection, so content you do not have the key for stays unreadable. This
-  vex.exe does the encodings, the classic ciphers, XOR, RC4 and ChaCha20; AES
+  edition does the encodings, the classic ciphers, XOR, RC4 and ChaCha20; AES
   and a few others are in the Python edition, and the Decode view greys out
   whatever the edition you are running cannot do.
-- This one vex.exe does everything above - the browser interface, the
-  analysis and disassembly, the techniques scan, game asset packs and patching -
-  with nothing to install. The Python edition of vex adds a few extras:
-  editing icons and other resources inside Windows programs, Electron (.asar)
-  and Ren'Py (.rpa) packs, and an illustrated PDF guide.
+- These three files do everything above - the app, the analysis and
+  disassembly, the techniques scan, game asset packs and patching - with
+  nothing to install. The Python edition of vex adds a few extras: editing
+  icons and other resources inside Windows programs, Electron (.asar) and
+  Ren'Py (.rpa) packs, and an illustrated PDF guide.
 - The disassembler inside vex is Capstone (BSD licence); its licence
   text is in the licences folder.

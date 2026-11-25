@@ -41,15 +41,27 @@ This installs the `vex` command and its one dependency, the Capstone disassemble
 Without installing, `python -m vex ...` works from this folder once Capstone is present
 (`pip install capstone`).
 
+On Windows, the `vex-windows.rar` download needs neither Python nor an install: unpack it and
+double-click `vex-app.exe` to open vex in a window of its own. Its `START HERE.txt` explains the
+rest.
+
 ## The graphical interface
 
 ```
-vex gui                # then choose a file in the browser
+vex gui                # then choose a file in the window
 vex gui path/to/game   # or open something straight away
+vex gui --browser      # use a tab in your web browser instead of a window
 ```
 
-This starts a small server on your own computer and opens it in your browser. Nothing is sent
-anywhere. Drop a file on the page or use **Open file or folder**.
+This starts a small server on your own computer and opens the interface in a window of its own.
+Nothing is sent anywhere. Drop a file on the window or use **Open file or folder**.
+
+The window is an app window of Google Chrome, Chromium, Microsoft Edge or Brave, whichever is
+installed: one window with no tabs or address bar, and a separate throw-away profile that shares
+nothing with your own browser. Closing the window stops vex, and Ctrl+C in the terminal closes
+the window. Without one of these browsers, vex opens a normal tab in your web browser instead;
+press Ctrl+C in the terminal when you are done. `--browser` always uses a normal tab, and
+`--no-browser` only prints the link.
 
 - **Overview** — what the file is, how it is protected, what it needs.
 - **Techniques** — protection and evasion techniques (anti-debug, VM checks, injection, hooking, packing, drivers) with their evidence; "Find uses" jumps to the code that uses each API.
@@ -261,8 +273,9 @@ cheats.**
 - The parsers are written for hostile input: every offset and count read from a file is
   bounds-checked, and a corrupt table costs a warning rather than a crash.
 - Extraction refuses paths that would land outside the destination folder.
-- The web interface listens on `127.0.0.1` only. Each session has a random key carried in the link;
-  requests without it, or addressed to another host name, are refused.
+- The interface, whether in its own window or a browser tab, is served on `127.0.0.1` only. Each
+  session has a random key carried in the link; requests without it, or addressed to another host
+  name, are refused.
 
 ## Development
 

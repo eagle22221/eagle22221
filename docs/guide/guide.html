@@ -100,7 +100,7 @@ td code { white-space: nowrap; }
   <h2>What is in this guide</h2>
   <p>Each lesson takes about five minutes. The practice files come with vex, so you can follow every step exactly as written.</p>
   <ol>
-    <li><span class="n">Start here</span><span class="t">Install and open the interface</span><span class="d">Two commands, then a browser tab.</span></li>
+    <li><span class="n">Start here</span><span class="t">Install and open the interface</span><span class="d">Two commands, then a window of its own.</span></li>
     <li><span class="n">Lesson 1</span><span class="t">The overview</span><span class="d">What kind of program is this?</span></li>
     <li><span class="n">Lesson 2</span><span class="t">The file map and sections</span><span class="d">Where the code and data sit inside the file.</span></li>
     <li><span class="n">Lesson 3</span><span class="t">Strings</span><span class="d">The readable text a program carries.</span></li>
@@ -132,7 +132,7 @@ td code { white-space: nowrap; }
       <pre><code>pip install .</code></pre></li>
     <li>Start the interface:
       <pre><code>vex gui</code></pre>
-      Your browser opens a page served from your own computer. If it does not open by itself, copy the link the terminal prints. Keep the terminal open while you work, and press Ctrl+C in it when you are done.</li>
+      vex opens in a window of its own, served from your own computer. Keep the terminal open while you work; closing the window stops vex. It is a window of Chrome, Chromium, Edge or Brave, with a profile of its own that shares nothing with your browsing. Without one of these you get a browser tab instead; stop it with Ctrl+C in the terminal. If nothing opens, copy the link the terminal prints.</li>
   </ol>
   <figure><img src="img/welcome.png" alt="The vex start page"><figcaption>The start page. Drop a file anywhere on it, or choose <b>Open file or folder</b>.</figcaption></figure>
   <h3>The practice files</h3>
@@ -347,7 +347,8 @@ td code { white-space: nowrap; }
   <p>Everything in the lessons is also available as a command. Put <code>--json</code> right after <code>vex</code> to get output other tools can read.</p>
   <table>
     <tr><th>Command</th><th>Shows</th></tr>
-    <tr><td><code>vex gui [PATH]</code></td><td>Opens the graphical interface</td></tr>
+    <tr><td><code>vex gui [PATH]</code></td><td>Opens the graphical interface in a window of its own</td></tr>
+    <tr><td><code>vex gui --browser</code></td><td>Opens it in a tab of your web browser instead</td></tr>
     <tr><td><code>vex info FILE</code></td><td>The overview (lesson 1)</td></tr>
     <tr><td><code>vex report FILE</code></td><td>Overview, sections, imports, notable strings and functions together</td></tr>
     <tr><td><code>vex sections FILE</code></td><td>The section table (lesson 2)</td></tr>
