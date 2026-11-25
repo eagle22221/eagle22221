@@ -20,7 +20,7 @@ vex = "vex.cli:main"
 include = ["vex*"]
 
 [tool.setuptools.package-data]
-vex = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/fonts/*"]
+vex = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/*.png", "web/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

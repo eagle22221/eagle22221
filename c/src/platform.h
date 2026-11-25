@@ -31,6 +31,8 @@ const char *platform_abspath(Arena *a, const char *path);
 
 /* Does anything exist at `path` (even a dangling symbolic link)? */
 bool platform_exists(const char *path);
+/* os.path.exists(): does `path`, with symbolic links followed, exist? */
+bool platform_path_exists(const char *path);
 /* Do both paths name the same existing file? */
 bool platform_same_file(const char *a, const char *b);
 /* The path with symbolic links resolved (or the path itself). */

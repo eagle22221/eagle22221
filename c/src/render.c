@@ -611,6 +611,194 @@ void render_done(Arena *a, const Style *st, const JVal *d, Lines *out) {
     add(a, out, styled(a, st, j_text(j_get(d, "message")), GREEN ";" BOLD));
 }
 
+/* --- decode ------------------------------------------------------------------- */
+
+static int hex_nibble(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : 0;
+}
+
+/* Port of cli.py's _render_decode. The text of the result is printed as it
+ * is, line breaks and all, so the whole output is built as one piece: what
+ * Python prints is "\n".join(lines).lstrip("\n"). */
+void render_decode(Arena *a, const Style *st, const JVal *d, Lines *out) {
+    const JVal *message = j_get(d, "message");
+    if (message != NULL) {              /* --out: only the confirmation */
+        add(a, out, styled(a, st, j_text(message), GREEN ";" BOLD));
+        return;
+    }
+    Buf b;
+    buf_init(&b, a);
+    const JVal *steps = j_get(d, "steps");
+    if (j_len(steps) > 0) {
+        Buf names;
+        buf_init(&names, a);
+        buf_addc(&names, "steps: ");
+        for (size_t i = 0; i < j_len(steps); i++) {
+            if (i)
+                buf_addc(&names, " -> ");
+            buf_adds(&names, j_text(j_get(j_at(steps, i), "op")));
+        }
+        buf_adds(&b, styled(a, st, buf_str(&names), DIM));
+        buf_addch(&b, '\n');
+    }
+    if (!j_truthy(j_get(d, "ok"))) {
+        Buf error;
+        buf_init(&error, a);
+        buf_addc(&error, "error: ");
+        buf_adds(&error, j_text(j_get(d, "error")));
+        buf_adds(&b, styled(a, st, buf_str(&error), RED));
+        buf_addch(&b, '\n');
+    }
+    buf_adds(&b, j_text(j_get(d, "text")));
+    buf_addch(&b, '\n');
+    /* The first 256 bytes, sixteen to a line. */
+    Str hex = j_text(j_get(d, "hex"));
+    size_t size = hex.n / 2, shown = size < 256 ? size : 256;
+    for (size_t at = 0; at < shown; at += 16) {
+        size_t count = shown - at < 16 ? shown - at : 16;
+        Buf bytes, text;
+        buf_init(&bytes, a);
+        buf_init(&text, a);
+        for (size_t i = 0; i < count; i++) {
+            const char *pair = hex.p + 2 * (at + i);
+            int byte = hex_nibble(pair[0]) << 4 | hex_nibble(pair[1]);
+            if (i)
+                buf_addch(&bytes, ' ');
+            buf_add(&bytes, pair, 2);
+            buf_addch(&text, byte >= 0x20 && byte <= 0x7E ? (char)byte : '.');
+        }
+        buf_adds(&b, styled(a, st, str_printf(a, "%08zx", at), DIM));
+        buf_addc(&b, "  ");
+        pad_to(&b, buf_str(&bytes), 47, false);
+        buf_addc(&b, "  |");
+        buf_adds(&b, buf_str(&text));
+        buf_addc(&b, "|\n");
+    }
+    if (size > 256) {
+        buf_adds(&b, styled(a, st, str_printf(a, "... %zu more bytes", size - 256), DIM));
+        buf_addch(&b, '\n');
+    }
+    buf_printf(&b, "%s bytes \xc2\xb7 looks like %s",
+               dec_number(a, j_number(j_get(d, "size"))).p,
+               j_text(j_get(d, "looks_like")).p);
+    Str all = buf_str(&b);
+    while (all.n > 0 && all.p[0] == '\n') {
+        all.p++;
+        all.n--;
+    }
+    add(a, out, all);
+}
+
+/* Port of cli.py's _render_decode_ops. */
+void render_decode_ops(Arena *a, const Style *st, const JVal *d, Lines *out) {
+    const JVal *groups = j_get(d, "groups");
+    for (size_t g = 0; g < j_len(groups); g++) {
+        const JVal *group = j_at(groups, g);
+        heading(a, st, out, j_text(j_get(group, "name")).p);
+        const JVal *ops = j_get(group, "ops");
+        for (size_t i = 0; i < j_len(ops); i++) {
+            const JVal *op = j_at(ops, i);
+            Buf line;
+            buf_init(&line, a);
+            buf_addc(&line, "  ");
+            buf_adds(&line, styled(a, st, j_text(j_get(op, "name")), BOLD));
+            const JVal *params = j_get(op, "params");
+            for (size_t k = 0; k < j_len(params); k++) {
+                const JVal *p = j_at(params, k);
+                bool required = j_truthy(j_get(p, "required"));
+                buf_addc(&line, required ? " " : " [");
+                buf_adds(&line, j_text(j_get(p, "name")));
+                buf_addch(&line, '=');
+                const JVal *choices = j_get(p, "choices");
+                if (j_len(choices) > 0) {
+                    buf_adds(&line, join_list(a, choices, "|"));
+                } else {
+                    Str type = j_text(j_get(p, "type"));
+                    for (size_t c = 0; c < type.n; c++)
+                        buf_addch(&line, type.p[c] >= 'a' && type.p[c] <= 'z'
+                                             ? (char)(type.p[c] - 32) : type.p[c]);
+                }
+                if (!required)
+                    buf_addch(&line, ']');
+            }
+            buf_addc(&line, "  ");
+            buf_adds(&line, styled(a, st, str_printf(a, "- %s", j_text(j_get(op, "summary")).p),
+                                   DIM));
+            if (!j_truthy(j_get(op, "available")))
+                buf_adds(&line, styled(a, st, str_c("  (unavailable in this build)"), DIM));
+            add(a, out, buf_str(&line));
+        }
+    }
+    heading(a, st, out, "Solvers");
+    const JVal *solvers = j_get(d, "solvers");
+    for (size_t i = 0; i < j_len(solvers); i++) {
+        const JVal *solver = j_at(solvers, i);
+        Buf line;
+        buf_init(&line, a);
+        buf_addc(&line, "  ");
+        buf_adds(&line, styled(a, st, j_text(j_get(solver, "name")), BOLD));
+        buf_addc(&line, "  ");
+        buf_adds(&line, styled(a, st, str_printf(a, "- %s", j_text(j_get(solver, "summary")).p),
+                               DIM));
+        add(a, out, buf_str(&line));
+    }
+}
+
+/* Port of cli.py's _render_decode_solve. */
+void render_decode_solve(Arena *a, const Style *st, const JVal *d, Lines *out) {
+    if (!j_truthy(j_get(d, "ok"))) {
+        Buf error;
+        buf_init(&error, a);
+        buf_addc(&error, "error: ");
+        buf_adds(&error, j_text(j_get(d, "error")));
+        add(a, out, styled(a, st, buf_str(&error), RED));
+        return;
+    }
+    const JVal *candidates = j_get(d, "candidates");
+    if (j_len(candidates) == 0) {
+        add(a, out, str_c("(no candidates)"));
+        return;
+    }
+    for (size_t i = 0; i < j_len(candidates); i++) {
+        const JVal *c = j_at(candidates, i);
+        /* "key=value, key=value" */
+        Buf params;
+        buf_init(&params, a);
+        const JVal *given = j_get(c, "params");
+        for (size_t k = 0; given != NULL && given->kind == J_DICT && k < given->u.dict.n; k++) {
+            const JVal *value = given->u.dict.v[k].value;
+            if (k)
+                buf_addc(&params, ", ");
+            buf_printf(&params, "%s=", given->u.dict.v[k].key);
+            if (value->kind == J_INT)
+                buf_adds(&params, dec_number(a, value->u.number));
+            else
+                buf_adds(&params, j_text(value));
+        }
+        /* The first 60 characters of the text, on one line. */
+        Str text = j_text(j_get(c, "text"));
+        Buf preview;
+        buf_init(&preview, a);
+        size_t characters = 0;
+        for (size_t k = 0; k < text.n; k++) {
+            char ch = text.p[k];
+            if (((uint8_t)ch & 0xC0) != 0x80 && ++characters > 60)
+                break;
+            buf_addch(&preview, ch == '\n' || ch == '\r' ? ' ' : ch);
+        }
+        Buf line;
+        buf_init(&line, a);
+        buf_printf(&line, "%2zu. ", i + 1);
+        buf_adds(&line, styled(a, st, str_printf(a, "%.2f", j_raw_double(j_get(c, "score"))),
+                               BOLD));
+        buf_addc(&line, "  ");
+        pad_to(&line, buf_str(&params), 20, false);
+        buf_addc(&line, "  ");
+        buf_adds(&line, buf_str(&preview));
+        add(a, out, buf_str(&line));
+    }
+}
+
 void lines_print(FILE *out, const Lines *lines) {
     size_t first = 0;
     while (first < lines->n && lines->v[first].n == 0)

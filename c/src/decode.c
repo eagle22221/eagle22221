@@ -23,6 +23,9 @@ typedef struct {
     size_t n, cap;
 } Bytes;
 
+/* No result is larger than the cap plus the piece that crossed it. */
+#define BYTES_MOST (CAP + CHUNK + 64)
+
 static void bytes_reserve(Bytes *b, size_t total) {
     if (total <= b->cap)
         return;
@@ -32,6 +35,8 @@ static void bytes_reserve(Bytes *b, size_t total) {
             die_out_of_memory();
         cap *= 2;
     }
+    if (cap > BYTES_MOST && total <= BYTES_MOST)
+        cap = BYTES_MOST;               /* grow by doubling, but not past the most */
     uint8_t *grown = realloc(b->p, cap);
     if (grown == NULL)
         die_out_of_memory();
@@ -865,7 +870,8 @@ static bool op_vigenere(Op *c, const uint8_t *in, size_t n, Bytes *out) {
             continue;
         uint32_t upper[3];
         if (py_upper(cp, upper) != 1)
-            /* "ß".upper() is "SS": Python stops with a TypeError here. */
+            /* U+00DF (sharp s) in upper case is "SS", two characters:
+             * Python stops with a TypeError here. */
             return fail(c, "vigenere needs a key of letters");
         shifts[count++] = (uint8_t)((upper[0] + 26 * 3 - 65) % 26);
     }
@@ -1647,6 +1653,36 @@ static const ParamSpec *find_param(const OpSpec *op, Str name) {
     return NULL;
 }
 
+/* Parameters that are not an object (the HTTP API passes on whatever JSON it
+ * was sent). Python walks them as if they were one and so reports the first
+ * item of a list, or the first character of a string, that is not the name
+ * of a parameter; where it would go on, it stops with a TypeError or an
+ * AttributeError, which here is an ordinary failure of the step. */
+static bool params_not_a_dict(Op *c, const OpSpec *op, const JVal *params) {
+    if (params->kind == J_STR) {
+        Str text = params->u.text;
+        for (size_t i = 0; i < text.n;) {
+            size_t at = i;
+            wtf8_next(text.p, text.n, &i);
+            Str one = {text.p + at, i - at};
+            if (find_param(op, one) == NULL)
+                return fail(c, "unknown parameter %s for %s", py_repr_str(c->a, one).p,
+                            op->name);
+        }
+    } else if (params->kind == J_LIST) {
+        for (size_t i = 0; i < params->u.list.n; i++) {
+            const JVal *item = params->u.list.v[i];
+            if (item->kind == J_LIST || item->kind == J_DICT)
+                break;                  /* not hashable: Python gives up here */
+            if (item->kind == J_STR && find_param(op, item->u.text) != NULL)
+                continue;
+            return fail(c, "unknown parameter %s for %s", decode_pyrepr(c->a, item).p,
+                        op->name);
+        }
+    }
+    return fail(c, "params must be an object");
+}
+
 /* apply_op(): one operation, with its name, its parameters and the size of
  * its result checked. */
 static bool apply_op(Arena *a, const DecodeStep *step, const uint8_t *in, size_t n, Bytes *out,
@@ -1658,6 +1694,8 @@ static bool apply_op(Arena *a, const DecodeStep *step, const uint8_t *in, size_t
         ok = fail(&c, "unknown operation: %s", py_repr_str(a, step->op).p);
     } else if (op->fn == NULL) {
         ok = fail(&c, "%s is not available in this build", op->name);
+    } else if (step->params != NULL && step->params->kind != J_DICT) {
+        ok = params_not_a_dict(&c, op, step->params);
     } else {
         ok = true;
         const JVal *params = step->params;
@@ -1680,7 +1718,13 @@ static bool apply_op(Arena *a, const DecodeStep *step, const uint8_t *in, size_t
 
 /* --- sources ---------------------------------------------------------------------- */
 
-/* source_bytes(): the bytes are either a slice of the file or in `owned`. */
+static bool false_with(Str *error, Str message) {
+    *error = message;
+    return false;
+}
+
+/* source_bytes(): the bytes are a slice of the file, the text itself, or
+ * in `owned`. */
 static bool source_bytes(Arena *a, const DecodeSource *source, Bytes *owned,
                          const uint8_t **data, size_t *size, Str *error) {
     Op c = {a, NULL, STR_NONE};
@@ -1714,9 +1758,10 @@ static bool source_bytes(Arena *a, const DecodeSource *source, Bytes *owned,
         if (source->kind == DECODE_TEXT) {
             /* str.encode("utf-8"); a lone surrogate cannot be encoded */
             if (!py_encode_utf8(a, text, &c.error))
-                ok = false;
-            else
-                bytes_set(owned, (const uint8_t *)text.p, text.n);
+                return false_with(error, c.error);
+            *data = (const uint8_t *)text.p;
+            *size = text.n;
+            return true;
         } else if (source->kind == DECODE_HEX) {
             if (!parse_hex(text.p, text.n, true, owned, &why))
                 ok = fail(&c, "%s", why);
@@ -1799,12 +1844,47 @@ static Str hex_text(Arena *a, const uint8_t *data, size_t n) {
     return s;
 }
 
+/* bytes.decode("utf-8", "replace"): every run of bytes that is not UTF-8
+ * becomes one U+FFFD, the runs being the ones CPython reports. The result
+ * is measured first, so that it takes no more room than it needs. */
+static Str replaced_text(Arena *a, const uint8_t *data, size_t n) {
+    CodecError e = {0, 0, ""};
+    size_t length = 0, i = 0;
+    bool replaced = false;
+    while (i < n) {
+        if (utf8_check(data + i, n - i, &e)) {
+            length += n - i;
+            break;
+        }
+        replaced = true;
+        length += e.start + 3;
+        i += e.end;
+    }
+    if (!replaced)
+        return str_copy(a, (const char *)data, n);
+    char *text = arena_alloc(a, length + 1);
+    size_t w = 0;
+    for (i = 0; i < n;) {
+        bool valid = utf8_check(data + i, n - i, &e);
+        size_t good = valid ? n - i : e.start;
+        memcpy(text + w, data + i, good);
+        w += good;
+        if (valid)
+            break;
+        memcpy(text + w, "\xEF\xBF\xBD", 3);
+        w += 3;
+        i += e.end;
+    }
+    Str s = {text, w};
+    return s;
+}
+
 JVal *decode_result_view(Arena *a, const DecodeResult *r) {
     JVal *d = j_dict(a);
     j_set(a, d, "ok", j_bool(a, r->ok));
     j_set(a, d, "size", j_int(a, (big)r->size));
     j_set(a, d, "hex", j_str(a, hex_text(a, r->data, r->size)));
-    j_set(a, d, "text", j_str(a, utf8_decode(a, r->data, r->size)));
+    j_set(a, d, "text", j_str(a, replaced_text(a, r->data, r->size)));
     j_set(a, d, "looks_like", j_cstr(a, decode_looks_like(r->data, r->size)));
     JVal *steps = j_list(a);
     for (size_t i = 0; i < r->nsteps; i++) {
@@ -2120,7 +2200,7 @@ static JVal *candidate(Arena *a, JVal *params, const uint8_t *data, size_t n, ui
     j_set(a, d, "params", params);
     j_set(a, d, "size", j_int(a, (big)n));
     j_set(a, d, "hex", j_str(a, hex_text(a, data, n)));
-    j_set(a, d, "text", j_str(a, utf8_decode(a, data, n)));
+    j_set(a, d, "text", j_str(a, replaced_text(a, data, n)));
     j_set(a, d, "score", j_raw(a, score_token(a, micro)));
     return d;
 }

@@ -463,7 +463,8 @@ def _cmd_patch(args, st):
 
 def _cmd_gui(args, st):
     from . import server
-    raise SystemExit(server.serve(args.file, args.port, not args.no_browser))
+    raise SystemExit(server.serve(args.file, args.port, not args.no_browser,
+                                  app_window=not args.browser))
 
 
 # --- decode & cipher workbench --------------------------------------------------
@@ -665,9 +666,11 @@ def _add_modding(sub) -> None:
     common(a)
     sp.set_defaults(func=_cmd_patch)
 
-    sp = sub.add_parser("gui", help="open the graphical interface in your browser")
+    sp = sub.add_parser("gui", help="open the graphical interface in its own window")
     sp.add_argument("file", nargs="?", metavar="PATH", help="file or game folder to open")
     sp.add_argument("--port", type=int, default=0, help="port to listen on (default: any free)")
+    sp.add_argument("--browser", action="store_true",
+                    help="open in a web browser tab instead of vex's own window")
     sp.add_argument("--no-browser", action="store_true", help="only print the link")
     sp.set_defaults(func=_cmd_gui)
 

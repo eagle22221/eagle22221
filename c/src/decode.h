@@ -32,7 +32,8 @@ typedef struct {
 } DecodeSource;
 
 /* One step of a recipe: the operation's name as it was given (it may name
- * nothing) and its parameters, a J_DICT of name -> value. */
+ * nothing) and its parameters, a J_DICT of name -> value (NULL for none; any
+ * other JSON value fails the step). */
 typedef struct {
     Str op;
     const JVal *params;

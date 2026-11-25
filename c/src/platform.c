@@ -214,6 +214,10 @@ bool platform_exists(const char *path) {
     return attributes != INVALID_FILE_ATTRIBUTES;
 }
 
+bool platform_path_exists(const char *path) {
+    return platform_exists(path);
+}
+
 static bool file_identity(const char *path, BY_HANDLE_FILE_INFORMATION *info) {
     wchar_t *wide = to_wide(path);
     if (wide == NULL)
@@ -408,6 +412,11 @@ const char *platform_abspath(Arena *a, const char *path) {
 bool platform_exists(const char *path) {
     struct stat st;
     return lstat(path, &st) == 0;
+}
+
+bool platform_path_exists(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0;
 }
 
 bool platform_same_file(const char *a, const char *b) {

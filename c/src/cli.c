@@ -4,8 +4,10 @@
 #include <errno.h>
 
 #include "archives.h"
+#include "decode.h"
 #include "engines.h"
 #include "platform.h"
+#include "pystr.h"
 #include "server.h"
 #include "split.h"
 #include "techniques.h"
@@ -47,6 +49,14 @@ static const char HELP[] =
     "  report FILE               everything at a glance\n"
     "  split FILE FOLDER         save the parts of the file (headers, sections,\n"
     "                            embedded files) as separate files in a new folder\n"
+    "  decode SOURCE [--recipe SPEC] [--out FILE]\n"
+    "  decode SOURCE --solve NAME\n"
+    "  decode --list             decode, decrypt and chain transforms on data you\n"
+    "                            give. SOURCE is TEXT, --text S, --hex S, --base64 S\n"
+    "                            or --file PATH [--offset O] [--length N]; SPEC is\n"
+    "                            \"op[:k=v,...][|op...]\", e.g. \"from-base64|gunzip\";\n"
+    "                            --solve tries caesar, xor-single, xor-keylen or\n"
+    "                            substitution; --list shows every operation\n"
     "  patch bytes FILE LOCATION HEX [--offset] (-o OUT | --in-place)\n"
     "  patch nop FILE LOCATION BYTES [--offset] (-o OUT | --in-place)\n"
     "  patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)\n"
@@ -343,6 +353,129 @@ static void cmd_split(Session *s) {
     cli_emit(s, d, render_split);
 }
 
+/* --- decode & cipher workbench ------------------------------------------------ */
+
+/* An option's value as the Python str it is there, or NULL. */
+static JVal *decode_argument(Session *s, const char *name) {
+    const char *text = cli_option(s, name);
+    return text != NULL ? j_str(s->a, wtf8_from_argument(s->a, text)) : NULL;
+}
+
+/* Port of cli.py's _cmd_decode (and of what argparse checks before it). */
+static void cmd_decode(Session *s) {
+    static const char *const exclusive[] = {"text", "hex", "base64", "file"};
+    Arena *a = s->a;
+    /* --text, --hex, --base64 and --file exclude each other: argparse stops
+     * at the second one it meets. */
+    const char *first = NULL, *second = NULL;
+    unsigned first_order = 0, second_order = 0;
+    for (size_t i = 0; i < ARRAY_LEN(exclusive); i++) {
+        if (!cli_flag(s, exclusive[i]))
+            continue;
+        unsigned order = 0;
+        for (size_t k = 0; k < s->command->noptions; k++)
+            if (strcmp(s->command->options[k].name, exclusive[i]) == 0)
+                order = s->option_order[k];
+        if (first == NULL || order < first_order) {
+            second = first;
+            second_order = first_order;
+            first = exclusive[i];
+            first_order = order;
+        } else if (second == NULL || order < second_order) {
+            second = exclusive[i];
+            second_order = order;
+        }
+    }
+    if (second != NULL)
+        cli_usage_error(s, "argument --%s: not allowed with argument --%s", second, first);
+    /* --offset and --length are numbers as int(text, 0) reads them. */
+    static const char *const numbers[] = {"offset", "length"};
+    JVal *range[2] = {NULL, NULL};
+    for (size_t i = 0; i < ARRAY_LEN(numbers); i++) {
+        range[i] = decode_argument(s, numbers[i]);
+        PyInt ignored;
+        if (range[i] != NULL && !py_int_parse(range[i]->u.text, &ignored))
+            cli_usage_error(s, "argument --%s: invalid _int value: %s", numbers[i],
+                            py_repr_str(a, range[i]->u.text).p);
+    }
+
+    if (cli_flag(s, "list")) {
+        cli_emit(s, decode_catalogue(a), render_decode_ops);
+        return;
+    }
+
+    DecodeSource source;
+    memset(&source, 0, sizeof source);
+    if (cli_option(s, "file") != NULL) {
+        uint64_t size;
+        source.kind = DECODE_FILE;
+        source.file = cli_read_file(s, cli_option(s, "file"), &size);
+        source.file_size = (size_t)size;
+        source.offset = range[0];
+        source.length = range[1];
+    } else if (cli_option(s, "text") != NULL) {
+        source.kind = DECODE_TEXT;
+        source.value = decode_argument(s, "text");
+    } else if (cli_option(s, "hex") != NULL) {
+        source.kind = DECODE_HEX;
+        source.value = decode_argument(s, "hex");
+    } else if (cli_option(s, "base64") != NULL) {
+        source.kind = DECODE_BASE64;
+        source.value = decode_argument(s, "base64");
+    } else if (s->npositional > 0) {
+        source.kind = DECODE_TEXT;
+        source.value = j_str(a, wtf8_from_argument(a, s->positional[0]));
+    } else {
+        err_throw(s->err, ERR_OTHER,
+                  "give a source: --text, --hex, --base64, --file, or a bare TEXT argument");
+    }
+
+    const char *solver = cli_option(s, "solve");
+    if (solver != NULL && solver[0] != '\0') {
+        JVal *found = decode_solve(a, wtf8_from_argument(a, solver), &source);
+        cli_emit(s, found, render_decode_solve);
+        if (!j_truthy(j_get(found, "ok")))
+            s->exit_status = 1;
+        return;
+    }
+
+    const char *recipe = cli_option(s, "recipe");
+    DecodeStep *steps;
+    size_t nsteps;
+    Str problem;
+    if (!decode_parse_recipe(a, wtf8_from_argument(a, recipe != NULL ? recipe : ""), &steps,
+                             &nsteps, &problem))
+        err_throw(s->err, ERR_RECIPE, "%s", problem.p);
+    const char *out = cli_option(s, "out");
+    if (out != NULL && out[0] == '\0')
+        out = NULL;
+    if (out != NULL && platform_path_exists(out))
+        err_throw(s->err, ERR_OTHER, "%s exists", out);
+
+    DecodeResult result;
+    decode_execute(a, &source, steps, nsteps, &result);
+    JVal *d = decode_result_view(a, &result);
+    if (out != NULL && result.ok) {
+        FILE *f = platform_fopen(out, "wb");
+        if (f == NULL)
+            err_throw(s->err, ERR_OS, "cannot write %s: %s", out, strerror(errno));
+        bool written = result.size == 0 || fwrite(result.data, 1, result.size, f) == result.size;
+        int code = errno;
+        if (fclose(f) != 0 && written) {
+            written = false;
+            code = errno;
+        }
+        if (!written)
+            err_throw(s->err, ERR_OS, "cannot write %s: %s", out, strerror(code));
+        if (!s->json)
+            j_set(a, d, "message", j_str(a, str_printf(a, "wrote %zu bytes to %s", result.size,
+                                                       platform_abspath(a, out))));
+    }
+    cli_emit(s, d, render_decode);
+    if (!result.ok)
+        s->exit_status = 1;             /* shown as far as it got, but it failed */
+}
+
 /* --- modding commands (engine / assets) --------------------------------------- */
 
 static void add_line(Arena *a, Lines *out, Str line) {
@@ -544,6 +677,10 @@ static const OptSpec PATCH_STRING_OPTIONS[] = {
     {"encoding", 'e', true}, {"output", 'o', true}, {"in-place", 0, false}};
 static const OptSpec GUI_OPTIONS[] = {{"port", 0, true}, {"no-browser", 0, false}};
 static const OptSpec ASSETS_OUTPUT[] = {{"output", 'o', true}};
+static const OptSpec DECODE_OPTIONS[] = {
+    {"text", 0, true}, {"hex", 0, true}, {"base64", 0, true}, {"file", 0, true},
+    {"offset", 0, true}, {"length", 0, true}, {"recipe", 0, true}, {"solve", 0, true},
+    {"out", 0, true}, {"list", 0, false}};
 
 static const Command COMMANDS[] = {
     {"info", NULL, 1, 1, "FILE", NULL, 0, cmd_info},
@@ -561,6 +698,7 @@ static const Command COMMANDS[] = {
     {"layout", NULL, 1, 1, "FILE", NULL, 0, cmd_layout},
     {"report", NULL, 1, 1, "FILE", NULL, 0, cmd_report},
     {"split", NULL, 2, 2, "FILE, FOLDER", NULL, 0, cmd_split},
+    {"decode", NULL, 0, 1, "TEXT", DECODE_OPTIONS, 10, cmd_decode},
     {"patch", "bytes", 3, 3, "FILE, LOCATION, HEX", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "nop", 3, 3, "FILE, LOCATION, BYTES", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "string", 3, 3, "FILE, OLD, NEW", PATCH_STRING_OPTIONS, 3, cmd_patch},
@@ -713,6 +851,8 @@ found:
         return;
     }
     size_t index = (size_t)(match - own);
+    if (!s->option_seen[index])
+        s->option_order[index] = ++s->options_given;
     s->option_seen[index] = true;
     s->option_value[index] = value;
 }
@@ -841,6 +981,9 @@ int cli_main(int argc, char **argv) {
             fputs(USAGE, stderr);
             fprintf(stderr, "vex: error: %s\n", err.msg);
             status = 2;
+        } else if (err.kind == ERR_RECIPE) {
+            fprintf(stderr, "vex: error: %s\n", err.msg);
+            status = 2;
         } else {
             fprintf(stderr, "vex: error: %s\n", err.msg);
             status = 1;
@@ -850,6 +993,8 @@ int cli_main(int argc, char **argv) {
         fputs(HELP, stdout);
     } else if (session.want_version) {
         fputs("vex " VEX_VERSION "\n", stdout);
+    } else {
+        status = session.exit_status;
     }
     if (fflush(stdout) != 0 && status == 0)
         status = 1;

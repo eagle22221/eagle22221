@@ -35,9 +35,12 @@ struct Session {
     const Command *command;
     const char *positional[64];     /* PACK, FOLDER then entry names for `assets extract` */
     size_t npositional;
-    const char *option_value[8];    /* parallel to command->options */
-    bool option_seen[8];
-};
+    const char *option_value[12];   /* parallel to command->options */
+    bool option_seen[12];
+    unsigned option_order[12];      /* 1 for the option given first, 2 for the next... */
+    unsigned options_given;
+    int exit_status;                /* of a command that ran to its end (decode: 1 */
+};                                  /* when the result says ok: false)             */
 
 /* Runs the program; returns the process exit status (0, 1, or 2 for a bad
  * command line). */

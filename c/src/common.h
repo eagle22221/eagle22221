@@ -158,7 +158,8 @@ typedef enum {
     ERR_NO_DISASSEMBLER,    /* MissingDependencyError */
     ERR_OTHER,              /* plain VexError */
     ERR_OS,                 /* file could not be read or written */
-    ERR_USAGE               /* bad command line (exit status 2) */
+    ERR_USAGE,              /* bad command line (exit status 2) */
+    ERR_RECIPE              /* bad decode recipe: exit status 2, no usage line */
 } ErrKind;
 
 typedef struct ErrFrame {

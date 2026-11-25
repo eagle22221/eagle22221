@@ -57,6 +57,7 @@ typedef int socket_t;
 #include "analysis.h"
 #include "techniques.h"
 #include "archives.h"
+#include "decode.h"
 #include "engines.h"
 #include "model.h"
 #include "platform.h"
@@ -291,88 +292,6 @@ static bool q_number_opt(Req *req, const char *name, big *out) {
     return true;
 }
 
-/* --- JSON serialisation (compact; decodes identically to json.dumps) --------- */
-
-static void json_write(Buf *b, const JVal *v);
-
-static void json_write_string(Buf *b, Str s) {
-    static const char hexd[] = "0123456789abcdef";
-    buf_addch(b, '"');
-    size_t i = 0;
-    while (i < s.n) {
-        uint8_t c = (uint8_t)s.p[i];
-        if (c >= 0x80) {
-            size_t len = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-            if (len > s.n - i)
-                len = s.n - i;
-            uint32_t cp = c & (0xFFu >> (len + 1));
-            for (size_t k = 1; k < len; k++)
-                cp = (cp << 6) | ((uint8_t)s.p[i + k] & 0x3F);
-            i += len;
-            char esc[16];
-            if (cp >= 0x10000) {
-                cp -= 0x10000;
-                snprintf(esc, sizeof esc, "\\u%04x\\u%04x", (unsigned)(0xD800 + (cp >> 10)),
-                         (unsigned)(0xDC00 + (cp & 0x3FF)));
-            } else {
-                snprintf(esc, sizeof esc, "\\u%04x", (unsigned)cp);
-            }
-            buf_addc(b, esc);
-            continue;
-        }
-        i++;
-        switch (c) {
-        case '"': buf_addc(b, "\\\""); break;
-        case '\\': buf_addc(b, "\\\\"); break;
-        case '\n': buf_addc(b, "\\n"); break;
-        case '\r': buf_addc(b, "\\r"); break;
-        case '\t': buf_addc(b, "\\t"); break;
-        case '\b': buf_addc(b, "\\b"); break;
-        case '\f': buf_addc(b, "\\f"); break;
-        default:
-            if (c < 0x20) {
-                char esc[8] = {'\\', 'u', '0', '0', hexd[c >> 4], hexd[c & 15], 0};
-                buf_addc(b, esc);
-            } else {
-                buf_addch(b, (char)c);
-            }
-        }
-    }
-    buf_addch(b, '"');
-}
-
-static void json_write(Buf *b, const JVal *v) {
-    char number[44];
-    switch (v->kind) {
-    case J_NULL: buf_addc(b, "null"); break;
-    case J_BOOL: buf_addc(b, v->u.flag ? "true" : "false"); break;
-    case J_INT: buf_addc(b, dec_big(number, v->u.number)); break;
-    case J_FLOAT: buf_addc(b, format_rounded(number, v->u.real)); break;
-    case J_STR: json_write_string(b, v->u.text); break;
-    case J_RAW: buf_adds(b, v->u.text); break;
-    case J_LIST:
-        buf_addch(b, '[');
-        for (size_t i = 0; i < v->u.list.n; i++) {
-            if (i)
-                buf_addch(b, ',');
-            json_write(b, v->u.list.v[i]);
-        }
-        buf_addch(b, ']');
-        break;
-    case J_DICT:
-        buf_addch(b, '{');
-        for (size_t i = 0; i < v->u.dict.n; i++) {
-            if (i)
-                buf_addch(b, ',');
-            json_write_string(b, (Str){v->u.dict.v[i].key, v->u.dict.v[i].key_len});
-            buf_addch(b, ':');
-            json_write(b, v->u.dict.v[i].value);
-        }
-        buf_addch(b, '}');
-        break;
-    }
-}
-
 /* --- sending responses ------------------------------------------------------- */
 
 static void send_all(socket_t fd, const uint8_t *data, size_t len) {
@@ -400,8 +319,8 @@ static const char *reason_phrase(int status) {
     }
 }
 
-static void send_response(Req *req, int status, const char *ctype, const uint8_t *body,
-                          size_t len, const char *csp, const char *disposition) {
+static void send_head(Req *req, int status, const char *ctype, size_t len, const char *csp,
+                      const char *disposition) {
     Buf h;
     buf_init(&h, req->a);
     buf_printf(&h, "HTTP/1.1 %d %s\r\n", status, reason_phrase(status));
@@ -417,16 +336,146 @@ static void send_response(Req *req, int status, const char *ctype, const uint8_t
     buf_addc(&h, "Connection: close\r\n\r\n");
     Str hs = buf_str(&h);
     send_all(req->fd, (const uint8_t *)hs.p, hs.n);
+}
+
+static void send_response(Req *req, int status, const char *ctype, const uint8_t *body,
+                          size_t len, const char *csp, const char *disposition) {
+    send_head(req, status, ctype, len, csp, disposition);
     if (len && body != NULL)
         send_all(req->fd, body, len);
 }
 
+/* --- JSON serialisation (compact; decodes identically to json.dumps) ---------
+ * A result can be large (the hex and the text of 64 MiB of decoded bytes),
+ * so it is not built in memory: it is measured for the Content-Length, then
+ * written to the socket piece by piece. */
+
+typedef struct {
+    socket_t fd;
+    bool measuring;                 /* count the bytes, send nothing */
+    size_t total;
+    size_t used;
+    uint8_t piece[1 << 15];
+} JsonOut;
+
+static void out_add(JsonOut *o, const char *p, size_t n) {
+    o->total += n;
+    if (o->measuring)
+        return;
+    while (n > 0) {
+        size_t room = sizeof o->piece - o->used;
+        size_t take = n < room ? n : room;
+        memcpy(o->piece + o->used, p, take);
+        o->used += take;
+        p += take;
+        n -= take;
+        if (o->used == sizeof o->piece) {
+            send_all(o->fd, o->piece, o->used);
+            o->used = 0;
+        }
+    }
+}
+
+static void out_text(JsonOut *o, const char *text) {
+    out_add(o, text, strlen(text));
+}
+
+static void json_write_string(JsonOut *o, Str s) {
+    static const char hexd[] = "0123456789abcdef";
+    out_add(o, "\"", 1);
+    size_t i = 0;
+    while (i < s.n) {
+        /* what needs no escape goes out in one piece */
+        size_t run = i;
+        while (run < s.n && (uint8_t)s.p[run] >= 0x20 && (uint8_t)s.p[run] < 0x80 &&
+               s.p[run] != '"' && s.p[run] != '\\')
+            run++;
+        if (run > i) {
+            out_add(o, s.p + i, run - i);
+            i = run;
+            continue;
+        }
+        uint8_t c = (uint8_t)s.p[i];
+        if (c >= 0x80) {
+            size_t len = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+            if (len > s.n - i)
+                len = s.n - i;
+            uint32_t cp = c & (0xFFu >> (len + 1));
+            for (size_t k = 1; k < len; k++)
+                cp = (cp << 6) | ((uint8_t)s.p[i + k] & 0x3F);
+            i += len;
+            char esc[16];
+            if (cp >= 0x10000) {
+                cp -= 0x10000;
+                snprintf(esc, sizeof esc, "\\u%04x\\u%04x", (unsigned)(0xD800 + (cp >> 10)),
+                         (unsigned)(0xDC00 + (cp & 0x3FF)));
+            } else {
+                snprintf(esc, sizeof esc, "\\u%04x", (unsigned)cp);
+            }
+            out_text(o, esc);
+            continue;
+        }
+        i++;
+        switch (c) {
+        case '"': out_text(o, "\\\""); break;
+        case '\\': out_text(o, "\\\\"); break;
+        case '\n': out_text(o, "\\n"); break;
+        case '\r': out_text(o, "\\r"); break;
+        case '\t': out_text(o, "\\t"); break;
+        case '\b': out_text(o, "\\b"); break;
+        case '\f': out_text(o, "\\f"); break;
+        default: {
+            char esc[8] = {'\\', 'u', '0', '0', hexd[c >> 4], hexd[c & 15], 0};
+            out_text(o, esc);
+        }
+        }
+    }
+    out_add(o, "\"", 1);
+}
+
+static void json_write(JsonOut *o, const JVal *v) {
+    char number[44];
+    switch (v->kind) {
+    case J_NULL: out_text(o, "null"); break;
+    case J_BOOL: out_text(o, v->u.flag ? "true" : "false"); break;
+    case J_INT: out_text(o, dec_big(number, v->u.number)); break;
+    case J_FLOAT: out_text(o, format_rounded(number, v->u.real)); break;
+    case J_STR: json_write_string(o, v->u.text); break;
+    case J_RAW: out_add(o, v->u.text.p, v->u.text.n); break;
+    case J_LIST:
+        out_add(o, "[", 1);
+        for (size_t i = 0; i < v->u.list.n; i++) {
+            if (i)
+                out_add(o, ",", 1);
+            json_write(o, v->u.list.v[i]);
+        }
+        out_add(o, "]", 1);
+        break;
+    case J_DICT:
+        out_add(o, "{", 1);
+        for (size_t i = 0; i < v->u.dict.n; i++) {
+            if (i)
+                out_add(o, ",", 1);
+            json_write_string(o, (Str){v->u.dict.v[i].key, v->u.dict.v[i].key_len});
+            out_add(o, ":", 1);
+            json_write(o, v->u.dict.v[i].value);
+        }
+        out_add(o, "}", 1);
+        break;
+    }
+}
+
 static void send_json(Req *req, int status, const JVal *value) {
-    Buf b;
-    buf_init(&b, req->a);
-    json_write(&b, value);
-    Str s = buf_str(&b);
-    send_response(req, status, "application/json", (const uint8_t *)s.p, s.n, CSP, NULL);
+    JsonOut *out = arena_alloc(req->a, sizeof *out);
+    out->fd = req->fd;
+    out->measuring = true;
+    json_write(out, value);
+    send_head(req, status, "application/json", out->total, CSP, NULL);
+    out->measuring = false;
+    out->total = 0;
+    json_write(out, value);
+    if (out->used)
+        send_all(req->fd, out->piece, out->used);
 }
 
 static void send_json_error(Req *req, int status, const char *message) {
@@ -566,18 +615,23 @@ static const uint8_t *read_whole_file(Req *req, const char *path, uint64_t *size
     return data;
 }
 
-/* The binary named by `name`, with a 404 for a missing file (as os.stat would
- * raise) and whatever binary_load() throws for an unreadable or non-binary
- * one. */
-static Binary *load_binary(Req *req, const char *name, const char **abspath_out) {
-    const char *ap = abspath_param(req, name);
-    if (abspath_out != NULL)
-        *abspath_out = ap;
+/* The binary at an absolute path, with a 404 for a missing file (as os.stat
+ * would raise) and whatever binary_load() throws for an unreadable or
+ * non-binary one. */
+static Binary *load_binary_at(Req *req, const char *ap) {
     if (!platform_exists(ap))
         api_error(req, 404, "no such file or folder: %s", ap);
     uint64_t size;
     const uint8_t *data = read_whole_file(req, ap, &size);
     return binary_load(req->a, req->err, data, size, ap);
+}
+
+/* The binary named by the query parameter `name`. */
+static Binary *load_binary(Req *req, const char *name, const char **abspath_out) {
+    const char *ap = abspath_param(req, name);
+    if (abspath_out != NULL)
+        *abspath_out = ap;
+    return load_binary_at(req, ap);
 }
 
 /* --- pagination and filtering (mirrors _page / _contains) -------------------- */
@@ -1187,6 +1241,92 @@ static void h_split(Req *req) {
     req->result = split_view(req->a, split, platform_abspath(req->a, dest));
 }
 
+/* --- decode & cipher workbench ------------------------------------------------ */
+
+/* _json_body(): the request body as a JSON object; anything else is a 400. */
+static const JVal *json_body(Req *req) {
+    static const uint8_t empty[] = "{}";
+    const uint8_t *body;
+    size_t length;
+    req_body(req, &body, &length);
+    if (length == 0) {
+        body = empty;
+        length = 2;
+    }
+    const JVal *parsed = j_parse(req->a, body, length);
+    if (parsed == NULL)
+        api_error(req, 400, "request body must be JSON");
+    if (parsed->kind != J_DICT)
+        api_error(req, 400, "request body must be a JSON object");
+    return parsed;
+}
+
+/* x or None: the value unless Python calls it false. */
+static const JVal *if_true(const JVal *value) {
+    return j_truthy(value) ? value : NULL;
+}
+
+/* _decode_source(): where the bytes come from. A `file` source is the open
+ * program, read the way the other routes read it. */
+static void decode_source(Req *req, const JVal *source, DecodeSource *out) {
+    memset(out, 0, sizeof *out);
+    if (source == NULL || source->kind != J_DICT)
+        api_error(req, 400, "source must be an object");
+    Str kind = j_text(j_get(source, "kind"));
+    if (str_eq_c(kind, "text") || str_eq_c(kind, "hex") || str_eq_c(kind, "base64")) {
+        out->kind = str_eq_c(kind, "text") ? DECODE_TEXT
+                  : str_eq_c(kind, "hex") ? DECODE_HEX : DECODE_BASE64;
+        out->value = if_true(j_get(source, "value"));
+        return;
+    }
+    if (!str_eq_c(kind, "file"))
+        api_error(req, 400, "source kind must be text, hex, base64 or file");
+    const JVal *path = if_true(j_get(source, "path"));
+    /* A path that is not text (or holds a NUL) names no file. */
+    if (path == NULL || path->kind != J_STR || strlen(path->u.text.p) != path->u.text.n)
+        api_error(req, 400, "a file source needs a path");
+    const Binary *b = load_binary_at(req, platform_abspath(req->a, path->u.text.p));
+    out->kind = DECODE_FILE;
+    out->file = b->data;
+    out->file_size = (size_t)b->size;
+    out->offset = if_true(j_get(source, "offset"));
+    out->length = j_get(source, "length");
+}
+
+static void h_decode_ops(Req *req) {
+    req->result = decode_catalogue(req->a);
+}
+
+static void h_decode(Req *req) {
+    const JVal *body = json_body(req);
+    DecodeSource source;
+    decode_source(req, j_get(body, "source"), &source);
+    /* The steps: every object in the list, with str(op) and its params. */
+    VEC(DecodeStep) steps = {0};
+    const JVal *recipe = if_true(j_get(body, "recipe"));
+    if (recipe != NULL && recipe->kind != J_LIST && recipe->kind != J_DICT &&
+        recipe->kind != J_STR)
+        api_error(req, 400, "recipe must be a list of steps");
+    for (size_t i = 0; i < j_len(recipe); i++) {
+        const JVal *item = j_at(recipe, i);
+        if (item->kind != J_DICT)
+            continue;
+        DecodeStep step = {decode_pystr(req->a, j_get(item, "op")),
+                           if_true(j_get(item, "params"))};
+        *VEC_PUSH(req->a, steps) = step;
+    }
+    DecodeResult result;
+    decode_execute(req->a, &source, steps.v, steps.n, &result);
+    req->result = decode_result_view(req->a, &result);
+}
+
+static void h_decode_solve(Req *req) {
+    const JVal *body = json_body(req);
+    DecodeSource source;
+    decode_source(req, j_get(body, "source"), &source);
+    req->result = decode_solve(req->a, decode_pystr(req->a, j_get(body, "name")), &source);
+}
+
 /* --- POST: patching ---------------------------------------------------------- */
 /* A faithful re-implementation of the subset of patch.py the web API uses, so
  * the bytes written and the JSON returned match the Python server exactly. */
@@ -1610,6 +1750,8 @@ static const Route ROUTES[] = {
     {"GET", "resources", h_resources}, {"GET", "resource/data", h_resource_unavailable},
     {"GET", "resource/icon", h_resource_unavailable},
     {"GET", "split", h_split_preview}, {"POST", "split", h_split},
+    {"GET", "decode/ops", h_decode_ops}, {"POST", "decode", h_decode},
+    {"POST", "decode/solve", h_decode_solve},
     {"POST", "upload", h_upload}, {"POST", "archive/extract", h_archive_extract},
     {"POST", "archive/replace", h_archive_replace},
     {"POST", "resource/replace", h_resource_unavailable},

@@ -22,6 +22,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import load, views
+from . import load, views, window
 from .analysis import Analysis
 from .errors import VexError
 from .model import Binary
@@ -649,21 +650,61 @@ def session_url(httpd, workspace: Workspace, path: Optional[str] = None) -> str:
     return url
 
 
-def serve(path: Optional[str] = None, port: int = 0, open_browser: bool = True) -> int:
-    httpd, workspace = create_server(port)
-    url = session_url(httpd, workspace, path)
-    print(f"vex is running at:\n\n  {url}\n\nPress Ctrl+C to stop.")
+WINDOW_HINT = "It opened in its own window. Close that window, or press Ctrl+C here, to stop."
+BROWSER_HINT = "Press Ctrl+C to stop."
+FALLBACK_NOTE = ("\nThe app window could not be opened, so vex opened in your web browser "
+                 "instead. " + BROWSER_HINT)
+LOST_NOTE = ("\nvex could not follow its window, so it will keep running. " + BROWSER_HINT)
+
+
+def _open_in_browser(url: str) -> None:
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
+def _follow_window(proc, started: float, httpd, url: str) -> None:
+    """Wait for the app window to close, then stop serving. A window that goes
+    at once was never opened (fall back to the browser) or was taken over by a
+    browser that is already running (keep serving)."""
+    status = proc.wait()
+    if httpd.stopping:
+        return
+    if time.monotonic() - started >= window.QUICK_EXIT_SECS:
+        httpd.shutdown()
+        return
+    if status != 0:
+        _open_in_browser(url)
+    print(FALLBACK_NOTE if status != 0 else LOST_NOTE)
     sys.stdout.flush()
-    if open_browser:
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
+
+
+def serve(path: Optional[str] = None, port: int = 0, open_browser: bool = True,
+          app_window: bool = True) -> int:
+    """Serve the interface until stopped. It opens in its own window when a
+    suitable browser is installed (and `app_window` is set), else in a tab."""
+    httpd, workspace = create_server(port)
+    httpd.stopping = False
+    url = session_url(httpd, workspace, path)
+    proc, started = None, time.monotonic()
+    if open_browser and app_window:
+        proc = window.open_window(url, os.path.join(workspace.tempdir, "window"))
+    print(f"vex is running at:\n\n  {url}\n\n{WINDOW_HINT if proc else BROWSER_HINT}")
+    sys.stdout.flush()
+    if proc is not None:
+        threading.Thread(target=_follow_window, args=(proc, started, httpd, url),
+                         daemon=True).start()
+    elif open_browser:
+        _open_in_browser(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nstopped.")
+        pass
     finally:
+        httpd.stopping = True
+        print("\nstopped.")
+        window.close_window(proc)
         httpd.server_close()
         workspace.close()
     return 0

@@ -216,11 +216,14 @@ def test_no_arguments_prints_usage(capsys):
 def test_gui_command_starts_the_server_with_its_options(monkeypatch):
     from vex import server
     calls = []
-    monkeypatch.setattr(server, "serve", lambda *a: calls.append(a) or 0)
+    monkeypatch.setattr(server, "serve", lambda *a, **kw: calls.append((a, kw)) or 0)
     with pytest.raises(SystemExit) as exc:
         main(["gui", ELF, "--port", "9123", "--no-browser"])
     assert exc.value.code == 0
-    assert calls == [(ELF, 9123, False)]
+    assert calls == [((ELF, 9123, False), {"app_window": True})]
+    with pytest.raises(SystemExit):
+        main(["gui", "--browser"])                  # a browser tab, not vex's own window
+    assert calls[1] == ((None, 0, True), {"app_window": False})
 
 
 def test_session_link_carries_the_token_in_the_fragment():

@@ -29,6 +29,11 @@ void render_layout(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_report(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_split(Arena *a, const Style *st, const JVal *d, Lines *out);
 void render_done(Arena *a, const Style *st, const JVal *d, Lines *out);
+/* `vex decode`: the result of a recipe, the catalogue (--list) and the
+ * candidates of a solver (--solve). */
+void render_decode(Arena *a, const Style *st, const JVal *d, Lines *out);
+void render_decode_ops(Arena *a, const Style *st, const JVal *d, Lines *out);
+void render_decode_solve(Arena *a, const Style *st, const JVal *d, Lines *out);
 
 /* print("\n".join(lines).lstrip("\n")) */
 void lines_print(FILE *out, const Lines *lines);
