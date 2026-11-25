@@ -378,6 +378,21 @@ def test_c_window_log_says_why_it_fell_back(run_c, tmp_path, case, steps):
     assert "gui: stopping (interrupted)" in log.read_text()
 
 
+def test_c_window_log_records_a_start_up_error(run_c, tmp_path):
+    # The windowed program shows its errors in a box, which can be dismissed
+    # unread: the log keeps them too.
+    log = tmp_path / "window.log"
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        r = run_c(args=["--port", str(taken.getsockname()[1])],
+                  env_extra={"VEX_WINDOW_LOG": str(log)})
+        assert r.proc.wait(timeout=15) == 1
+    assert "vex: error: could not bind to the port" in r.proc.stderr.read().decode()
+    assert "error: could not bind to the port" in log.read_text()
+    assert not r.app_log.exists() and not r.tab_log.exists()
+
+
 def test_c_without_a_log_setting_nothing_is_written(run_c, tmp_path):
     r = run_c(secs=4)
     r.url()
@@ -399,6 +414,40 @@ def test_c_being_told_to_stop_closes_the_window_and_deletes_the_profile(run_c, s
         time.sleep(0.05)
     assert not _alive(pid) and not os.path.exists(profile)
     assert r.rest() == _banner(url, WINDOW_HINT) + "\nstopped.\n"
+
+
+def test_c_a_hangup_ignored_from_the_start_stays_ignored(tmp_path):
+    # `nohup vex gui &`: closing the terminal must not stop it.
+    proc = subprocess.Popen(EDITIONS["c"]() + ["gui", "--no-browser"], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL,
+                            preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN))
+    try:
+        assert b"Press Ctrl+C" in proc.stdout.readline() + proc.stdout.readline() + \
+            proc.stdout.readline() + proc.stdout.readline() + proc.stdout.readline()
+        proc.send_signal(signal.SIGHUP)
+        time.sleep(0.5)
+        assert proc.poll() is None
+        proc.send_signal(signal.SIGINT)
+        assert proc.wait(timeout=15) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.stdout.close()
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/status"), reason="reads /proc")
+@pytest.mark.parametrize("edition", sorted(EDITIONS))
+def test_the_browser_does_not_inherit_an_ignored_sigpipe(tmp_path, edition):
+    # vex ignores SIGPIPE for its sockets; the browser it starts must not.
+    seen = tmp_path / "sigign"
+    browser = _script(tmp_path / "browser", f"#!/bin/sh\ngrep SigIgn /proc/$$/status > {seen}.tmp\n"
+                                            f"mv {seen}.tmp {seen}\nsleep 4\n")
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONPATH": str(ROOT),
+           "VEX_BROWSER": str(browser), "TMPDIR": str(tmp_path)}
+    proc = subprocess.run(EDITIONS[edition]() + ["gui"], env=env, capture_output=True, timeout=30)
+    assert proc.returncode == 0
+    mask = int(seen.read_text().split()[1], 16)
+    assert not mask & (1 << (signal.SIGPIPE - 1))
 
 
 def test_c_help_lists_the_browser_option():

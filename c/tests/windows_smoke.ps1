@@ -3,6 +3,13 @@
 # Screenshots and window logs are saved in the results folder.
 #
 #   pwsh c/tests/windows_smoke.ps1 -Dir FOLDER_WITH_THE_PROGRAMS -Out FOLDER_FOR_RESULTS
+#
+# The folder is the one the Windows package is made of, plus the probe. On the
+# build machine (with MinGW-w64):
+#
+#   c/fetch_webview2.sh && make -C c windows probe
+#   packaging/make_windows_rar.sh --stage vex-windows
+#   cp c/build/appwin-probe.exe vex-windows/
 param([Parameter(Mandatory)][string]$Dir, [string]$Out = "smoke-output")
 
 $ErrorActionPreference = "Stop"

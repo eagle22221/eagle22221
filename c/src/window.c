@@ -46,7 +46,18 @@ static bool g_had_window;
 static int g_looks_without_window;
 static wchar_t g_profile[MAX_PATH];
 
+/* The console program (vex.exe) always counts as having one, even when it was
+ * started with its console hidden: a message box there could wait for a click
+ * that nobody can see coming. Only the windowed program (vex-app.exe) has
+ * none, unless it was given one. */
 bool window_has_console(void) {
+    const BYTE *image = (const BYTE *)GetModuleHandleW(NULL);
+    if (image != NULL) {
+        const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)image;
+        const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)(image + dos->e_lfanew);
+        if (nt->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
+            return true;
+    }
     return GetConsoleWindow() != NULL;
 }
 
@@ -667,6 +678,7 @@ bool window_open(const char *url) {
     clock_gettime(CLOCK_MONOTONIC, &g_started);
     pid_t pid = fork();
     if (pid == 0) {
+        signal(SIGPIPE, SIG_DFL);       /* vex ignores it; the browser must not inherit that */
         int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {
             dup2(devnull, 0);

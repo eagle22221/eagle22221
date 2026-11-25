@@ -2015,6 +2015,7 @@ static void open_browser(const char *url) {
         setsid();
         pid_t grandchild = fork();
         if (grandchild == 0) {
+            signal(SIGPIPE, SIG_DFL);   /* ignored here, but not for the browser */
             int devnull = open("/dev/null", O_RDWR);
             if (devnull >= 0) {
                 dup2(devnull, 0);
@@ -2148,16 +2149,23 @@ static void on_signal(int sig) {
     request_stop(sig == SIGINT ? STOP_INTERRUPTED : STOP_TERMINATED);
 }
 
-/* Ctrl+C, a plain `kill` and a closed terminal all stop vex the same way:
- * the window is closed and its profile deleted. */
-static void install_stop_handlers(void) {
+/* A signal that was ignored when vex started (nohup, a background job) stays
+ * ignored. */
+static void catch_signal(int sig, struct sigaction *old) {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = on_signal;
     sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, &g_old_int);
-    sigaction(SIGTERM, &sa, &g_old_term);
-    sigaction(SIGHUP, &sa, &g_old_hup);
+    if (sigaction(sig, &sa, old) == 0 && old->sa_handler == SIG_IGN)
+        sigaction(sig, old, NULL);
+}
+
+/* Ctrl+C, a plain `kill` and a closed terminal all stop vex the same way:
+ * the window is closed and its profile deleted. */
+static void install_stop_handlers(void) {
+    catch_signal(SIGINT, &g_old_int);
+    catch_signal(SIGTERM, &g_old_term);
+    catch_signal(SIGHUP, &g_old_hup);
 }
 
 static void remove_stop_handlers(void) {

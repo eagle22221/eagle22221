@@ -3,7 +3,8 @@
 The same static reverse-engineering toolkit as the Python package in
 `../vex`, written in C so that it ships as one program with nothing to
 install: `vex.exe` on Windows, `vex` on Linux. Files are never run;
-originals are never changed unless you ask.
+originals are never changed unless you ask. On Windows there is also
+`vex-app.exe`, the graphical interface as a program of its own (see below).
 
 The Python version is the reference. For every command below, `--json`
 output of the two is the same data (checked by `tests/test_c_port.py`).
@@ -11,13 +12,27 @@ output of the two is the same data (checked by `tests/test_c_port.py`).
 ## Build
 
     ./fetch_capstone.sh   # once: disassembler source into third_party/
+    ./fetch_webview2.sh   # once: the WebView2 SDK into third_party/ (Windows window)
     make                  # build/vex        (this machine; gcc or clang)
-    make windows          # build/vex.exe    (64-bit Windows, needs MinGW-w64)
+    make windows          # build/vex.exe, build/vex-app.exe and
+                          # build/WebView2Loader.dll (64-bit Windows, needs MinGW-w64)
     make asan             # build/vex-asan   (sanitizer build used by the tests)
+    make probe            # build/appwin-probe.exe: the native window on its own
 
-`vex.exe` is statically linked: copy the one file to any 64-bit Windows.
-The code is C11 plus the compiler's 128-bit integer type (gcc, clang and
-MinGW-w64 have it on 64-bit targets) and builds with `-Wall -Wextra -Werror`.
+`vex.exe` and `vex-app.exe` are statically linked and import only DLLs that
+are part of Windows. `vex.exe` alone is enough for the command line; for
+vex's own window, `WebView2Loader.dll` has to sit next to the program that
+opens it. The code is C11 plus the compiler's 128-bit integer type (gcc,
+clang and MinGW-w64 have it on 64-bit targets) and builds with `-Wall -Wextra
+-Werror`; the native build links with `-pthread` (the `gui` server runs on a
+thread of its own).
+
+`fetch_webview2.sh` downloads Microsoft's WebView2 SDK (BSD-style licence,
+`third_party/webview2/LICENSE.txt`) at a pinned version and checks its
+SHA-256 before unpacking the three files used: `WebView2.h` (compile time),
+`WebView2Loader.dll` (copied next to the programs) and the licence. Without
+it (or with `make windows WEBVIEW2=0`) both programs are still built, without
+the native window; they then show the interface in an app window.
 
 `disasm`, `functions` and `xrefs` use the [Capstone](https://www.capstone-engine.org)
 engine 5.0.9 (BSD licence, see `third_party/capstone-5.0.9/src/LICENSE.TXT`),
@@ -45,12 +60,50 @@ compiled from source into the program. Without `third_party/` (or with
     vex patch bytes  FILE LOCATION HEX   [--offset] (-o OUT | --in-place)
     vex patch nop    FILE LOCATION BYTES [--offset] (-o OUT | --in-place)
     vex patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)
+    vex gui [FILE] [--port N] [--browser] [--no-browser]
 
 LOCATION and TARGET are a `0x` address, a function, symbol or import name
 (optionally `library!name`), or `entry`. `vex --help` lists everything.
 
 On Windows you can also drop a file onto `vex.exe`: that shows the
 report and waits for Enter before the window closes.
+
+## The graphical interface
+
+`vex gui [FILE]` serves the interface on `127.0.0.1` and shows it in the
+first of these that works:
+
+1. **vex's own window** (Windows only): a window of the vex process, with its
+   icon, title and taskbar button, showing the page through Microsoft Edge
+   WebView2, the web engine Windows ships (`src/appwin.c`). It needs
+   `WebView2Loader.dll` next to the program and the WebView2 runtime, which
+   every Windows 11 and every Windows 10 with Edge has.
+2. **An app window**: Edge, Chrome, Chromium or Brave started with `--app=URL`
+   and a throw-away profile of its own: one window, no tabs, no address bar
+   (`src/window.c`, as `vex/window.py`). `VEX_BROWSER` names the browser to
+   use instead of searching for one.
+3. **A browser tab** (`xdg-open` on Linux, the default browser on Windows).
+
+`--browser` goes straight to 3, `--no-browser` only prints the link. vex
+stops when its window is closed, or on Ctrl+C, which also closes the window
+and deletes the profile. An app window that ends at once with an error falls
+back to a browser tab; one that ends at once without error was taken over by
+a browser that was already running, and vex keeps serving. What is printed
+is word for word what the Python version prints.
+
+**vex-app.exe** is the same thing as a windowed Windows program: it never
+opens a console window. `vex-app.exe [FILE]` (or a file dropped on its icon)
+is `vex gui [FILE]`; it ends when its window is closed. With no console, its
+errors are shown in message boxes, and when only a browser tab is possible a
+box saying "vex is running in your web browser. Click OK to stop vex." is how
+it is stopped. Double-clicking `vex.exe` (without a file) also opens the
+interface, with its console window beside it.
+
+Set `VEX_WINDOW_LOG` to a file name to get a record of every step: which
+front end was tried, what happened to it (why the native window was
+unavailable, which browser was started, how and when it ended), whether the
+profile was deleted, and why vex stopped. That is the way to diagnose
+`vex-app.exe`, which has nowhere to print.
 
 ## Differences from the Python version
 
@@ -123,6 +176,12 @@ Where the Python version stops with an internal error (a traceback, or HTTP
 
     python3 -m pytest tests/test_c_port.py      # from the repository root
     python3 -m pytest tests/test_c_decode.py    # the decode workbench
+    python3 -m pytest tests/test_window.py      # vex gui: windows, fallbacks, stopping
+
+`tests/test_window.py` runs every `vex gui` test against both editions, with
+small scripts standing in for the browsers. The Windows programs cannot be
+run here; `tests/windows_smoke.ps1` checks them by hand on a Windows PC, in
+the folder the package is made of (see its first lines).
 
 The first runs both implementations on every fixture, on system binaries, on programs
 cross-compiled for other CPUs and byte orders (when clang/lld are installed)
@@ -147,4 +206,10 @@ sanitizer build. `VEX_TEST_SANITIZED=1` runs everything with it.
     src/analysis.[ch]        function discovery, name resolution, xrefs
     src/patch.c              the patch commands
     src/cli.[ch] main.c      command line
+    src/server.[ch]          vex gui: the HTTP server (on its own thread) and the
+                             choice of front end
+    src/window.[ch]          the app window, message boxes, VEX_WINDOW_LOG
+    src/appwin.c             vex's own window (Windows, WebView2)
+    src/app_main.c           vex-app.exe
+    res/vex.rc               icon and version details of both Windows programs
     src/platform.[ch]        everything that differs between Windows and POSIX

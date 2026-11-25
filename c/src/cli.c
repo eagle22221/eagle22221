@@ -992,6 +992,7 @@ int cli_main(int argc, char **argv) {
             fprintf(stderr, "vex: error: %s\n", err.msg);
             status = 1;
         }
+        window_trace("error: %s", err.msg);
         /* The windowed program (vex-app.exe) has no console: say it in a box. */
         if (!window_has_console()) {
             char text[1200];
