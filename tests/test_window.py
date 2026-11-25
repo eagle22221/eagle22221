@@ -504,3 +504,28 @@ def test_page_offers_png_icons_for_the_window_and_taskbar(client, size):
     assert body[:8] == b"\x89PNG\r\n\x1a\n"
     width, height = int.from_bytes(body[16:20], "big"), int.from_bytes(body[20:24], "big")
     assert (width, height) == (size, size)
+
+
+# --- Ctrl+C while the window or browser is being opened ------------------------
+
+@pytest.mark.parametrize("moment", ["browser", "window"])
+def test_ctrl_c_while_opening_still_stops_cleanly(monkeypatch, capsys, moment):
+    # Ctrl+C can arrive while vex is still starting the browser or the app
+    # window; it must stop the same way as later on: say so, clean up, status 0.
+    from vex import server
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    closed = []
+    real_close = server.Workspace.close
+    monkeypatch.setattr(server.Workspace, "close", lambda ws: closed.append(ws) or real_close(ws))
+    if moment == "browser":
+        monkeypatch.setattr(server, "_open_in_browser", interrupted)
+        status = server.serve(None, 0, True, app_window=False)
+    else:
+        monkeypatch.setattr(window, "open_window", interrupted)
+        status = server.serve(None, 0, True, app_window=True)
+    assert status == 0
+    assert "stopped." in capsys.readouterr().out
+    assert len(closed) == 1 and not os.path.exists(closed[0].tempdir)

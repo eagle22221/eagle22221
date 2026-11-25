@@ -8,8 +8,13 @@
    themselves, and sparkles drift and twinkle. All of it is transform/opacity
    animation on composited layers, stepped on one slow clock, so the GPU does
    the work; it stops under prefers-reduced-motion or when turned off in
-   Settings. In the light theme, text that sits on the sky is white with a
-   soft shadow, and text on cards, menus and dialogs is dark. */
+   Settings. In the light theme, text that sits on the sky is white and text
+   on cards, menus and dialogs is dark. White text keeps WCAG AA contrast with
+   what is really behind it (a text shadow does not count): the sky stays deep
+   where such text sits, the ribbons rise below the menu and the headings,
+   sparkles are too small to wash out a letter, and where a ribbon can still
+   pass (the credit, a note low on the page, everything on a phone) the text
+   has a backing of its own. */
 
 @font-face { font-family: "Inter"; font-weight: 400; font-display: swap;
   src: url("/static/fonts/inter-latin-400-normal.woff2") format("woff2"); }
@@ -32,19 +37,19 @@
   --paper: #050713;
   --paper-2: #0A0D20;
   --surface: rgba(12, 15, 33, .80);
-  --card: rgba(14, 18, 38, .74);
+  --card: rgba(14, 18, 38, .82);
   --card-top: rgba(255, 255, 255, .035);
   --raised: #12172F;
   --raised-2: #1A2044;
   --field: rgba(6, 8, 22, .55);
   --menu: rgba(17, 21, 45, .97);
   --ink: #ECEEFB;
-  --ink-2: #A3A8C6;
-  --ink-3: #6E7496;
+  --ink-2: #B4B9D6;
+  --ink-3: #9AA0C2;
   --line: rgba(128, 138, 232, .12);
   --line-2: rgba(140, 150, 242, .22);
   --line-3: rgba(160, 150, 255, .38);
-  --accent: #A48BFF;
+  --accent: #B6A2FF;
   --accent-strong: #7C5CFF;
   --accent-ink: #FFFFFF;
   --accent-wash: rgba(124, 92, 255, .14);
@@ -64,7 +69,7 @@
   --overlay: #E36BCB;
   --good: #3DDC97;
   --warn: #F5B547;
-  --bad: #F25C6E;
+  --bad: #FF7A8A;
   --teal: #2DD4BF;
   --violet: #A855F7;
   --hatch-ground: rgba(6, 8, 20, .55);
@@ -96,7 +101,7 @@
    the deepest blue shows through it. */
 :root[data-theme="light"],
 :root[data-theme="light"] :is(.card, .panel, .engine, .box, .table-wrap, .pane, .notice, .stat, .steps li,
-  .entropy-big, .popover, .dialog, .toast, .statusbar, .viewtabs, .filetab.is-active, .goto, .badge, .count,
+  .entropy-big, .popover, .dialog, .toast, .statusbar, .viewtabs, .filetab.is-active, .goto, .badge, .count, .split-foot,
   .filetile, .btn, input, select, textarea) {
   --paper: #F3F1FC;
   --paper-2: #ECE8FB;
@@ -109,7 +114,7 @@
   --menu: rgba(255, 255, 255, .98);
   --ink: #1B1938;
   --ink-2: #4F4F74;
-  --ink-3: #5C5C82;
+  --ink-3: #55557A;
   --line: rgba(84, 72, 186, .12);
   --line-2: rgba(84, 72, 186, .22);
   --line-3: rgba(106, 69, 224, .4);
@@ -128,12 +133,12 @@
   --primary-hover: #7A58EA;
   --code: #D9801A;
   --data: #0E9F8C;
-  --code-ink: #93500A;
-  --data-ink: #0A6E62;
+  --code-ink: #7F4405;
+  --data-ink: #08645A;
   --meta: #5A44C8;
   --headers: #3D6CE0;
   --overlay: #A02A82;
-  --good: #0B6E42;
+  --good: #08603A;
   --warn: #87540A;
   --bad: #B8243C;
   --teal: #0FA594;
@@ -150,7 +155,8 @@
   --spark-halo: rgba(255, 255, 255, .6);
   --credit: #FFFFFF;
   --credit-scrim: rgba(8, 28, 112, .6);
-  /* a soft shadow under text that sits on the sky, for where a ribbon passes */
+  /* a soft shadow under text that sits on the sky: a finish only, the
+     contrast comes from what is behind it */
   --sky-shadow: 0 1px 2px rgba(6, 22, 92, .55), 0 0 10px rgba(6, 22, 92, .4);
   color-scheme: light;
 }
@@ -161,8 +167,8 @@
 /* the sky set: whatever sits directly on the background */
 :root[data-theme="light"] :is(.sidebar, .topbar, .scroller) {
   --ink: #FFFFFF;
-  --ink-2: #F4F7FF;
-  --ink-3: #E2EAFF;
+  --ink-2: #FFFFFF;
+  --ink-3: #EEF3FF;
   --icon: #FFFFFF;
   --line: rgba(255, 255, 255, .22);
   --line-2: rgba(255, 255, 255, .36);
@@ -215,17 +221,21 @@ a { color: var(--link); }
    than run at the display's frame rate: everything moves four times a
    second, on one shared 250 ms clock (every step, duration and delay is a
    multiple of it), so the screen is redrawn at most four times a second.
-   A step is about a pixel, too little to see at this speed, and it is a
+   A step is a pixel or two, too little to see at this speed, and it is a
    small fraction of the work — which matters where the compositor has no
-   GPU (software rendering, remote desktops, virtual machines). */
+   GPU (software rendering, remote desktops, virtual machines). For the same
+   reason every layer that only moves moves a whole number of pixels a step
+   (the compositor then copies it rather than resampling it), and a theme
+   hides a layer rather than removing it, since a removed layer's animation
+   would restart out of step with the rest. */
 .backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; contain: strict;
   background: radial-gradient(120% 80% at 50% -10%, var(--paper-2), var(--paper) 60%); }
 :root[data-theme="light"] body { background: #1D4ED4; }
 :root[data-theme="light"] .backdrop {
   background:
-    radial-gradient(22% 40% at -3% 66%, rgba(255, 204, 182, .55), transparent 75%),
+    radial-gradient(140px 130px at -40px max(80%, 720px), rgba(255, 196, 170, .7), transparent 80%),
     radial-gradient(52% 48% at 14% 108%, rgba(118, 228, 242, .85), transparent 70%),
-    linear-gradient(140deg, #1636B8 0%, #1F5AE0 38%, #2F86EA 70%, #49B7EA 100%);
+    linear-gradient(150deg, #1636B8 0%, #1A45CE 30%, #1F5AE0 54%, #2F86EA 78%, #49B7EA 100%);
 }
 .glow { position: absolute; border-radius: 50%; will-change: transform, opacity; }
 .glow-a { width: 80vmax; height: 60vmax; left: 16vw; top: -37vmax;
@@ -261,7 +271,8 @@ a { color: var(--link); }
 :root[data-theme="light"] .sparkles-a { background-image: url("/static/sparkles-light-a.svg"); }
 :root[data-theme="light"] .sparkles-b { background-image: url("/static/sparkles-light-b.svg"); }
 
-/* motes: points of light that swell, drift up a little and fade */
+/* motes: points of light that swell, drift up a little and fade; placed
+   clear of where headings and the menu's text sit */
 .motes { position: absolute; inset: 0; }
 .mote {
   position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; opacity: .6;
@@ -275,15 +286,15 @@ a { color: var(--link); }
     linear-gradient(90deg, transparent, var(--spark-halo) 42%, var(--spark) 50%, var(--spark-halo) 58%, transparent) 50% 50% / 100% 1px no-repeat,
     linear-gradient(180deg, transparent, var(--spark-halo) 42%, var(--spark) 50%, var(--spark-halo) 58%, transparent) 50% 50% / 1px 100% no-repeat;
 }
-.mote:nth-child(1) { left: 8%; top: 14%; } .mote:nth-child(2) { left: 22%; top: 72%; }
-.mote:nth-child(3) { left: 31%; top: 34%; } .mote:nth-child(4) { left: 43%; top: 86%; }
+.mote:nth-child(1) { left: 12%; top: 79%; } .mote:nth-child(2) { left: 22%; top: 72%; }
+.mote:nth-child(3) { left: 34%; top: 66%; } .mote:nth-child(4) { left: 43%; top: 86%; }
 .mote:nth-child(5) { left: 52%; top: 9%; } .mote:nth-child(6) { left: 61%; top: 57%; }
 .mote:nth-child(7) { left: 69%; top: 24%; } .mote:nth-child(8) { left: 77%; top: 79%; }
 .mote:nth-child(9) { left: 86%; top: 41%; } .mote:nth-child(10) { left: 94%; top: 12%; }
 .mote:nth-child(11) { left: 15%; top: 48%; } .mote:nth-child(12) { left: 38%; top: 61%; }
 .mote:nth-child(13) { left: 57%; top: 92%; } .mote:nth-child(14) { left: 73%; top: 6%; }
 .mote:nth-child(15) { left: 89%; top: 66%; } .mote:nth-child(16) { left: 4%; top: 88%; }
-.mote:nth-child(17) { left: 47%; top: 29%; } .mote:nth-child(18) { left: 81%; top: 51%; }
+.mote:nth-child(17) { left: 53%; top: 44%; } .mote:nth-child(18) { left: 81%; top: 51%; }
 
 @media (prefers-reduced-motion: no-preference) {
   /* glows: steps per keyframe segment (= duration / 2) x 250 ms; each step
@@ -404,6 +415,8 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
 }
 /* on the blue sky the violet is lightened so it still reads */
 :root[data-theme="light"] .sidebar .brand-pro { background-image: linear-gradient(95deg, #E9DFFF, #CDB8FF); text-shadow: none; }
+/* and on the white of a dialog it is deepened */
+:root[data-theme="light"] .dialog .brand-pro { background-image: linear-gradient(95deg, #6A3FE0, #8A4FEA); }
 .brand-sub { font-size: 12.5px; color: var(--ink-2); letter-spacing: .005em; white-space: nowrap; }
 .sidebar-toggle { display: none; margin-left: auto; }
 
@@ -428,7 +441,8 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
 .nav-empty p { margin: 0; }
 
 .sidebar-foot { position: relative; flex: none; min-height: 44px; margin-top: auto; display: flex; align-items: flex-end; padding: 8px 16px 12px; }
-/* ribbons can pass behind the credit: a soft shadow keeps it legible */
+/* ribbons can pass behind the credit: an oval of shade under it (a real
+   backing, not just a text shadow) keeps it legible */
 .credit { position: relative; z-index: 0; margin: 0; font-size: 11.5px; color: var(--credit); letter-spacing: .02em; max-width: none;
   text-shadow: 0 1px 2px rgba(3, 4, 16, .6), 0 0 8px rgba(3, 4, 16, .5); }
 .credit::before {
@@ -663,11 +677,10 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
 .entropy-big {
   min-width: 128px; padding: 11px 18px; border-radius: var(--r-lg); text-align: center;
   border: 1px solid color-mix(in srgb, var(--teal) 55%, transparent);
-  background: color-mix(in srgb, var(--teal) 7%, transparent);
+  /* in the Entropy view it stands on the sky, so a card lies under its tint */
+  background: linear-gradient(color-mix(in srgb, var(--teal) 8%, transparent), color-mix(in srgb, var(--teal) 8%, transparent)), var(--card);
   box-shadow: 0 0 24px -12px var(--teal);
 }
-/* in the Entropy view it stands on the sky, so in the light theme it is a card */
-:root[data-theme="light"] .entropy-big { background-color: var(--card); background-image: linear-gradient(color-mix(in srgb, var(--teal) 8%, transparent), color-mix(in srgb, var(--teal) 8%, transparent)); }
 .entropy-big-label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
 .entropy-big-value { font: 700 28px/1.1 var(--display); letter-spacing: -.02em; }
 .entropy-big-value small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 3px; }
@@ -858,7 +871,9 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .pieces tr.is-unsaved td { color: var(--ink-2); }
 .piece-note { display: block; margin-top: 2px; font: 400 12px/1.4 var(--ui); color: var(--ink-2); }
 .split-result { overflow-wrap: anywhere; }
-.split-foot { margin: 12px 0 0; font-size: 13px; }
+/* a note under the table, low on the page where the ribbons pass: on a card */
+.split-foot { display: inline-block; margin: 12px 0 0; padding: 7px 12px; font-size: 13px; max-width: none;
+  background: var(--card); border: 1px solid var(--line-2); border-radius: var(--r-md); box-shadow: var(--shadow); }
 
 /* --- open dialog -------------------------------------------------------- */
 .dialog { width: min(760px, 94vw); border: 1px solid var(--line-2); border-radius: var(--r-xl); color: var(--ink); padding: 0; box-shadow: var(--shadow-lg);
@@ -1060,13 +1075,18 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
   .sidebar.is-open .nav { display: flex; }
   .sidebar-foot { min-height: 0; padding: 0 14px 10px; }
   .ribbons { --rise-x: -60px; }
+  /* the page scrolls over the ribbons, so the content column has a panel too */
+  .scroller { border: 1px solid var(--line-2); border-radius: var(--r-lg); padding: 12px 10px 6px;
+    background: var(--surface); box-shadow: var(--shadow); }
+  :root[data-theme="light"] .scroller { background: rgba(14, 38, 148, .66); border-color: rgba(255, 255, 255, .26);
+    box-shadow: 0 16px 30px -22px rgba(6, 22, 92, .7); }
   .content { min-height: 0; }
   .topbar { flex-wrap: wrap; padding: 0; }
   .filetabs { flex: 1 1 0; }
   .goto { order: 5; flex: 1 1 100%; max-width: none; margin: 0 0 8px; }
   .topbar-tools { margin-left: auto; }
   .goto:not([hidden]) + .topbar-tools { margin-left: auto; }
-  .scroller { overflow: visible; padding: 12px 0 4px; }
+  .scroller { overflow: visible; }
   .filehead { grid-template-columns: auto minmax(0, 1fr); gap: 12px 14px; }
   .filetile { width: 70px; height: 70px; }
   .filedoc { width: 40px; height: 50px; }

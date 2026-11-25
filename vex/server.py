@@ -727,18 +727,19 @@ def serve(path: Optional[str] = None, port: int = 0, open_browser: bool = True,
     suitable browser is installed (and `app_window` is set), else in a tab."""
     httpd, workspace = create_server(port)
     httpd.stopping = False
-    url = session_url(httpd, workspace, path)
-    proc, started = None, time.monotonic()
-    if open_browser and app_window:
-        proc = window.open_window(url, os.path.join(workspace.tempdir, "window"))
-    print(f"vex is running at:\n\n  {url}\n\n{WINDOW_HINT if proc else BROWSER_HINT}")
-    sys.stdout.flush()
-    if proc is not None:
-        threading.Thread(target=_follow_window, args=(proc, started, httpd, url),
-                         daemon=True).start()
-    elif open_browser:
-        _open_in_browser(url)
-    try:
+    proc = None
+    try:        # from here on, Ctrl+C at any moment stops vex the same clean way
+        url = session_url(httpd, workspace, path)
+        started = time.monotonic()
+        if open_browser and app_window:
+            proc = window.open_window(url, os.path.join(workspace.tempdir, "window"))
+        print(f"vex is running at:\n\n  {url}\n\n{WINDOW_HINT if proc else BROWSER_HINT}")
+        sys.stdout.flush()
+        if proc is not None:
+            threading.Thread(target=_follow_window, args=(proc, started, httpd, url),
+                             daemon=True).start()
+        elif open_browser:
+            _open_in_browser(url)
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
