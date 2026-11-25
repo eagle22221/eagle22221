@@ -45,7 +45,7 @@
 #define LOADER_NAME L"WebView2Loader.dll"
 #define ICON_ID 1                       /* res/vex.rc */
 #define STARTUP_TIMER 1
-#define STARTUP_TIMEOUT_MS 20000        /* the first start creates a profile: allow for a slow disk */
+#define STARTUP_TIMEOUT_MS 30000        /* the first start creates a profile: allow for a slow disk */
 #define WIDTH_AT_96_DPI 1360
 #define HEIGHT_AT_96_DPI 900
 #define BACKGROUND RGB(0x0B, 0x0C, 0x0F)    /* the page's own dark background */
@@ -90,8 +90,7 @@ static void trace(const char *format, ...) {
 }
 
 /* A number from the environment, for diagnosing start-up on a machine where it
- * goes wrong: %VEX_WINDOW_TIMEOUT_MS% (how long to wait for the engine) and
- * %VEX_WINDOW_SHOW_EARLY% (show the empty window while the engine starts). */
+ * goes wrong: %VEX_WINDOW_TIMEOUT_MS% is how long to wait for the engine. */
 static unsigned long env_number(const wchar_t *name, unsigned long fallback) {
     wchar_t text[32];
     DWORD n = GetEnvironmentVariableW(name, text, 32);
@@ -222,8 +221,6 @@ static HRESULT STDMETHODCALLTYPE controller_invoke(
     if (g.on_shown != NULL)
         g.on_shown();
     KillTimer(g.hwnd, STARTUP_TIMER);
-    ShowWindow(g.hwnd, SW_SHOWNORMAL);
-    SetForegroundWindow(g.hwnd);
     ICoreWebView2Controller_MoveFocus(controller, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
     return S_OK;
 }
@@ -251,6 +248,9 @@ static HRESULT STDMETHODCALLTYPE environment_invoke(
         fail();
         return S_OK;
     }
+    /* Kept for as long as the window lives. Without a reference of our own the
+     * environment is released when this handler returns, and the web view asked
+     * for below never arrives (seen on Windows Server 2025, runtime 157). */
     ICoreWebView2Environment_AddRef(environment);
     g.environment = environment;
     HRESULT asked = ICoreWebView2Environment_CreateCoreWebView2Controller(environment, g.hwnd,
@@ -267,6 +267,20 @@ static ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler g_environment_
     &g_environment_vtbl};
 
 /* --- the window -------------------------------------------------------------- */
+
+/* A function from a system DLL that older Windows versions may not have. */
+static FARPROC optional_function(const wchar_t *dll, const char *name) {
+    HMODULE module = LoadLibraryExW(dll, NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    return module != NULL ? GetProcAddress(module, name) : NULL;
+}
+
+static UINT dpi_of(HWND hwnd) {
+    typedef UINT(WINAPI *GetDpiFn)(HWND);
+    GetDpiFn get_dpi = (GetDpiFn)(void (*)(void))optional_function(L"user32.dll", "GetDpiForWindow");
+    UINT dpi = get_dpi != NULL ? get_dpi(hwnd) : 0;
+    return dpi != 0 ? dpi : 96;
+}
+
 
 static void release_webview(void) {
     if (g.controller != NULL)
@@ -311,6 +325,25 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPAR
                      SWP_NOZORDER | SWP_NOACTIVATE);
         return 0;
     }
+    case WM_PAINT: {                            /* seen only until the page covers the window */
+        PAINTSTRUCT paint;
+        HDC dc = BeginPaint(hwnd, &paint);
+        RECT area;
+        GetClientRect(hwnd, &area);
+        HFONT font = CreateFontW(-MulDiv(15, (int)dpi_of(hwnd), 72), 0, 0, 0, FW_NORMAL, FALSE,
+                                 FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                 CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        HGDIOBJ previous = font != NULL ? SelectObject(dc, font) : NULL;
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(0x8D, 0x94, 0xA3));
+        DrawTextW(dc, L"Starting vex\u2026", -1, &area, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (font != NULL) {
+            SelectObject(dc, previous);
+            DeleteObject(font);
+        }
+        EndPaint(hwnd, &paint);
+        return 0;
+    }
     case WM_TIMER:
         if (wparam == STARTUP_TIMER) {
             KillTimer(hwnd, STARTUP_TIMER);
@@ -332,12 +365,6 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPAR
     return DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
-/* A function from a system DLL that older Windows versions may not have. */
-static FARPROC optional_function(const wchar_t *dll, const char *name) {
-    HMODULE module = LoadLibraryExW(dll, NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    return module != NULL ? GetProcAddress(module, name) : NULL;
-}
-
 /* Sharp text on high-resolution screens: without this Windows stretches the
  * window like a picture. */
 static void be_dpi_aware(void) {
@@ -349,13 +376,6 @@ static void be_dpi_aware(void) {
         (set_context((HANDLE)(INT_PTR)-4) || set_context((HANDLE)(INT_PTR)-3)))
         return;
     SetProcessDPIAware();
-}
-
-static UINT dpi_of(HWND hwnd) {
-    typedef UINT(WINAPI *GetDpiFn)(HWND);
-    GetDpiFn get_dpi = (GetDpiFn)(void (*)(void))optional_function(L"user32.dll", "GetDpiForWindow");
-    UINT dpi = get_dpi != NULL ? get_dpi(hwnd) : 0;
-    return dpi != 0 ? dpi : 96;
 }
 
 /* A dark title bar when Windows is set to dark apps, to match the page. */
@@ -473,8 +493,8 @@ NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
     cls.hbrBackground = CreateSolidBrush(BACKGROUND);
     cls.lpszClassName = WINDOW_CLASS;
     if (RegisterClassExW(&cls) != 0) {
-        /* Created hidden; it is shown once the page is ready to appear in it. */
-        g.hwnd = CreateWindowExW(0, WINDOW_CLASS, L"vex", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+        g.hwnd = CreateWindowExW(0, WINDOW_CLASS, L"vex", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                                 CW_USEDEFAULT,
                                  CW_USEDEFAULT, WIDTH_AT_96_DPI, HEIGHT_AT_96_DPI, NULL, NULL,
                                  instance, NULL);
     }
@@ -483,8 +503,11 @@ NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
         match_system_theme(g.hwnd);
         SetTimer(g.hwnd, STARTUP_TIMER,
                  (UINT)env_number(L"VEX_WINDOW_TIMEOUT_MS", STARTUP_TIMEOUT_MS), NULL);
-        if (env_number(L"VEX_WINDOW_SHOW_EARLY", 0) != 0)
-            ShowWindow(g.hwnd, SW_SHOWNORMAL);
+        /* Up at once, saying that vex is starting: the engine can take some
+         * seconds the first time it runs on a machine. */
+        ShowWindow(g.hwnd, SW_SHOWNORMAL);
+        UpdateWindow(g.hwnd);
+        SetForegroundWindow(g.hwnd);
         HRESULT asked = create_environment(NULL, data, NULL, &g_environment_handler);
         trace("create environment: result 0x%08lx", (unsigned long)asked);
         if (FAILED(asked))

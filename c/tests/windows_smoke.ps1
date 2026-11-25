@@ -113,9 +113,8 @@ function Test-Probe([string]$Name, [hashtable]$Settings) {
     Get-Process -Name msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
-Test-Probe "default" @{ VEX_WINDOW_TIMEOUT_MS = "120000" }
-Test-Probe "shown-early" @{ VEX_WINDOW_TIMEOUT_MS = "120000"; VEX_WINDOW_SHOW_EARLY = "1" }
-Test-Probe "no-gpu" @{ VEX_WINDOW_TIMEOUT_MS = "120000"; WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--disable-gpu" }
+Test-Probe "first-start" @{ VEX_WINDOW_TIMEOUT_MS = "120000" }
+Test-Probe "second-start" @{ }
 
 Write-Host ""
 if ($script:failures.Count -gt 0) {
