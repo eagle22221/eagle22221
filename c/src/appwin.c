@@ -13,7 +13,7 @@
  * Everything here runs on the program's main thread; WebView2 calls the
  * handlers below from the message loop of that same thread.
  */
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(VEX_NO_WEBVIEW2)
 
 #define WIN32_LEAN_AND_MEAN
 #define CINTERFACE
@@ -57,6 +57,7 @@ typedef HRESULT(STDAPICALLTYPE *CreateEnvironmentFn)(
 static struct {
     HWND hwnd;
     wchar_t *url;
+    void (*on_shown)(void);
     ICoreWebView2Environment *environment;
     ICoreWebView2Controller *controller;
     ICoreWebView2 *webview;
@@ -218,6 +219,8 @@ static HRESULT STDMETHODCALLTYPE controller_invoke(
         return S_OK;
     }
     g.shown = true;
+    if (g.on_shown != NULL)
+        g.on_shown();
     KillTimer(g.hwnd, STARTUP_TIMER);
     ShowWindow(g.hwnd, SW_SHOWNORMAL);
     SetForegroundWindow(g.hwnd);
@@ -425,8 +428,15 @@ static bool data_folder(wchar_t *out, size_t cap) {
 
 /* --- the entry point --------------------------------------------------------- */
 
-NativeResult native_window_run(const char *url) {
+void native_window_request_close(void) {
+    HWND hwnd = g.hwnd;                 /* read once: the main thread clears it */
+    if (hwnd != NULL)
+        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+}
+
+NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
     memset(&g, 0, sizeof g);
+    g.on_shown = on_shown;
     CreateEnvironmentFn create_environment = load_loader();
     wchar_t data[MAX_PATH + 64];
     trace("native window: loader %s", create_environment != NULL ? "found" : "not found");
@@ -496,6 +506,20 @@ NativeResult native_window_run(const char *url) {
     CoUninitialize();
     trace("native window: %s", g.shown ? "closed by the user" : "unavailable");
     return g.shown ? NATIVE_CLOSED : NATIVE_UNAVAILABLE;
+}
+
+#elif defined(_WIN32)
+/* Built without the WebView2 SDK (see fetch_webview2.sh): no native window. */
+
+#include "window.h"
+
+NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
+    (void)url;
+    (void)on_shown;
+    return NATIVE_UNAVAILABLE;
+}
+
+void native_window_request_close(void) {
 }
 
 #else

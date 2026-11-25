@@ -42,8 +42,13 @@ typedef enum {
 
 /* Show vex's own window on `url` and run it until it is closed. Must be called
  * on the program's main thread; the server has to run on another thread
- * meanwhile. Always NATIVE_UNAVAILABLE on systems other than Windows. */
-NativeResult native_window_run(const char *url);
+ * meanwhile. `on_shown` (may be NULL) is called once, when the page appears.
+ * Always NATIVE_UNAVAILABLE on systems other than Windows, and in a build made
+ * without the WebView2 SDK. */
+NativeResult native_window_run(const char *url, void (*on_shown)(void));
+
+/* Ask the native window to close, from any thread. Does nothing without one. */
+void native_window_request_close(void);
 
 /* True when the program has a console to print to (always, except for the
  * windowed Windows build started from the desktop). */

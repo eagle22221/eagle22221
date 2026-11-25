@@ -415,9 +415,13 @@ void window_stop_box(const char *text, void (*on_dismiss)(void)) {
     (void)on_dismiss;
 }
 
-NativeResult native_window_run(const char *url) {
+NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
     (void)url;
+    (void)on_shown;
     return NATIVE_UNAVAILABLE;
+}
+
+void native_window_request_close(void) {
 }
 
 /* --- finding a browser ------------------------------------------------------- */
