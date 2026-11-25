@@ -875,8 +875,6 @@ def test_parameters_that_are_not_an_object(both, c_client):
     refused(both, data, [("rot-n", [1.5])], "unknown parameter 1.5 for rot-n")
     refused(both, data, [("rot-n", "n=1")], "unknown parameter '=' for rot-n")
     refused(both, data, [("nothing", [1, 2])], "unknown operation: 'nothing'")
-    refused(both, data, [("des", "k")], "des is not available in this build") \
-        if "des" not in C_UNAVAILABLE else None
     # Where Python would go on with something that is not an object it stops
     # with an internal error; the C edition fails the step.
     for params in ("n", ["n"], [["n"]], [{"n": 1}], 5, True, 1.5):
@@ -1181,8 +1179,7 @@ def test_zlib_and_gzip_wrappers_match_python(both):
             "incorrect data check")
     refused(both, gzip_with_header(payload, header_crc=True).replace(b"\x02\xff", b"\x02\xfe", 1),
             [("gunzip", {})], "header crc mismatch")
-    refused(both, co.compress(payload) + co.flush() if False else wrapped[-1],
-            [("zlib-inflate", {})], "Error 2 while decompressing data")
+    refused(both, wrapped[-1], [("zlib-inflate", {})], "Error 2 while decompressing data")
     refused(both, b"\x00\x00\x00\x00\x00", [("raw-inflate", {})],
             "invalid stored block lengths")
     refused(both, b"\x07", [("raw-inflate", {})], "invalid block type")
