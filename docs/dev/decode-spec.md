@@ -174,3 +174,13 @@ POST routes do, bounded to the file.
   `binary`, `empty`.
 - Solver params: caesar `{n}`, xor-single `{key}` (two hex digits), xor-keylen
   `{key, keylen}`, substitution `{map}`.
+- Robustness (both editions): every failure is an ordinary result, never an
+  internal error. A JSON body nested more than 512 levels is refused with 400
+  `request body must be JSON`; a `recipe` that is a number or boolean is 400
+  `recipe must be a list of steps`; `params` that is not an object fails the
+  step with `params must be an object`; a file `path` that is not a string or
+  contains NUL is 400 `a file source needs a path`. Text that cannot be encoded
+  (a lone surrogate, a base64 source above U+00FF) fails with the codec's own
+  message. `railfence` with `rails` at or above the data length returns the data
+  unchanged, in time proportional to the data. Any other unexpected error in a
+  step fails it with `OP failed: Type: message`.

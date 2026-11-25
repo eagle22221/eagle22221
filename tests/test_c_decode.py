@@ -2053,7 +2053,8 @@ def test_json_nested_deeper_than_512_levels(both):
     """The C reader goes 512 levels deep; Python used to read on (to a depth
     of some thousands, then stop with a RecursionError). Now both refuse."""
     def nested(levels):              # the body, the source and `levels` lists: 2 + levels
-        return b'{"source": {"kind": "text", "value": ' + b"[" * levels + b"]" * levels + b"}}"
+        return (b'{"name": "caesar", "source": {"kind": "text", "value": ' + b"[" * levels +
+                b"]" * levels + b"}}")
     for route in ("decode", "decode/solve"):
         status, result = both(route, nested(510))
         assert status == 200 and result["ok"]

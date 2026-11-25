@@ -2069,33 +2069,293 @@ static const char *make_tempdir(Arena *a) {
 #endif
 }
 
-/* --- graceful shutdown ------------------------------------------------------- */
+/* --- stopping ---------------------------------------------------------------- */
 
-static volatile sig_atomic_t g_stop;
-static socket_t g_listen = BAD_SOCKET;
+/* Why the program is stopping; RUNNING until then. It is set from a signal
+ * handler, the console's control handler and the stop box's thread, so it is
+ * a lock-free atomic (which a signal handler may use). The first reason
+ * given is kept. */
+enum { RUNNING, STOP_INTERRUPTED, STOP_TERMINATED, STOP_WINDOW_CLOSED, STOP_BOX_DISMISSED,
+       STOP_CONSOLE_CLOSED };
+static atomic_int g_stop;
+static bool g_gui_ended;            /* cmd_gui served and then stopped as asked */
 
-static void on_interrupt(int sig) {
-    (void)sig;
-    g_stop = 1;
-#ifdef _WIN32
-    /* The handler runs on another thread, so close the socket to wake accept(). */
-    if (g_listen != BAD_SOCKET) {
-        closesocket(g_listen);
-        g_listen = BAD_SOCKET;
+static void request_stop(int why) {
+    int running = RUNNING;
+    atomic_compare_exchange_strong(&g_stop, &running, why);
+}
+
+static bool gui_stopping(void) {
+    return atomic_load(&g_stop) != RUNNING;
+}
+
+static const char *stop_reason(void) {
+    switch (atomic_load(&g_stop)) {
+    case STOP_INTERRUPTED:
+        return "interrupted";
+    case STOP_TERMINATED:
+        return "told to stop by a signal";
+    case STOP_WINDOW_CLOSED:
+        return "the window was closed";
+    case STOP_BOX_DISMISSED:
+        return "the stop box was dismissed";
+    case STOP_CONSOLE_CLOSED:
+        return "the console window was closed";
+    default:
+        return "running";
     }
+}
+
+static void on_stop_box_dismissed(void) {
+    request_stop(STOP_BOX_DISMISSED);
+}
+
+#ifdef _WIN32
+static HANDLE g_stopped;            /* an event, set once the gui has cleaned up */
+
+/* Runs on a thread of its own, started by Windows. */
+static BOOL WINAPI on_console_event(DWORD event) {
+    if (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT) {
+        request_stop(STOP_INTERRUPTED);
+        native_window_request_close();
+        return TRUE;
+    }
+    /* The console window is being closed. Windows ends the program as soon
+     * as this returns, so first let the main thread close the window and
+     * delete the profile, then end with status 0. */
+    request_stop(STOP_CONSOLE_CLOSED);
+    native_window_request_close();
+    if (g_stopped != NULL)
+        WaitForSingleObject(g_stopped, 4000);
+    ExitProcess(0);
+    return TRUE;
+}
+
+static void install_stop_handlers(void) {
+    g_stopped = CreateEventW(NULL, TRUE, FALSE, NULL);
+    SetConsoleCtrlHandler(on_console_event, TRUE);
+}
+
+static void remove_stop_handlers(void) {
+    if (g_stopped != NULL)
+        SetEvent(g_stopped);
+    SetConsoleCtrlHandler(on_console_event, FALSE);
+}
+#else
+static struct sigaction g_old_int, g_old_term, g_old_hup;
+
+static void on_signal(int sig) {
+    request_stop(sig == SIGINT ? STOP_INTERRUPTED : STOP_TERMINATED);
+}
+
+/* Ctrl+C, a plain `kill` and a closed terminal all stop vex the same way:
+ * the window is closed and its profile deleted. */
+static void install_stop_handlers(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_signal;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, &g_old_int);
+    sigaction(SIGTERM, &sa, &g_old_term);
+    sigaction(SIGHUP, &sa, &g_old_hup);
+}
+
+static void remove_stop_handlers(void) {
+    sigaction(SIGINT, &g_old_int, NULL);
+    sigaction(SIGTERM, &g_old_term, NULL);
+    sigaction(SIGHUP, &g_old_hup, NULL);
+}
+#endif
+
+static void nap_ms(int ms) {
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts = {ms / 1000, (ms % 1000) * 1000000L};
+    nanosleep(&ts, NULL);
 #endif
 }
 
-static void install_interrupt_handler(void) {
+/* --- the server thread ------------------------------------------------------- */
+
+static void set_blocking(socket_t fd, bool blocking) {
 #ifdef _WIN32
-    signal(SIGINT, on_interrupt);
+    u_long mode = blocking ? 0 : 1;
+    ioctlsocket(fd, FIONBIO, &mode);
 #else
-    /* No SA_RESTART: a signal makes the blocked accept() return with EINTR. */
-    struct sigaction sa;
-    memset(&sa, 0, sizeof sa);
-    sa.sa_handler = on_interrupt;
-    sigaction(SIGINT, &sa, NULL);
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0)
+        fcntl(fd, F_SETFL, blocking ? flags & ~O_NONBLOCK : flags | O_NONBLOCK);
 #endif
+}
+
+/* One connection at a time, until the program is stopping. The listening
+ * socket does not block (a connection that is gone again by the time it is
+ * accepted must not hold the loop up); the connections themselves do. */
+static void serve_until_stopped(Server *srv) {
+    while (!gui_stopping()) {
+        int ready = wait_readable(srv->listen_fd, WAIT_SLICE_MS);
+        if (ready < 0)
+            nap_ms(WAIT_SLICE_MS);  /* a transient error: do not spin */
+        if (ready <= 0)
+            continue;
+        socket_t conn = accept(srv->listen_fd, NULL, NULL);
+        if (conn == BAD_SOCKET)
+            continue;
+        set_blocking(conn, true);
+#ifdef _WIN32
+        DWORD tv = RECV_TIMEOUT_SECS * 1000;
+        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+#else
+        struct timeval tv = {RECV_TIMEOUT_SECS, 0};
+        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+#endif
+        handle_connection(srv, conn);
+        closesock(conn);
+    }
+}
+
+#ifdef _WIN32
+typedef HANDLE Thread;
+
+static unsigned __stdcall server_thread(void *arg) {
+    serve_until_stopped(arg);
+    return 0;
+}
+
+static bool start_server(Thread *thread, Server *srv) {
+    uintptr_t handle = _beginthreadex(NULL, 0, server_thread, srv, 0, NULL);
+    *thread = (HANDLE)handle;
+    return handle != 0;
+}
+
+static void join_server(Thread *thread) {
+    WaitForSingleObject(*thread, INFINITE);
+    CloseHandle(*thread);
+}
+#else
+typedef pthread_t Thread;
+
+static void *server_thread(void *arg) {
+    serve_until_stopped(arg);
+    return NULL;
+}
+
+/* The server thread blocks the stop signals, so they reach the main thread,
+ * which closes the window. */
+static bool start_server(Thread *thread, Server *srv) {
+    sigset_t block, old;
+    sigemptyset(&block);
+    sigaddset(&block, SIGINT);
+    sigaddset(&block, SIGTERM);
+    sigaddset(&block, SIGHUP);
+    pthread_sigmask(SIG_BLOCK, &block, &old);
+    bool started = pthread_create(thread, NULL, server_thread, srv) == 0;
+    pthread_sigmask(SIG_SETMASK, &old, NULL);
+    return started;
+}
+
+static void join_server(Thread *thread) {
+    pthread_join(*thread, NULL);
+}
+#endif
+
+/* --- showing the page -------------------------------------------------------- */
+
+/* server.py: WINDOW_HINT, BROWSER_HINT, FALLBACK_NOTE, LOST_NOTE. */
+#define WINDOW_HINT "It opened in its own window. Close that window, or press Ctrl+C here, to stop."
+#define BROWSER_HINT "Press Ctrl+C to stop."
+#define FALLBACK_NOTE \
+    "\nThe app window could not be opened, so vex opened in your web browser instead. " BROWSER_HINT
+#define LOST_NOTE "\nvex could not follow its window, so it will keep running. " BROWSER_HINT
+/* The windowed program (vex-app.exe) has no console to press Ctrl+C in: when
+ * the page ends up in the browser, this box is how it is stopped. */
+#define STOP_BOX_TEXT "vex is running in your web browser. Click OK to stop vex."
+
+static void say(const char *text) {
+    printf("%s\n", text);
+    fflush(stdout);
+}
+
+static void wait_for_stop(void) {
+    while (!gui_stopping())
+        nap_ms(100);
+}
+
+/* The page is in the browser, where vex cannot see it close. */
+static void in_the_browser(void) {
+    if (!window_has_console())
+        window_trace("gui: showing the stop box");
+    window_stop_box(STOP_BOX_TEXT, on_stop_box_dismissed);
+    wait_for_stop();
+}
+
+/* Follow the app window until it closes or the program is stopped. */
+static void follow_app_window(const char *url) {
+    while (!gui_stopping()) {
+        switch (window_poll()) {
+        case WINDOW_CLOSED:
+            request_stop(STOP_WINDOW_CLOSED);
+            break;
+        case WINDOW_FAILED:         /* it never opened */
+            window_trace("gui: front end: a browser tab, as the app window failed");
+            open_browser(url);
+            say(FALLBACK_NOTE);
+            in_the_browser();
+            break;
+        case WINDOW_LOST:           /* a running browser took it over: keep serving */
+            say(LOST_NOTE);
+            in_the_browser();
+            break;
+        default:
+            nap_ms(100);
+            break;
+        }
+    }
+    window_close();                 /* if it is still open; deletes the profile */
+}
+
+#ifdef _WIN32
+static void on_native_shown(void) {
+    window_trace("gui: the native window shows the page");
+    say(WINDOW_HINT);
+    if (gui_stopping())             /* stopped before the window could take the request */
+        native_window_request_close();
+}
+#endif
+
+/* The front ends, best first (window.h). Returns once the program is to stop. */
+static void show_page(const char *url, bool open_anything, bool own_window) {
+    if (!open_anything) {
+        window_trace("gui: --no-browser: nothing to open");
+        say(BROWSER_HINT);
+        wait_for_stop();
+        return;
+    }
+    if (own_window) {
+#ifdef _WIN32
+        window_trace("gui: front end: the native window");
+        if (native_window_run(url, on_native_shown) == NATIVE_CLOSED) {
+            request_stop(STOP_WINDOW_CLOSED);
+            return;
+        }
+        window_trace("gui: the native window is unavailable");
+        if (gui_stopping())
+            return;
+#endif
+        window_trace("gui: front end: the app window");
+        if (window_open(url)) {
+            say(WINDOW_HINT);
+            follow_app_window(url);
+            return;
+        }
+    } else {
+        window_trace("gui: --browser: no window");
+    }
+    window_trace("gui: front end: a browser tab");
+    say(BROWSER_HINT);
+    open_browser(url);
+    in_the_browser();
 }
 
 /* --- the gui command --------------------------------------------------------- */
@@ -2106,6 +2366,7 @@ void cmd_gui(Session *s) {
     if (port < 0 || port > 65535)
         cli_usage_error(s, "argument --port: must be between 0 and 65535");
     bool no_browser = cli_flag(s, "no-browser");
+    bool browser_tab = cli_flag(s, "browser");
     const char *path = s->npositional > 0 ? s->positional[0] : NULL;
 
 #ifdef _WIN32
@@ -2140,6 +2401,7 @@ void cmd_gui(Session *s) {
         closesock(fd);
         err_throw(s->err, ERR_OS, "could not read the server address: %s", strerror(errno));
     }
+    set_blocking(fd, false);
 
     Server srv;
     memset(&srv, 0, sizeof srv);
@@ -2163,44 +2425,38 @@ void cmd_gui(Session *s) {
         Str enc = url_quote(s->a, platform_abspath(s->a, path));
         buf_printf(&url, "&open=%.*s", (int)enc.n, enc.p);
     }
-    printf("vex is running at:\n\n  %s\n\nPress Ctrl+C to stop.\n", buf_str(&url).p);
+
+    atomic_store(&g_stop, RUNNING);
+    install_stop_handlers();
+    Thread thread;
+    if (!start_server(&thread, &srv)) {
+        remove_stop_handlers();
+        closesock(fd);
+        err_throw(s->err, ERR_OTHER, "could not start the server thread");
+    }
+    /* The token is left out of the log: it is the key to the session. */
+    window_trace("gui: serving on http://127.0.0.1:%u/", srv.port);
+    printf("vex is running at:\n\n  %s\n\n", buf_str(&url).p);
     fflush(stdout);
 
-    if (!no_browser)
-        open_browser(buf_str(&url).p);
+    show_page(buf_str(&url).p, !no_browser, !browser_tab);
 
-    g_stop = 0;
-    g_listen = fd;
-    install_interrupt_handler();
-
-    while (!g_stop) {
-        socket_t conn = accept(fd, NULL, NULL);
-        if (conn == BAD_SOCKET) {
-            if (g_stop)
-                break;
-            continue;               /* interrupted or transient: keep serving */
-        }
-#ifdef _WIN32
-        DWORD tv = RECV_TIMEOUT_SECS * 1000;
-        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
-#else
-        struct timeval tv = {RECV_TIMEOUT_SECS, 0};
-        setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-#endif
-        handle_connection(&srv, conn);
-        closesock(conn);
-    }
-
-    if (g_listen != BAD_SOCKET) {
-        closesock(fd);
-        g_listen = BAD_SOCKET;
-    }
+    window_trace("gui: stopping (%s)", stop_reason());
+    join_server(&thread);
+    closesock(fd);
     err_release(&srv.err);
     printf("\nstopped.\n");
     fflush(stdout);
+    window_trace("gui: stopped");
+    g_gui_ended = true;
+    remove_stop_handlers();
 #ifdef _WIN32
     WSACleanup();
 #endif
+}
+
+bool gui_ended_as_asked(void) {
+    return g_gui_ended;
 }
 
 /* --- desktop-launch helpers (used by cli.c) ---------------------------------- */

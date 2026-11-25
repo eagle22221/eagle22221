@@ -1,10 +1,11 @@
-/* The graphical interface: `vex gui [PATH] [--port N] [--no-browser]`
+/* The graphical interface: `vex gui [PATH] [--port N] [--browser] [--no-browser]`
  * (port of server.py).
  *
  * A small HTTP server bound to 127.0.0.1 that serves the single-page
  * interface of vex/web (compiled into the program, see
  * tools/embed_web.py) and a JSON API over the same views the command line
- * prints. */
+ * prints. The page is shown by the first front end that works (window.h):
+ * vex's own window on Windows, an app window, or a browser tab. */
 #ifndef VEX_SERVER_H
 #define VEX_SERVER_H
 
@@ -22,8 +23,12 @@ typedef struct {
 extern const WebAsset WEB_ASSETS[];
 extern const size_t WEB_ASSET_COUNT;
 
-/* The `gui` command: serves until interrupted (Ctrl+C). */
+/* The `gui` command: serves until its window is closed, or until interrupted
+ * (Ctrl+C), or, in the windowed program, until its stop box is dismissed. */
 void cmd_gui(Session *s);
+/* True once `gui` has served and then stopped as asked (not by an error):
+ * there is nothing left on its console for the user to read. */
+bool gui_ended_as_asked(void);
 
 /* True when the program was started on Windows by a double-click or by
  * dropping something on it (it owns its console window), which is when a

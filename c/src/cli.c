@@ -11,6 +11,7 @@
 #include "server.h"
 #include "split.h"
 #include "techniques.h"
+#include "window.h"
 
 /* --- usage errors ------------------------------------------------------------- */
 
@@ -62,8 +63,10 @@ static const char HELP[] =
     "  patch string FILE OLD NEW [-e ascii|utf16] (-o OUT | --in-place)\n"
     "                            overwrite bytes, instructions or text; --in-place\n"
     "                            keeps the original as FILE.bak\n"
-    "  gui [FILE] [--port N] [--no-browser]\n"
-    "                            open the graphical interface in a web browser\n"
+    "  gui [FILE] [--port N] [--browser] [--no-browser]\n"
+    "                            open the graphical interface in its own window;\n"
+    "                            --browser opens it in a web browser tab instead,\n"
+    "                            --no-browser only prints the link\n"
     "  engine PATH               identify a game's engine and find its asset packs\n"
     "  assets list PACK [--grep TEXT]\n"
     "  assets extract PACK FOLDER [NAME...]\n"
@@ -675,7 +678,8 @@ static const OptSpec PATCH_OPTIONS[] = {
     {"offset", 0, false}, {"output", 'o', true}, {"in-place", 0, false}};
 static const OptSpec PATCH_STRING_OPTIONS[] = {
     {"encoding", 'e', true}, {"output", 'o', true}, {"in-place", 0, false}};
-static const OptSpec GUI_OPTIONS[] = {{"port", 0, true}, {"no-browser", 0, false}};
+static const OptSpec GUI_OPTIONS[] = {
+    {"port", 0, true}, {"browser", 0, false}, {"no-browser", 0, false}};
 static const OptSpec ASSETS_OUTPUT[] = {{"output", 'o', true}};
 static const OptSpec DECODE_OPTIONS[] = {
     {"text", 0, true}, {"hex", 0, true}, {"base64", 0, true}, {"file", 0, true},
@@ -702,7 +706,7 @@ static const Command COMMANDS[] = {
     {"patch", "bytes", 3, 3, "FILE, LOCATION, HEX", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "nop", 3, 3, "FILE, LOCATION, BYTES", PATCH_OPTIONS, 3, cmd_patch},
     {"patch", "string", 3, 3, "FILE, OLD, NEW", PATCH_STRING_OPTIONS, 3, cmd_patch},
-    {"gui", NULL, 0, 1, "FILE", GUI_OPTIONS, 2, cmd_gui},
+    {"gui", NULL, 0, 1, "FILE", GUI_OPTIONS, 3, cmd_gui},
     {"engine", NULL, 1, 1, "PATH", NULL, 0, cmd_engine},
     {"assets", "list", 1, 1, "PACK", GREP_OPTION, 1, cmd_assets},
     {"assets", "extract", 2, 64, "PACK, FOLDER", NULL, 0, cmd_assets},
@@ -987,6 +991,12 @@ int cli_main(int argc, char **argv) {
         } else {
             fprintf(stderr, "vex: error: %s\n", err.msg);
             status = 1;
+        }
+        /* The windowed program (vex-app.exe) has no console: say it in a box. */
+        if (!window_has_console()) {
+            char text[1200];
+            snprintf(text, sizeof text, "vex could not start.\n\n%s", err.msg);
+            window_message(text);
         }
     } else if (inv.help) {
         fputs(USAGE, stdout);

@@ -1083,6 +1083,31 @@ def test_build_without_capstone_reports_the_missing_disassembler(c_binary, tmp_p
     assert "(unavailable: this build has no disassembler)" in run_c(binary, "report", path)[1]
 
 
+# The DLLs the Windows programs may import. They are statically linked, so
+# these are all part of Windows itself:
+WINDOWS_DLLS = {
+    "kernel32.dll", "msvcrt.dll",
+    "shell32.dll",      # the command line (CommandLineToArgvW), opening a browser tab
+    "ws2_32.dll",       # the sockets of the `gui` server
+    "ole32.dll",        # COM, which the native window's web view (WebView2) runs on
+    "user32.dll",       # the native window, message boxes, following the app window
+    "gdi32.dll",        # the native window's background and "Starting vex..." text
+    "advapi32.dll",     # the registry: where Edge or Chrome is installed, the dark theme
+}
+WEBVIEW2_SDK = C_DIR / "third_party" / "webview2" / "WebView2.h"
+
+
+def pe_subsystem(path):
+    """The Subsystem field of the PE optional header: 2 windowed, 3 console."""
+    data = Path(path).read_bytes()
+    optional_header = struct.unpack_from("<I", data, 0x3C)[0] + 24
+    return struct.unpack_from("<H", data, optional_header + 68)[0]
+
+
+def wide(text):
+    return text.encode("utf-16-le")
+
+
 @pytest.mark.skipif(not MINGW, reason="MinGW-w64 is not installed")
 def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
     proc = subprocess.run([MAKE, "-C", str(C_DIR), "windows"], capture_output=True, text=True)
@@ -1091,10 +1116,9 @@ def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
     exe = C_DIR / "build" / "vex.exe"
     b = vex.load(exe)
     assert (b.format, b.bits, b.arch, b.kind) == ("PE", 64, "x86_64", "executable")
-    assert b.metadata["subsystem"] == "console"
+    assert b.metadata["subsystem"] == "console" and pe_subsystem(exe) == 3
     # static: nothing but DLLs that are part of Windows itself
-    assert {lib.lower() for lib in b.libraries} <= {
-        "kernel32.dll", "msvcrt.dll", "shell32.dll", "ws2_32.dll"}
+    assert {lib.lower() for lib in b.libraries} <= WINDOWS_DLLS
     assert not b.symbols                                         # stripped
     from vex import resources                                    # the file icon is embedded
     assert any(r.type == "GROUP_ICON" for r in resources.list_resources(b))
@@ -1104,8 +1128,64 @@ def test_windows_build_is_a_standalone_64_bit_console_program(c_binary):
     imported = {i.name for i in b.imports}
     assert {"GetConsoleProcessList", "SetConsoleMode", "MoveFileExW",
             "CommandLineToArgvW"} <= imported
+    # `vex gui` has the front ends too: Ctrl+C, the app window, the native window
+    assert {"SetConsoleCtrlHandler", "CreateProcessW", "EnumWindows"} <= imported
+    if WEBVIEW2_SDK.exists():
+        assert "CoInitializeEx" in imported and wide("WebView2Loader.dll") in exe.read_bytes()
     # ... and the C program reads its own Windows build exactly like Python does
     for command in (("info",), ("sections",), ("imports",), ("exports",), ("symbols",),
                     ("strings", "--tagged"), ("disasm", "-n", "64"), ("hexdump",)):
         assert_same_json(c_binary, command[0], exe, *command[1:])
     assert json.loads(run_c(c_binary, "--json", "layout", exe)[1]) == views.layout(b)
+
+
+@pytest.mark.skipif(not MINGW, reason="MinGW-w64 is not installed")
+def test_windows_build_has_a_windowed_program(c_binary):
+    """vex-app.exe: `vex gui` as a windowed program, with no console window."""
+    proc = subprocess.run([MAKE, "-C", str(C_DIR), "windows"], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    exe = C_DIR / "build" / "vex-app.exe"
+    b = vex.load(exe)
+    assert (b.format, b.bits, b.arch, b.kind) == ("PE", 64, "x86_64", "executable")
+    assert pe_subsystem(exe) == 2 and b.metadata["subsystem"] == "gui"
+    assert {lib.lower() for lib in b.libraries} <= WINDOWS_DLLS
+    assert not b.symbols
+    from vex import resources                   # the icon, for Explorer, the taskbar, the window
+    assert any(r.type == "GROUP_ICON" for r in resources.list_resources(b))
+    details = resources.version_info(b)
+    assert (details["CompanyName"], details["ProductName"]) == ("SS", "vex")
+    assert (details["FileDescription"], details["OriginalFilename"]) == ("vex", "vex-app.exe")
+    assert details["LegalCopyright"] == "Developed by SS"
+    assert details["FileVersion"] == vex.__version__
+    imported = {i.name for i in b.imports}
+    # its messages go to boxes; standard output goes to NUL when there is none
+    assert {"MessageBoxW", "GetConsoleWindow", "GetFileType", "freopen"} <= imported
+    data = exe.read_bytes()
+    assert b"vex is running in your web browser. Click OK to stop vex." in data
+    assert b"vex could not start." in data
+    loader = C_DIR / "build" / "WebView2Loader.dll"
+    if WEBVIEW2_SDK.exists():                   # the native window, and its loader beside it
+        assert "CoInitializeEx" in imported and wide("WebView2Loader.dll") in data
+        assert loader.read_bytes() == (WEBVIEW2_SDK.parent / "WebView2Loader.dll").read_bytes()
+        assert vex.load(loader).kind == "dll"
+    # ... and vex.exe is still the console program
+    assert pe_subsystem(C_DIR / "build" / "vex.exe") == 3
+
+
+@pytest.mark.skipif(not MINGW, reason="MinGW-w64 is not installed")
+def test_windows_build_without_the_webview2_sdk(tmp_path):
+    """Without third_party/webview2 both programs are still built; they have no
+    native window (and use the app window) and need no loader."""
+    build = tmp_path / "build"
+    proc = subprocess.run([MAKE, "-C", str(C_DIR), "windows", "WEBVIEW2=0", "CAPSTONE=0",
+                           f"BUILD={build}", "-j4"], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    assert "warning" not in proc.stdout + proc.stderr
+    assert "-DVEX_NO_WEBVIEW2" in proc.stdout
+    assert not (build / "WebView2Loader.dll").exists()
+    for name, subsystem in (("vex.exe", 3), ("vex-app.exe", 2)):
+        b = vex.load(build / name)
+        assert pe_subsystem(build / name) == subsystem
+        assert {lib.lower() for lib in b.libraries} <= WINDOWS_DLLS - {"ole32.dll"}
+        assert "CreateProcessW" in {i.name for i in b.imports}     # the app window is there
+        assert wide("WebView2Loader.dll") not in (build / name).read_bytes()

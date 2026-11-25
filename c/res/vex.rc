@@ -1,3 +1,16 @@
+/* Resources of both Windows programs: the icon (id 1, also the window's icon,
+ * see src/appwin.c) and the details Explorer shows under Properties > Details.
+ * Built once as is for vex.exe and once with -DVEX_APP for vex-app.exe. */
+#ifdef VEX_APP
+#define VEX_DESCRIPTION "vex"
+#define VEX_INTERNAL_NAME "vex-app"
+#define VEX_FILE_NAME "vex-app.exe"
+#else
+#define VEX_DESCRIPTION "vex binary inspector"
+#define VEX_INTERNAL_NAME "vex"
+#define VEX_FILE_NAME "vex.exe"
+#endif
+
 1 ICON "res/vex.ico"
 
 1 VERSIONINFO
@@ -11,11 +24,11 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "SS"
-            VALUE "FileDescription", "vex binary inspector"
+            VALUE "FileDescription", VEX_DESCRIPTION
             VALUE "FileVersion", "0.1.0"
-            VALUE "InternalName", "vex"
+            VALUE "InternalName", VEX_INTERNAL_NAME
             VALUE "LegalCopyright", "Developed by SS"
-            VALUE "OriginalFilename", "vex.exe"
+            VALUE "OriginalFilename", VEX_FILE_NAME
             VALUE "ProductName", "vex"
             VALUE "ProductVersion", "0.1.0"
         END

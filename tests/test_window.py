@@ -345,11 +345,15 @@ def test_c_window_log_traces_the_front_end_decisions(run_c, tmp_path):
     r.url()
     assert r.proc.wait(timeout=15) == 0
     text = log.read_text()
-    for step in ("gui: serving on http://127.0.0.1:", "gui: front end: the native window",
-                 "gui: front end: the app window", "app window: started",
-                 "app window: closed", "gui: stopping (the window was closed)",
-                 "app window: profile deleted", "gui: stopped"):
-        assert step in text, text
+    steps = ["gui: serving on http://127.0.0.1:", "gui: front end: the app window",
+             "app window: started", "app window: closed", "app window: profile deleted",
+             "gui: stopping (the window was closed)", "gui: stopped"]
+    if os.name == "nt":                                 # vex's own window comes first there
+        steps.insert(1, "gui: front end: the native window")
+    at = 0
+    for step in steps:                                  # all of them, in this order
+        assert step in text[at:], text
+        at = text.index(step, at)
     assert "#token=" not in text                        # the session token stays out of it
     assert all(line.startswith("[") and " ms] " in line for line in text.splitlines())
 
