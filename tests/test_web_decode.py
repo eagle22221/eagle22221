@@ -68,6 +68,7 @@ def test_decode_view_is_registered_after_split_and_before_modify(script):
     assert names.index("split") + 1 == names.index("decode") == names.index("modify") - 1
     entry = re.search(r"decode: \{[^}]*\}", views).group(0)
     assert "render: renderDecode" in entry and "icon: 'decode'" in entry and "kinds: ['binary']" in entry
+    assert "group: 'advanced'" in entry
 
 
 def test_decode_icon_is_in_the_sprite_in_the_same_line_style(client):

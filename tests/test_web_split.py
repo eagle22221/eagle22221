@@ -62,14 +62,18 @@ def split_view_source(script):
 
 # --- the page -----------------------------------------------------------------
 
-def test_split_view_is_registered_between_assets_and_modify(script):
+def test_split_view_is_registered_in_the_advanced_group_before_modify(script):
+    # The sidebar lists the views in VIEWS order, grouped as in the design:
+    # ... Assets (Resources), then Entropy, Split, Decode, Patching / Modify (Advanced).
     views = script[script.index("const VIEWS = {"):script.index("function renderNav")]
     order = re.findall(r"^\s+(\w+): \{ label: '([^']+)'", views, re.M)
     names = [name for name, _ in order]
     assert ("split", "Split") in order
-    assert names.index("assets") + 1 == names.index("split") < names.index("modify")
+    assert names.index("assets") < names.index("entropy")
+    assert names.index("entropy") + 1 == names.index("split") < names.index("modify")
     entry = re.search(r"split: \{[^}]*\}", views).group(0)
     assert "render: renderSplit" in entry and "icon: 'split'" in entry and "kinds: ['binary']" in entry
+    assert "group: 'advanced'" in entry
 
 
 def test_split_icon_is_in_the_sprite_in_the_same_line_style(client):

@@ -871,7 +871,7 @@ async function renderEntropy(box) {
   ]);
   const sectionTable = sections.length ? h('section', { class: 'box' },
     boxHead('sections', 'Entropy by section'),
-    h('div', { class: 'box-body' }, h('table', { class: 'table-plain' },
+    h('div', { class: 'box-body table-scroll' }, h('table', { class: 'table-plain' },
       h('thead', {}, h('tr', {}, ['Section', 'File offset', 'Size', 'Entropy'].map((t, i) => h('th', { scope: 'col', text: t, class: i === 1 || i === 2 ? 'num' : '' })))),
       h('tbody', {}, sections.map((s) => h('tr', {},
         h('td', { class: 'mono strong' }, h('button', { class: 'link', type: 'button', text: s.name || '(unnamed)', onclick: () => goToOffset(s.offset) })),
