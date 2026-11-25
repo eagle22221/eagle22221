@@ -19,8 +19,7 @@ function Check([string]$Name, [bool]$Ok, [string]$Detail = "") {
     if (-not $Ok) { $script:failures += $Name }
 }
 
-# A picture of the whole screen, saved as PNG, and a small JPEG copy written
-# into the log as base64 so it can be read back without downloading anything.
+# A picture of the whole screen, saved as PNG in the results folder.
 function Save-Screenshot([string]$Name) {
     try {
         $area = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -29,21 +28,7 @@ function Save-Screenshot([string]$Name) {
         $pen.CopyFromScreen($area.Left, $area.Top, 0, 0, $shot.Size)
         $pen.Dispose()
         $shot.Save((Join-Path $Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-        $width = 1000
-        $height = [int]($area.Height * $width / $area.Width)
-        $small = New-Object System.Drawing.Bitmap $shot, $width, $height
-        $jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
-            Where-Object { $_.MimeType -eq "image/jpeg" }
-        $quality = New-Object System.Drawing.Imaging.EncoderParameters 1
-        $quality.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter `
-            ([System.Drawing.Imaging.Encoder]::Quality), 55L
-        $small.Save((Join-Path $Out "$Name.jpg"), $jpeg, $quality)
-        $small.Dispose(); $shot.Dispose()
-        $text = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Out "$Name.jpg")),
-                                          [Base64FormattingOptions]::InsertLineBreaks)
-        Write-Host "-----BEGIN SCREENSHOT $Name-----"
-        Write-Host $text
-        Write-Host "-----END SCREENSHOT $Name-----"
+        $shot.Dispose()
     } catch {
         Write-Host "(no screenshot: $($_.Exception.Message))"
     }
@@ -62,17 +47,27 @@ function Get-WebView2Version {
     return $null
 }
 
-# Wait until the program's main window carries the wanted title.
+# Wait until the program's main window carries the wanted title, reporting the
+# web view's helper processes along the way.
 function Wait-ForTitle($Process, [string]$Wanted, [int]$Seconds) {
-    $deadline = (Get-Date).AddSeconds($Seconds)
+    $start = Get-Date
+    $deadline = $start.AddSeconds($Seconds)
     $title = ""
+    $nextReport = $start.AddSeconds(5)
     while ((Get-Date) -lt $deadline) {
         $Process.Refresh()
         if ($Process.HasExited) { break }
         $title = $Process.MainWindowTitle
         if ($title -like $Wanted) { break }
+        if ((Get-Date) -ge $nextReport) {
+            $helpers = @(Get-Process -Name msedgewebview2 -ErrorAction SilentlyContinue).Count
+            Write-Host ("  ...{0,3:N0} s: title '{1}', {2} web view processes" -f `
+                ((Get-Date) - $start).TotalSeconds, $title, $helpers)
+            $nextReport = (Get-Date).AddSeconds(10)
+        }
         Start-Sleep -Milliseconds 500
     }
+    Write-Host ("  waited {0:N1} s" -f ((Get-Date) - $start).TotalSeconds)
     return $title
 }
 
@@ -92,23 +87,35 @@ $runtime = Get-WebView2Version
 Write-Host "WebView2 runtime: $(if ($runtime) { $runtime } else { 'NOT INSTALLED' })"
 
 # --- the native window on its own -------------------------------------------
-$log = Join-Path $Out "probe-window.log"
-$env:VEX_WINDOW_LOG = $log
-$probe = Start-Process -FilePath (Join-Path $Dir "appwin-probe.exe") -PassThru
-$null = $probe.Handle                   # keeps the exit status readable later
-$title = Wait-ForTitle $probe "vex probe" 60
-Start-Sleep -Seconds 2
-Save-Screenshot "probe"
-Check "probe: the window opened and shows the page" ($title -eq "vex probe") `
-    "(title '$title', exited: $($probe.HasExited))"
-if ($probe.HasExited) {
-    Write-Host "probe exit status: $($probe.ExitCode)"
-} else {
-    Close-AndCheck $probe "probe"
+# Run the probe once per setting, to tell apart the ways start-up can go wrong.
+function Test-Probe([string]$Name, [hashtable]$Settings) {
+    Write-Host ""
+    Write-Host "=== probe: $Name ==="
+    $log = Join-Path $Out "probe-$Name.log"
+    $env:VEX_WINDOW_LOG = $log
+    foreach ($key in $Settings.Keys) { Set-Item -Path "env:$key" -Value $Settings[$key] }
+    $probe = Start-Process -FilePath (Join-Path $Dir "appwin-probe.exe") -PassThru
+    $null = $probe.Handle               # keeps the exit status readable later
+    $title = Wait-ForTitle $probe "vex probe" 150
+    Start-Sleep -Seconds 2
+    Save-Screenshot "probe-$Name"
+    Check "probe ($Name): the window opened and shows the page" ($title -eq "vex probe") `
+        "(title '$title', exited: $($probe.HasExited))"
+    if ($probe.HasExited) {
+        Write-Host "probe exit status: $($probe.ExitCode)"
+    } else {
+        Close-AndCheck $probe "probe ($Name)"
+    }
+    Write-Host "--- window log ---"
+    if (Test-Path $log) { Get-Content $log } else { Write-Host "(nothing was logged)" }
+    foreach ($key in $Settings.Keys) { Remove-Item -Path "env:$key" }
+    $env:VEX_WINDOW_LOG = $null
+    Get-Process -Name msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
-Write-Host "--- window log (probe) ---"
-if (Test-Path $log) { Get-Content $log } else { Write-Host "(nothing was logged)" }
-$env:VEX_WINDOW_LOG = $null
+
+Test-Probe "default" @{ VEX_WINDOW_TIMEOUT_MS = "120000" }
+Test-Probe "shown-early" @{ VEX_WINDOW_TIMEOUT_MS = "120000"; VEX_WINDOW_SHOW_EARLY = "1" }
+Test-Probe "no-gpu" @{ VEX_WINDOW_TIMEOUT_MS = "120000"; WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--disable-gpu" }
 
 Write-Host ""
 if ($script:failures.Count -gt 0) {

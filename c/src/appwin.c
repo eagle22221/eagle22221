@@ -57,6 +57,7 @@ typedef HRESULT(STDAPICALLTYPE *CreateEnvironmentFn)(
 static struct {
     HWND hwnd;
     wchar_t *url;
+    ICoreWebView2Environment *environment;
     ICoreWebView2Controller *controller;
     ICoreWebView2 *webview;
     bool shown;         /* the page is on screen: from here on the window is the program */
@@ -74,12 +75,30 @@ static void trace(const char *format, ...) {
     FILE *log = _wfopen(path, L"a");
     if (log == NULL)
         return;
+    static ULONGLONG first;
+    ULONGLONG now = GetTickCount64();
+    if (first == 0)
+        first = now;
+    fprintf(log, "[%6lu ms] ", (unsigned long)(now - first));
     va_list args;
     va_start(args, format);
     vfprintf(log, format, args);
     va_end(args);
     fputc('\n', log);
     fclose(log);
+}
+
+/* A number from the environment, for diagnosing start-up on a machine where it
+ * goes wrong: %VEX_WINDOW_TIMEOUT_MS% (how long to wait for the engine) and
+ * %VEX_WINDOW_SHOW_EARLY% (show the empty window while the engine starts). */
+static unsigned long env_number(const wchar_t *name, unsigned long fallback) {
+    wchar_t text[32];
+    DWORD n = GetEnvironmentVariableW(name, text, 32);
+    if (n == 0 || n >= 32)
+        return fallback;
+    wchar_t *end = NULL;
+    unsigned long value = wcstoul(text, &end, 10);
+    return end != text && *end == L'\0' ? value : fallback;
 }
 
 /* Give up on the native window (only ever before it is shown). */
@@ -225,9 +244,16 @@ static HRESULT STDMETHODCALLTYPE environment_invoke(
     trace("environment: result 0x%08lx", (unsigned long)result);
     if (g.failed || g.hwnd == NULL)
         return S_OK;
-    if (FAILED(result) || environment == NULL ||
-        FAILED(ICoreWebView2Environment_CreateCoreWebView2Controller(environment, g.hwnd,
-                                                                     &g_controller_handler)))
+    if (FAILED(result) || environment == NULL) {
+        fail();
+        return S_OK;
+    }
+    ICoreWebView2Environment_AddRef(environment);
+    g.environment = environment;
+    HRESULT asked = ICoreWebView2Environment_CreateCoreWebView2Controller(environment, g.hwnd,
+                                                                          &g_controller_handler);
+    trace("create controller: result 0x%08lx", (unsigned long)asked);
+    if (FAILED(asked))
         fail();
     return S_OK;
 }
@@ -249,6 +275,10 @@ static void release_webview(void) {
     if (g.controller != NULL) {
         ICoreWebView2Controller_Release(g.controller);
         g.controller = NULL;
+    }
+    if (g.environment != NULL) {
+        ICoreWebView2Environment_Release(g.environment);
+        g.environment = NULL;
     }
 }
 
@@ -441,7 +471,10 @@ NativeResult native_window_run(const char *url) {
     if (g.hwnd != NULL) {
         place_window(g.hwnd);
         match_system_theme(g.hwnd);
-        SetTimer(g.hwnd, STARTUP_TIMER, STARTUP_TIMEOUT_MS, NULL);
+        SetTimer(g.hwnd, STARTUP_TIMER,
+                 (UINT)env_number(L"VEX_WINDOW_TIMEOUT_MS", STARTUP_TIMEOUT_MS), NULL);
+        if (env_number(L"VEX_WINDOW_SHOW_EARLY", 0) != 0)
+            ShowWindow(g.hwnd, SW_SHOWNORMAL);
         HRESULT asked = create_environment(NULL, data, NULL, &g_environment_handler);
         trace("create environment: result 0x%08lx", (unsigned long)asked);
         if (FAILED(asked))
