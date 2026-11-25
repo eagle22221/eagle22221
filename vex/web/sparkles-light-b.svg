@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 630" width="840" height="630">
+<!-- vex background: light theme, sparkle layer b. Points of light in a tile that repeats
+     across and down: anything near an edge is drawn again on the other side. -->
+<defs>
+<radialGradient id="h"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".7"/><stop offset=".35" stop-color="#FFFFFF" stop-opacity=".22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+<radialGradient id="o"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".8"/><stop offset=".3" stop-color="#FFFFFF" stop-opacity=".45"/><stop offset=".6" stop-color="#FFFFFF" stop-opacity=".2"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="776.9" cy="597.6" r="3.06" fill="url(#h)" opacity="0.65"/>
+<circle cx="776.9" cy="597.6" r="0.73" fill="#FFFFFF" opacity="0.82"/>
+<circle cx="355.9" cy="334" r="8.13" fill="url(#o)" opacity="0.51"/>
+<circle cx="185.7" cy="286.7" r="7.27" fill="url(#o)" opacity="0.60"/>
+<circle cx="353.8" cy="323" r="4.39" fill="url(#h)" opacity="0.46"/>
+<circle cx="353.8" cy="323" r="1.05" fill="#FFFFFF" opacity="0.58"/>
+<circle cx="657.8" cy="371.1" r="5.66" fill="url(#h)" opacity="0.79"/>
+<circle cx="657.8" cy="371.1" r="1.35" fill="#FFFFFF" opacity="0.99"/>
+<circle cx="304.7" cy="478.7" r="11.21" fill="url(#o)" opacity="0.58"/>
+<circle cx="264.1" cy="54" r="6.12" fill="url(#h)" opacity="0.65"/>
+<circle cx="264.1" cy="54" r="1.46" fill="#FFFFFF" opacity="0.82"/>
+<circle cx="375.9" cy="404.7" r="8.02" fill="url(#o)" opacity="0.46"/>
+<circle cx="685.3" cy="123.2" r="7.38" fill="url(#o)" opacity="0.36"/>
+<circle cx="231.5" cy="360.9" r="4.25" fill="url(#h)" opacity="0.57"/>
+<circle cx="231.5" cy="360.9" r="1.01" fill="#FFFFFF" opacity="0.72"/>
+<circle cx="242.3" cy="192" r="5.31" fill="url(#h)" opacity="0.53"/>
+<circle cx="242.3" cy="192" r="1.26" fill="#FFFFFF" opacity="0.67"/>
+<circle cx="90" cy="493.8" r="6.66" fill="url(#h)" opacity="0.53"/>
+<circle cx="90" cy="493.8" r="1.59" fill="#FFFFFF" opacity="0.66"/>
+<circle cx="458.2" cy="578.8" r="7.22" fill="url(#h)" opacity="0.50"/>
+<circle cx="458.2" cy="578.8" r="1.72" fill="#FFFFFF" opacity="0.63"/>
+<circle cx="819" cy="35.2" r="6.77" fill="url(#o)" opacity="0.63"/>
+</svg>

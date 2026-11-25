@@ -1,9 +1,15 @@
-/* vex Pro — deep navy and indigo, violet glows, rounded glassy cards with
-   thin borders and icon-led headings. Behind everything a slow, calm light
-   show: soft violet, indigo and magenta glows drifting and breathing, a faint
-   shimmer of dust, and the sidebar's line-art wave flowing at its foot. All of
-   it is transform/opacity animation on composited layers, so the GPU does the
-   work; it stops under prefers-reduced-motion or when turned off in Settings. */
+/* vex Pro — rounded glassy cards with thin borders and icon-led headings on
+   one continuous sky: the sidebar has no panel of its own (except on phones),
+   so it and the main area share the background. Two skies: dark (the default)
+   is deep navy with drifting violet glows and violet ribbons of light; light
+   is a deep-to-bright blue with a warm glow at the left, a cyan glow at the
+   bottom left and white ribbons. In both, translucent ribbons with bright thin
+   edges rise from the lower left towards the right and flow slowly along
+   themselves, and sparkles drift and twinkle. All of it is transform/opacity
+   animation on composited layers, stepped on one slow clock, so the GPU does
+   the work; it stops under prefers-reduced-motion or when turned off in
+   Settings. In the light theme, text that sits on the sky is white with a
+   soft shadow, and text on cards, menus and dialogs is dark. */
 
 @font-face { font-family: "Inter"; font-weight: 400; font-display: swap;
   src: url("/static/fonts/inter-latin-400-normal.woff2") format("woff2"); }
@@ -19,7 +25,9 @@
   src: url("/static/fonts/ibm-plex-mono-latin-600-normal.woff2") format("woff2"); }
 
 /* --- design tokens ------------------------------------------------------ */
-/* Dark is the default; light is the same design on soft lavender and white. */
+/* Dark is the default; light is the same design with white cards on a blue
+   sky. The light tokens below are the card set (dark text); the "sky" set
+   further down turns whatever sits directly on the background white. */
 :root {
   --paper: #050713;
   --paper-2: #0A0D20;
@@ -67,8 +75,12 @@
   --glow-a: rgba(124, 76, 255, .48);
   --glow-b: rgba(54, 84, 230, .34);
   --glow-c: rgba(206, 70, 200, .24);
-  --dust: rgba(214, 204, 255, .9);
-  --dust-2: rgba(170, 196, 255, .8);
+  --spark: #FFFFFF;
+  --spark-halo: rgba(196, 181, 253, .55);
+  --code-ink: #F4A23C;
+  --data-ink: #3DDBC4;
+  --credit: #9DA3C4;
+  --credit-scrim: rgba(3, 4, 16, .7);
   --r-xl: 18px;
   --r-lg: 14px;
   --r-md: 10px;
@@ -80,56 +92,80 @@
   color-scheme: dark;
 }
 
-:root[data-theme="light"] {
+/* Text colours here are chosen to meet WCAG AA (4.5:1) on a card even where
+   the deepest blue shows through it. */
+:root[data-theme="light"],
+:root[data-theme="light"] :is(.card, .panel, .engine, .box, .table-wrap, .pane, .notice, .stat, .steps li,
+  .entropy-big, .popover, .dialog, .toast, .statusbar, .viewtabs, .filetab.is-active, .goto, .badge, .count,
+  .filetile, .btn, input, select, textarea) {
   --paper: #F3F1FC;
   --paper-2: #ECE8FB;
   --surface: rgba(255, 255, 255, .72);
-  --card: rgba(255, 255, 255, .80);
+  --card: rgba(255, 255, 255, .88);
   --card-top: rgba(255, 255, 255, .6);
   --raised: #FFFFFF;
   --raised-2: #F1EDFE;
-  --field: rgba(255, 255, 255, .9);
+  --field: rgba(255, 255, 255, .94);
   --menu: rgba(255, 255, 255, .98);
   --ink: #1B1938;
-  --ink-2: #57577C;
-  --ink-3: #8A8AAC;
-  --line: rgba(84, 72, 186, .11);
-  --line-2: rgba(84, 72, 186, .2);
-  --line-3: rgba(106, 69, 224, .38);
-  --accent: #6A45E0;
+  --ink-2: #4F4F74;
+  --ink-3: #5C5C82;
+  --line: rgba(84, 72, 186, .12);
+  --line-2: rgba(84, 72, 186, .22);
+  --line-3: rgba(106, 69, 224, .4);
+  --accent: #5E3AD6;
   --accent-strong: #6A45E0;
   --accent-ink: #FFFFFF;
   --accent-wash: rgba(106, 69, 224, .10);
-  --link: #4B5FE0;
-  --icon: #5A6FF0;
-  --grad: linear-gradient(100deg, #4A7DF0 0%, #5552DE 46%, #8657EE 100%);
-  --grad-btn: linear-gradient(98deg, #8457F0 0%, #6552E6 48%, #4762D8 100%);
+  --link: #3B4FD0;
+  --icon: #4A5FE6;
+  --grad: linear-gradient(100deg, #3F66E0 0%, #4F44D6 46%, #7A45E6 100%);
+  --grad-btn: linear-gradient(98deg, #7A4CEA 0%, #5E4CE0 48%, #4360D4 100%);
   --grad-ring: rgba(255, 255, 255, .55);
-  --glow: 0 8px 22px -10px rgba(98, 70, 230, .65);
+  --glow: 0 8px 22px -10px rgba(60, 40, 190, .7);
   --primary: #6A45E0;
   --primary-ink: #FFFFFF;
   --primary-hover: #7A58EA;
   --code: #D9801A;
   --data: #0E9F8C;
-  --meta: #7562E0;
+  --code-ink: #93500A;
+  --data-ink: #0A6E62;
+  --meta: #5A44C8;
   --headers: #3D6CE0;
-  --overlay: #C2399F;
-  --good: #149A62;
-  --warn: #B7791F;
-  --bad: #D63A52;
+  --overlay: #A02A82;
+  --good: #0B6E42;
+  --warn: #87540A;
+  --bad: #B8243C;
   --teal: #0FA594;
   --violet: #8B3FE8;
   --hatch-ground: rgba(255, 255, 255, .7);
   --label-ground: rgba(255, 255, 255, .9);
-  --shadow: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 14px 30px -22px rgba(60, 40, 140, .35);
-  --shadow-lg: 0 30px 60px -26px rgba(60, 40, 140, .38), 0 0 0 1px rgba(84, 72, 186, .08);
-  --scrim: rgba(40, 30, 90, .28);
-  --glow-a: rgba(150, 110, 255, .30);
-  --glow-b: rgba(110, 150, 255, .26);
-  --glow-c: rgba(240, 130, 220, .20);
-  --dust: rgba(120, 90, 230, .6);
-  --dust-2: rgba(90, 120, 230, .5);
+  --shadow: 0 1px 0 rgba(255, 255, 255, .8) inset, 0 16px 32px -22px rgba(10, 30, 110, .45);
+  --shadow-lg: 0 30px 60px -26px rgba(10, 30, 110, .5), 0 0 0 1px rgba(84, 72, 186, .08);
+  --scrim: rgba(8, 24, 90, .35);
+  text-shadow: none;
+}
+:root[data-theme="light"] {
+  --spark: #FFFFFF;
+  --spark-halo: rgba(255, 255, 255, .6);
+  --credit: #FFFFFF;
+  --credit-scrim: rgba(8, 28, 112, .62);
+  /* a soft shadow under text that sits on the sky, for where a ribbon passes */
+  --sky-shadow: 0 1px 2px rgba(6, 22, 92, .55), 0 0 10px rgba(6, 22, 92, .4);
   color-scheme: light;
+}
+/* the sky set: whatever sits directly on the background */
+:root[data-theme="light"] :is(.sidebar, .topbar, .scroller) {
+  --ink: #FFFFFF;
+  --ink-2: #F4F7FF;
+  --ink-3: #E2EAFF;
+  --icon: #FFFFFF;
+  --line: rgba(255, 255, 255, .22);
+  --line-2: rgba(255, 255, 255, .36);
+  --line-3: rgba(255, 255, 255, .55);
+  --accent-wash: rgba(255, 255, 255, .16);
+  --link: #FFFFFF;
+  text-shadow: var(--sky-shadow);
 }
 
 * { box-sizing: border-box; }
@@ -157,10 +193,20 @@ a { color: var(--link); }
 * { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 
 /* --- animated backdrop -------------------------------------------------- */
-/* Three large, very soft radial-gradient glows (no blur filter) drift and
-   breathe behind everything; a few tiny motes float and twinkle; the
-   sidebar's wave flows. Only transform and opacity are animated, each
-   element on its own compositor layer, so nothing is repainted.
+/* One sky behind the sidebar and the main area. From the back: three large,
+   very soft radial-gradient glows (dark theme; no blur filter) drifting and
+   breathing; a far layer of soft sparkles; three layers of ribbons; a near
+   layer of fine sparkles; and a few motes that twinkle.
+   Each ribbon layer is an SVG tile that repeats seamlessly across (its glow
+   is drawn into the tile), laid twice side by side on an element one tile
+   wider than the window; flowing moves it by exactly one tile per cycle, so
+   the loop never shows. The ribbons in a tile run level: a fixed skew on the
+   layer's parent tilts them so they rise from below the sidebar menu at the
+   lower left towards the right (each layer at its own angle, so they fan
+   out), and the flow carries the light along them. The sparkle layers are
+   tiles that repeat across and down, drifting by exactly one tile per cycle.
+   Only transform and opacity are animated, each element on its own
+   compositor layer, so nothing is repainted.
    The motion is so slow (a few pixels a second) that it is stepped rather
    than run at the display's frame rate: everything moves four times a
    second, on one shared 250 ms clock (every step, duration and delay is a
@@ -170,6 +216,13 @@ a { color: var(--link); }
    GPU (software rendering, remote desktops, virtual machines). */
 .backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; contain: strict;
   background: radial-gradient(120% 80% at 50% -10%, var(--paper-2), var(--paper) 60%); }
+:root[data-theme="light"] body { background: #1D4ED4; }
+:root[data-theme="light"] .backdrop {
+  background:
+    radial-gradient(22% 40% at -3% 66%, rgba(255, 204, 182, .55), transparent 75%),
+    radial-gradient(52% 48% at 14% 108%, rgba(118, 228, 242, .85), transparent 70%),
+    linear-gradient(140deg, #1636B8 0%, #1F5AE0 38%, #2F86EA 70%, #49B7EA 100%);
+}
 .glow { position: absolute; border-radius: 50%; will-change: transform, opacity; }
 .glow-a { width: 80vmax; height: 60vmax; left: 16vw; top: -37vmax;
   background: radial-gradient(closest-side, var(--glow-a), transparent); }
@@ -177,10 +230,48 @@ a { color: var(--link); }
   background: radial-gradient(closest-side, var(--glow-b), transparent); }
 .glow-c { width: 64vmax; height: 56vmax; right: -26vmax; top: 18vh;
   background: radial-gradient(closest-side, var(--glow-c), transparent); }
+:root[data-theme="light"] .glow { display: none; }
+
+/* ribbons: --rise-x is where a layer's centre line meets the bottom of the
+   window, --rise how far above the bottom it is at the right-hand edge */
+.ribbons {
+  position: absolute; left: 0; bottom: -180px; width: 100%; height: 360px;
+  --rise-x: 80px; transform-origin: var(--rise-x) 180px;
+  transform: skewY(-24deg);
+  transform: skewY(atan2(calc(-1 * var(--rise)), calc(100vw - var(--rise-x))));
+}
+.ribbons-a { --rise: min(56vh, 60vw); }
+.ribbons-b { --rise: min(42vh, 46vw); }
+.ribbons-c { --rise: min(68vh, 74vw); }
+.ribbon { position: absolute; left: 0; top: 0; height: 100%; will-change: transform; background-repeat: repeat-x; background-position: 0 0; }
+.ribbon-a { width: calc(100vw + 1800px); background-size: 1800px 360px; background-image: url("/static/ribbons-dark-a.svg"); }
+.ribbon-b { width: calc(100vw + 2100px); background-size: 2100px 360px; background-image: url("/static/ribbons-dark-b.svg"); }
+.ribbon-c { width: calc(100vw + 1500px); background-size: 1500px 360px; background-image: url("/static/ribbons-dark-c.svg"); }
+:root[data-theme="light"] .ribbon-a { background-image: url("/static/ribbons-light-a.svg"); }
+:root[data-theme="light"] .ribbon-b { background-image: url("/static/ribbons-light-b.svg"); }
+:root[data-theme="light"] .ribbon-c { background-image: url("/static/ribbons-light-c.svg"); }
+
+/* sparkles */
+.sparkles { position: absolute; left: 0; top: 0; will-change: transform; background-repeat: repeat; background-position: 0 0; }
+.sparkles-a { width: calc(100% + 480px); height: calc(100% + 360px); background-size: 480px 360px; background-image: url("/static/sparkles-dark-a.svg"); }
+.sparkles-b { width: 100%; height: calc(100% + 630px); background-size: 840px 630px; background-image: url("/static/sparkles-dark-b.svg"); }
+:root[data-theme="light"] .sparkles-a { background-image: url("/static/sparkles-light-a.svg"); }
+:root[data-theme="light"] .sparkles-b { background-image: url("/static/sparkles-light-b.svg"); }
+
+/* motes: points of light that swell, drift up a little and fade */
 .motes { position: absolute; inset: 0; }
-.mote { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: var(--dust); opacity: .45; will-change: transform, opacity; }
-.mote:nth-child(3n) { width: 2px; height: 2px; background: var(--dust-2); }
-.mote:nth-child(4n) { width: 4px; height: 4px; opacity: .3; }
+.mote {
+  position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; opacity: .6;
+  background: radial-gradient(circle, var(--spark) 0 1.1px, var(--spark-halo) 1.7px, transparent 5px);
+  will-change: transform, opacity;
+}
+.mote:nth-child(3n) {
+  width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 0;
+  background:
+    radial-gradient(circle, var(--spark) 0 1.4px, var(--spark-halo) 2.2px, transparent 5px),
+    linear-gradient(90deg, transparent, var(--spark-halo) 42%, var(--spark) 50%, var(--spark-halo) 58%, transparent) 50% 50% / 100% 1px no-repeat,
+    linear-gradient(180deg, transparent, var(--spark-halo) 42%, var(--spark) 50%, var(--spark-halo) 58%, transparent) 50% 50% / 1px 100% no-repeat;
+}
 .mote:nth-child(1) { left: 8%; top: 14%; } .mote:nth-child(2) { left: 22%; top: 72%; }
 .mote:nth-child(3) { left: 31%; top: 34%; } .mote:nth-child(4) { left: 43%; top: 86%; }
 .mote:nth-child(5) { left: 52%; top: 9%; } .mote:nth-child(6) { left: 61%; top: 57%; }
@@ -196,15 +287,19 @@ a { color: var(--link); }
   :root:not([data-motion="off"]) .glow-a { animation: drift-a 38s steps(76) infinite alternate; }
   :root:not([data-motion="off"]) .glow-b { animation: drift-b 46s steps(92) infinite alternate; }
   :root:not([data-motion="off"]) .glow-c { animation: drift-c 54s steps(108) infinite alternate; }
-  /* motes: two keyframe segments too */
-  :root:not([data-motion="off"]) .mote { animation: float 12s steps(24) infinite alternate; }
-  :root:not([data-motion="off"]) .mote:nth-child(2n) { animation-duration: 15s; animation-timing-function: steps(30); animation-delay: -5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(3n) { animation-duration: 18s; animation-timing-function: steps(36); animation-delay: -9.5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(5n) { animation-duration: 10s; animation-timing-function: steps(20); animation-delay: -2.5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(7n) { animation-delay: -7.5s; }
-  /* the wave: one tile (one sidebar width) per cycle, a single segment */
-  :root:not([data-motion="off"]) .wave-a { animation: flow 60s steps(240) infinite; }
-  :root:not([data-motion="off"]) .wave-b { animation: flow 96s steps(384) infinite reverse; }
+  /* ribbons: one tile per cycle, a single segment; nearer layers move faster */
+  :root:not([data-motion="off"]) .ribbon-a { animation: ribbon-a 300s steps(1200) infinite; }
+  :root:not([data-motion="off"]) .ribbon-b { animation: ribbon-b 420s steps(1680) infinite; }
+  :root:not([data-motion="off"]) .ribbon-c { animation: ribbon-c 450s steps(1800) infinite; }
+  /* sparkles: one tile per cycle, a single segment */
+  :root:not([data-motion="off"]) .sparkles-a { animation: sparkles-a 240s steps(960) infinite; }
+  :root:not([data-motion="off"]) .sparkles-b { animation: sparkles-b 420s steps(1680) infinite; }
+  /* motes: two keyframe segments */
+  :root:not([data-motion="off"]) .mote { animation: twinkle 6s steps(12) infinite; }
+  :root:not([data-motion="off"]) .mote:nth-child(2n) { animation-duration: 7.5s; animation-timing-function: steps(15); animation-delay: -2.5s; }
+  :root:not([data-motion="off"]) .mote:nth-child(3n) { animation-duration: 9s; animation-timing-function: steps(18); animation-delay: -4.75s; }
+  :root:not([data-motion="off"]) .mote:nth-child(5n) { animation-duration: 5s; animation-timing-function: steps(10); animation-delay: -1.5s; }
+  :root:not([data-motion="off"]) .mote:nth-child(7n) { animation-delay: -3.25s; }
 }
 @keyframes drift-a {
   0% { transform: translate3d(0, 0, 0) scale(1); opacity: .82; }
@@ -221,12 +316,16 @@ a { color: var(--link); }
   50% { transform: translate3d(-10vw, 12vh, 0) scale(1.1); opacity: 1; }
   100% { transform: translate3d(-3vw, -6vh, 0) scale(1); opacity: .7; }
 }
-@keyframes float {
-  0% { transform: translate3d(0, 0, 0); opacity: .12; }
-  50% { opacity: .85; }
-  100% { transform: translate3d(4px, -30px, 0); opacity: .2; }
+@keyframes ribbon-a { from { transform: translate3d(-1800px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
+@keyframes ribbon-b { from { transform: translate3d(-2100px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
+@keyframes ribbon-c { from { transform: translate3d(-1500px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
+@keyframes sparkles-a { from { transform: translate3d(-480px, 0, 0); } to { transform: translate3d(0, -360px, 0); } }
+@keyframes sparkles-b { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(0, -630px, 0); } }
+@keyframes twinkle {
+  0% { transform: translate3d(0, 0, 0) scale(.4); opacity: 0; }
+  50% { transform: translate3d(3px, -9px, 0) scale(1); opacity: 1; }
+  100% { transform: translate3d(6px, -18px, 0) scale(.4); opacity: 0; }
 }
-@keyframes flow { to { transform: translate3d(-50%, 0, 0); } }
 
 /* --- controls ----------------------------------------------------------- */
 .btn {
@@ -289,11 +388,8 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
 /* --- app frame: sidebar + content --------------------------------------- */
 .app { position: relative; z-index: 1; display: flex; gap: 12px; height: 100vh; min-height: 0; padding: 10px 12px 10px 10px; }
 
-.sidebar {
-  flex: none; width: 236px; display: flex; flex-direction: column; min-height: 0; position: relative;
-  background: linear-gradient(180deg, var(--card-top), transparent 30%), var(--surface);
-  border: 1px solid var(--line-2); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow);
-}
+/* The sidebar has no panel: it sits on the same sky as the main area. */
+.sidebar { flex: none; width: 236px; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .sidebar-head { padding: 14px 12px 12px 14px; display: flex; align-items: center; gap: 12px; }
 .brand-logo { width: 58px; height: 58px; flex: none; filter: drop-shadow(0 0 12px rgba(110, 120, 255, .45)); }
 .brand-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -302,6 +398,8 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
   background: linear-gradient(95deg, #9C6BFF, #B57BFF); -webkit-background-clip: text; background-clip: text;
   color: transparent; -webkit-text-fill-color: transparent;
 }
+/* on the blue sky the violet is lightened so it still reads */
+:root[data-theme="light"] .sidebar .brand-pro { background-image: linear-gradient(95deg, #E9DFFF, #CDB8FF); text-shadow: none; }
 .brand-sub { font-size: 12.5px; color: var(--ink-2); letter-spacing: .005em; white-space: nowrap; }
 .sidebar-toggle { display: none; margin-left: auto; }
 
@@ -325,18 +423,15 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
 .nav-empty { margin: 8px 0; padding: 14px; border: 1px dashed var(--line-2); border-radius: var(--r-lg); display: grid; gap: 10px; color: var(--ink-2); font-size: 12.5px; }
 .nav-empty p { margin: 0; }
 
-.sidebar-foot { position: relative; flex: none; height: 124px; margin-top: auto; }
-.wave {
-  position: absolute; inset: 0; overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 45%, #000 85%, transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, #000 45%, #000 85%, transparent 100%);
+.sidebar-foot { position: relative; flex: none; min-height: 44px; margin-top: auto; display: flex; align-items: flex-end; padding: 8px 16px 12px; }
+/* ribbons can pass behind the credit: a soft shadow keeps it legible */
+.credit { position: relative; z-index: 0; margin: 0; font-size: 11.5px; color: var(--credit); letter-spacing: .02em; max-width: none;
+  text-shadow: 0 1px 2px rgba(3, 4, 16, .6), 0 0 8px rgba(3, 4, 16, .5); }
+.credit::before {
+  content: ""; position: absolute; z-index: -1; inset: -16px -30px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, var(--credit-scrim), transparent);
 }
-.wave-layer { position: absolute; left: 0; bottom: 0; height: 100%; background: url("/static/wave.svg") repeat-x 0 100% / 50% 100%; will-change: transform; }
-.wave-a { width: 200%; }
-.wave-b { width: 300%; height: 78%; opacity: .45; }
-:root[data-theme="light"] .wave-layer { opacity: .7; }
-:root[data-theme="light"] .wave-b { opacity: .3; }
-.credit { position: absolute; left: 16px; bottom: 12px; margin: 0; font-size: 11.5px; color: var(--ink-3); letter-spacing: .02em; max-width: none; }
+:root[data-theme="light"] .credit { text-shadow: var(--sky-shadow); }
 
 .content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
@@ -567,6 +662,8 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
   background: color-mix(in srgb, var(--teal) 7%, transparent);
   box-shadow: 0 0 24px -12px var(--teal);
 }
+/* in the Entropy view it stands on the sky, so in the light theme it is a card */
+:root[data-theme="light"] .entropy-big { background-color: var(--card); background-image: linear-gradient(color-mix(in srgb, var(--teal) 8%, transparent), color-mix(in srgb, var(--teal) 8%, transparent)); }
 .entropy-big-label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
 .entropy-big-value { font: 700 28px/1.1 var(--display); letter-spacing: -.02em; }
 .entropy-big-value small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 3px; }
@@ -692,6 +789,7 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .fn-list button[aria-current="true"] { background: var(--accent-wash); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent-strong); }
 .fn-list .fn-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fn-list .fn-size { opacity: .55; flex: none; }
+:root[data-theme="light"] .fn-list .fn-size { opacity: 1; color: var(--ink-3); }
 .listing { font: 400 12.5px/1.65 var(--mono); padding: 8px 0; }
 .insn { display: grid; grid-template-columns: 7.5em 9em minmax(0, 1.25fr) minmax(0, 1fr); gap: 0 12px; padding: 1px 14px; cursor: default; }
 .insn:hover { background: color-mix(in srgb, var(--accent-strong) 7%, transparent); }
@@ -943,7 +1041,12 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
   html { height: auto; }
   body { height: auto; min-height: 100vh; overflow: visible; font-size: 13.5px; }
   .app { flex-direction: column; height: auto; min-height: 100vh; padding: 8px; gap: 8px; }
-  .sidebar { width: auto; border-radius: var(--r-lg); }
+  /* on a phone the sidebar is a collapsible bar at the top whose menu drops
+     over the ribbons, so here it keeps a panel of its own */
+  .sidebar { width: auto; border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow);
+    background: linear-gradient(180deg, var(--card-top), transparent 30%), var(--surface); }
+  :root[data-theme="light"] .sidebar { background: rgba(14, 38, 148, .64); border-color: rgba(255, 255, 255, .26);
+    box-shadow: 0 16px 30px -22px rgba(6, 22, 92, .7); }
   .sidebar-head { gap: 10px; padding: 10px 12px; }
   .sidebar-toggle { display: inline-grid; }
   .brand-logo { width: 38px; height: 38px; }
@@ -951,8 +1054,8 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
   .brand-sub { font-size: 11.5px; }
   .nav { display: none; padding: 0 10px 10px; }
   .sidebar.is-open .nav { display: flex; }
-  .sidebar-foot { height: 54px; }
-  .wave-layer { height: 160%; }
+  .sidebar-foot { min-height: 0; padding: 0 14px 10px; }
+  .ribbons { --rise-x: -60px; }
   .content { min-height: 0; }
   .topbar { flex-wrap: wrap; padding: 0; }
   .filetabs { flex: 1 1 0; }
