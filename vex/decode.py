@@ -71,6 +71,16 @@ def _as_bytes(value) -> bytes:
     return str(value).encode("utf-8")
 
 
+def _encode(text: str, codec: str) -> bytes:
+    """``text.encode(codec)``; a character the codec cannot write (a lone
+    surrogate in UTF-8, anything above U+00FF in Latin-1) is a DecodeError
+    with the codec's own message."""
+    try:
+        return text.encode(codec)
+    except UnicodeEncodeError as exc:
+        raise DecodeError(str(exc)) from None
+
+
 def _parse_hex(value) -> bytes:
     """Lenient hex: spaces, newlines, ``0x``, ``,`` and ``:`` are ignored."""
     text = value.decode("latin-1") if isinstance(value, (bytes, bytearray)) else str(value)
@@ -196,7 +206,7 @@ _CHARSETS = {"utf-8": "utf-8", "utf-16le": "utf-16-le", "utf-16be": "utf-16-be",
 
 def _charset_decode(data: bytes, **params) -> bytes:
     name = params.get("from", "utf-8")
-    codec = _CHARSETS.get(name)
+    codec = _CHARSETS.get(name) if isinstance(name, str) else None
     if codec is None:
         raise DecodeError("from must be utf-8, utf-16le, utf-16be or latin-1")
     try:
@@ -298,7 +308,13 @@ def _atbash(data: bytes) -> bytes:
 def _vigenere(data: bytes, key="", mode="decrypt") -> bytes:
     if mode not in ("decrypt", "encrypt"):
         raise DecodeError("mode must be decrypt or encrypt")
-    shifts = [(ord(ch.upper()) - 65) for ch in str(key) if ch.isalpha()]
+    shifts = []
+    for ch in str(key):
+        if ch.isalpha():
+            upper = ch.upper()
+            if len(upper) != 1:         # "\u00df" is "SS", "\ufb01" is "FI"
+                raise DecodeError("vigenere needs a key of letters")
+            shifts.append(ord(upper) - 65)
     if not shifts:
         raise DecodeError("vigenere needs a key of letters")
     sign = 1 if mode == "encrypt" else -1
@@ -321,7 +337,11 @@ def _xor_with(data: bytes, key: bytes) -> bytes:
 
 
 def _xor(data: bytes, **params) -> bytes:
-    return _xor_with(data, _key_bytes(params, "xor"))
+    try:
+        key = _key_bytes(params, "xor")
+    except UnicodeEncodeError as exc:   # a lone surrogate in key_text
+        raise DecodeError(str(exc)) from None
+    return _xor_with(data, key)
 
 
 def _railfence(data: bytes, rails=2, mode="decrypt") -> bytes:
@@ -331,43 +351,38 @@ def _railfence(data: bytes, rails=2, mode="decrypt") -> bytes:
     if mode not in ("decrypt", "encrypt"):
         raise DecodeError("mode must be decrypt or encrypt")
     n = len(data)
-    if n == 0:
-        return b""
-    # The zig-zag row index for each of the n positions.
-    rows, r, step = [], 0, 1
-    for _ in range(n):
-        rows.append(r)
-        if r == 0:
-            step = 1
-        elif r == rails - 1:
-            step = -1
-        r += step
+    if rails >= n:
+        # Every byte has a rail to itself: the zig-zag never turns, and more
+        # rails change nothing (so a huge number of them costs nothing).
+        return bytes(data)
+    # The zig-zag repeats every `period` bytes; rail r holds the bytes at
+    # r, period - r, period + r, 2 * period - r, ... The cipher text is rail
+    # 0, then rail 1, and so on: `order` lists the positions in that order.
+    period = 2 * (rails - 1)
+    order: List[int] = []
+    for r in range(rails):
+        inner = 0 < r < rails - 1
+        for base in range(0, n, period):
+            if base + r < n:
+                order.append(base + r)
+            if inner and base + period - r < n:
+                order.append(base + period - r)
     if mode == "encrypt":
-        out = bytearray()
-        for target in range(rails):
-            for i, row in enumerate(rows):
-                if row == target:
-                    out.append(data[i])
-        return bytes(out)
-    # decrypt: fill the rails from the ciphertext, then read along the zig-zag.
-    counts = [rows.count(target) for target in range(rails)]
-    pos, rail_data = 0, []
-    for c in counts:
-        rail_data.append(bytearray(data[pos:pos + c]))
-        pos += c
+        return bytes(data[i] for i in order)
     out = bytearray(n)
-    idx = [0] * rails
-    for i, row in enumerate(rows):
-        out[i] = rail_data[row][idx[row]]
-        idx[row] += 1
+    for j, i in enumerate(order):
+        out[i] = data[j]
     return bytes(out)
+
+
+_BAD_MAP = "map must be a 26-letter permutation of the alphabet"
 
 
 def _substitution(data: bytes, map="") -> bytes:
     mapping = str(map)
     letters = [ch for ch in mapping if ch.isalpha()]
     if len(letters) != 26 or len({ch.upper() for ch in letters}) != 26:
-        raise DecodeError("map must be a 26-letter permutation of the alphabet")
+        raise DecodeError(_BAD_MAP)
     cipher = [ch.upper() for ch in letters]     # plain 'A'+i is enciphered as cipher[i]
     inverse = {cipher[i]: i for i in range(26)}  # cipher letter -> plain index
     out = bytearray(data)
@@ -375,7 +390,9 @@ def _substitution(data: bytes, map="") -> bytes:
         upper = 65 <= c <= 90
         lower = 97 <= c <= 122
         if upper or lower:
-            plain = inverse[chr(c).upper()]
+            plain = inverse.get(chr(c).upper())
+            if plain is None:           # 26 letters, but not A to Z
+                raise DecodeError(_BAD_MAP)
             out[i] = plain + (65 if upper else 97)
     return bytes(out)
 
@@ -565,6 +582,25 @@ _GROUP_ORDER = ["Encoding", "Decompress", "Classic cipher", "Symmetric", "Hash"]
 
 # --- applying operations ---------------------------------------------------
 
+def _not_an_object(name: str, params, allowed: set) -> str:
+    """Why parameters that are not an object (the HTTP API passes on any
+    JSON) fail: the first item of a list, or character of a string, that
+    names no parameter, else that they are not an object."""
+    if isinstance(params, (str, list)):
+        for key in params:
+            if isinstance(key, (list, dict)):
+                break
+            if key not in allowed:
+                return f"unknown parameter {key!r} for {name}"
+    return "params must be an object"
+
+
+def _unexpected(what: str, exc: Exception) -> str:
+    """The message for an exception nothing should raise (a bug): reported as
+    an ordinary failure rather than taking the caller down."""
+    return f"{what}: {type(exc).__name__}: {exc}"
+
+
 def apply_op(name: str, params: dict, data: bytes) -> bytes:
     """Run one operation, validating its name, parameters and the output cap."""
     op = REGISTRY.get(name)
@@ -573,6 +609,8 @@ def apply_op(name: str, params: dict, data: bytes) -> bytes:
     if not op.available():
         raise DecodeError(f"{name} is not available in this build")
     allowed = {p["name"] for p in op.params}
+    if not isinstance(params, dict):
+        raise DecodeError(_not_an_object(name, params, allowed))
     for key in params:
         if key not in allowed:
             raise DecodeError(f"unknown parameter {key!r} for {name}")
@@ -607,12 +645,16 @@ def execute(get_source: Callable[[], bytes],
             raise DecodeError("output too large")
     except DecodeError as exc:
         return ExecResult(False, b"", [], str(exc))
+    except Exception as exc:            # a bug: a failed source, not a crash
+        return ExecResult(False, b"", [], _unexpected("cannot read the source", exc))
     steps: List[dict] = []
     for name, params in recipe:
         try:
             new = apply_op(name, params or {}, data)
         except DecodeError as exc:
             return ExecResult(False, data, steps, str(exc))
+        except Exception as exc:        # a bug: a failed step, not a crash
+            return ExecResult(False, data, steps, _unexpected(f"{name} failed", exc))
         data = new
         steps.append({"op": name, "size": len(data)})
     return ExecResult(True, data, steps, None)
@@ -636,12 +678,12 @@ def source_bytes(kind: str, value: str = "", data: bytes = b"",
     """The starting bytes for a source. ``file`` slices ``data`` (already read
     from the open program or a path), bounded to what the file holds."""
     if kind == "text":
-        return str(value).encode("utf-8")
+        return _encode(str(value), "utf-8")
     if kind == "hex":
         return _parse_hex(value)
     if kind == "base64":
         return _from_base64(value if isinstance(value, (bytes, bytearray))
-                            else str(value).encode("latin-1"))
+                            else _encode(str(value), "latin-1"))
     if kind == "file":
         off = _as_int(offset, "offset") if offset not in (None, "") else 0
         if off < 0:
@@ -921,6 +963,9 @@ def solve(name: str, get_source: Callable[[], bytes]) -> dict:
         data = bytes(get_source())
     except DecodeError as exc:
         return {"ok": False, "candidates": [], "error": str(exc)}
+    except Exception as exc:            # a bug: a failed source, not a crash
+        return {"ok": False, "candidates": [],
+                "error": _unexpected("cannot read the source", exc)}
     data = data[:_SOLVE_CAP]
     try:
         candidates = solver(data)

@@ -567,8 +567,11 @@ def _cmd_decode(args, st):
     result = decode.result_object(er)
     out_msg = None
     if args.out and er.ok:
-        with open(args.out, "wb") as f:
-            f.write(er.data)
+        try:
+            with open(args.out, "wb") as f:
+                f.write(er.data)
+        except OSError as exc:      # not "cannot read": main() would blame --file
+            raise VexError(f"cannot write {args.out}: {exc.strerror or exc}") from None
         out_msg = f"wrote {len(er.data)} bytes to {os.path.abspath(args.out)}"
     return result, lambda d, s: _render_decode(d, er.data, out_msg, s)
 

@@ -24,8 +24,6 @@
 #include <windows.h>
 #include <ole2.h>               /* everything the SDK header itself includes... */
 #include <eventtoken.h>         /* ...so that only its own declarations follow */
-#include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -66,28 +64,13 @@ static struct {
 } g;
 
 /* A step-by-step record of how the window came up, appended to the file named
- * by %VEX_WINDOW_LOG% when that is set. A windowed program has nowhere to
- * print, so this is how a start-up problem gets diagnosed. */
-static void trace(const char *format, ...) {
-    wchar_t path[MAX_PATH];
-    DWORD n = GetEnvironmentVariableW(L"VEX_WINDOW_LOG", path, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH)
-        return;
-    FILE *log = _wfopen(path, L"a");
-    if (log == NULL)
-        return;
-    static ULONGLONG first;
-    ULONGLONG now = GetTickCount64();
-    if (first == 0)
-        first = now;
-    fprintf(log, "[%6lu ms] ", (unsigned long)(now - first));
-    va_list args;
-    va_start(args, format);
-    vfprintf(log, format, args);
-    va_end(args);
-    fputc('\n', log);
-    fclose(log);
-}
+ * by %VEX_WINDOW_LOG% when that is set (window.c). A windowed program has
+ * nowhere to print, so this is how a start-up problem gets diagnosed. */
+#define trace window_trace
+
+/* The window, for native_window_request_close() on other threads: set once it
+ * exists, cleared as it is destroyed. */
+static HWND volatile g_close_target;
 
 /* A number from the environment, for diagnosing start-up on a machine where it
  * goes wrong: %VEX_WINDOW_TIMEOUT_MS% is how long to wait for the engine. */
@@ -355,6 +338,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPAR
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
+        g_close_target = NULL;
         release_webview();
         g.hwnd = NULL;
         PostQuitMessage(0);
@@ -427,10 +411,17 @@ static CreateEnvironmentFn load_loader(void) {
         return NULL;
     wcscpy(slash + 1, LOADER_NAME);
     HMODULE loader = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (loader == NULL)
+    if (loader == NULL) {
+        /* 126: not there. 193: not a 64-bit DLL. */
+        trace("native window: could not load the loader (error %lu)",
+              (unsigned long)GetLastError());
         return NULL;
-    return (CreateEnvironmentFn)(void (*)(void))GetProcAddress(
+    }
+    CreateEnvironmentFn create = (CreateEnvironmentFn)(void (*)(void))GetProcAddress(
         loader, "CreateCoreWebView2EnvironmentWithOptions");
+    if (create == NULL)
+        trace("native window: the loader has no CreateCoreWebView2EnvironmentWithOptions");
+    return create;
 }
 
 /* %LOCALAPPDATA%\vex\WebView2: the engine keeps its cache and settings there.
@@ -449,7 +440,7 @@ static bool data_folder(wchar_t *out, size_t cap) {
 /* --- the entry point --------------------------------------------------------- */
 
 void native_window_request_close(void) {
-    HWND hwnd = g.hwnd;                 /* read once: the main thread clears it */
+    HWND hwnd = g_close_target;         /* read once: the main thread clears it */
     if (hwnd != NULL)
         PostMessageW(hwnd, WM_CLOSE, 0, 0);
 }
@@ -459,9 +450,14 @@ NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
     g.on_shown = on_shown;
     CreateEnvironmentFn create_environment = load_loader();
     wchar_t data[MAX_PATH + 64];
-    trace("native window: loader %s", create_environment != NULL ? "found" : "not found");
-    if (create_environment == NULL || url == NULL || !data_folder(data, MAX_PATH + 64))
+    trace("native window: loader %s", create_environment != NULL ? "found"
+          : "not found (WebView2Loader.dll must be next to the program)");
+    if (create_environment == NULL || url == NULL)
         return NATIVE_UNAVAILABLE;
+    if (!data_folder(data, MAX_PATH + 64)) {
+        trace("native window: no folder for the engine's data (%%LOCALAPPDATA%%\\vex)");
+        return NATIVE_UNAVAILABLE;
+    }
 
     int url_chars = MultiByteToWideChar(CP_UTF8, 0, url, -1, NULL, 0);
     if (url_chars <= 0)
@@ -475,6 +471,7 @@ NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
     be_dpi_aware();
     HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (FAILED(com)) {
+        trace("native window: COM could not start: 0x%08lx", (unsigned long)com);
         free(g.url);
         return NATIVE_UNAVAILABLE;
     }
@@ -498,7 +495,11 @@ NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
                                  CW_USEDEFAULT, WIDTH_AT_96_DPI, HEIGHT_AT_96_DPI, NULL, NULL,
                                  instance, NULL);
     }
+    if (g.hwnd == NULL)
+        trace("native window: could not create the window (error %lu)",
+              (unsigned long)GetLastError());
     if (g.hwnd != NULL) {
+        g_close_target = g.hwnd;
         place_window(g.hwnd);
         match_system_theme(g.hwnd);
         SetTimer(g.hwnd, STARTUP_TIMER,
@@ -523,6 +524,7 @@ NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
         }
     }
 
+    g_close_target = NULL;
     release_webview();
     free(g.url);
     g.url = NULL;

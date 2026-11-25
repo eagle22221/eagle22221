@@ -63,4 +63,17 @@ void window_message(const char *text);
  * Does nothing where there is a console. */
 void window_stop_box(const char *text, void (*on_dismiss)(void));
 
+/* --- diagnosis ----------------------------------------------------------------- */
+
+/* One line, "[  1234 ms] text", appended to the file named by %VEX_WINDOW_LOG%
+ * ($VEX_WINDOW_LOG) when that is set, and nothing otherwise. The front ends
+ * and `vex gui` record each step there, so a start-up problem in a program
+ * with nowhere to print can be diagnosed from the file alone. Times count
+ * from the first line of the run. Only plain printf conversions (%s, %d, %u,
+ * %lu, %x, %lx) are used with it: it runs on any C runtime. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 1, 2)))
+#endif
+void window_trace(const char *format, ...);
+
 #endif

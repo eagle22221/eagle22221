@@ -13,9 +13,9 @@ What the C edition does not have (`aes` in GCM mode, `des`, `3des`,
 `bunzip2`, `unxz`) must be in its catalogue as unavailable and fail with
 "<name> is not available in this build".
 
-Where the Python edition stops with an internal error (a traceback on the
-command line, HTTP 500) there is nothing to match: the C edition must then
-fail cleanly. Those cases are listed in `PYTHON_STOPS`.
+Inputs that once stopped the Python edition (a traceback on the command
+line, HTTP 500, or hours of work) are compared like any others: the two
+editions must fail them alike, with the same message (`ONCE_STOPPED_PYTHON`).
 
 `VEX_TEST_SANITIZED=1` runs everything with the AddressSanitizer/UBSan build;
 `test_hostile_input_is_safe_under_asan` always does. `VEX_TEST_C_BUILD=DIR`
@@ -292,7 +292,7 @@ WORKING_PARAMS = {
 def test_operation_matches_python_on_plain_inputs(both, name):
     succeeded = 0
     for label, data in PLAIN.items():
-        if len(data) > 5000 and name in ("railfence", "vigenere", "substitution", "rc4",
+        if len(data) > 5000 and name in ("vigenere", "substitution", "rc4",
                                          "chacha20", "aes", "from-base85"):
             data = data[:5000]          # slow in pure Python; the fuzz goes further
         result = run_both(both, data, [(name, WORKING_PARAMS.get(name, {}))])
@@ -411,21 +411,25 @@ def test_railfence_every_shape(both):
     assert result["ok"] and result["size"] == 0
 
 
-def test_railfence_with_more_rails_than_python_can_count(c_client):
-    """The Python edition walks through every rail, one by one, and makes a
-    list as long as their number: a large `rails` keeps it busy for hours or
-    uses up the memory. Past the length of the data more rails change
-    nothing, which is all the C edition needs to know."""
+def test_railfence_with_more_rails_than_bytes(both):
+    """Past the length of the data more rails change nothing, and cost
+    nothing: the text comes out as it went in, in no time. (The Python
+    edition once went through every rail, one by one, for hours.)"""
     data = bytes(range(33, 33 + 90))
+    start = time.monotonic()
     for rails in (90, 91, 5000, 10 ** 9, 2 ** 64, 10 ** 40, "0x" + "f" * 60, "9" * 4300):
         for mode in ("encrypt", "decrypt"):
-            status, result = c_client.post("decode", {
-                "source": hex_source(data),
-                "recipe": [{"op": "railfence", "params": {"rails": rails, "mode": mode}}]})
-            assert status == 200 and result["ok"] and bytes.fromhex(result["hex"]) == data
-    # what Python does compute, for as many rails as the data is long
-    assert decode.apply_op("railfence", {"rails": 90, "mode": "encrypt"}, data) == data
-    assert decode.apply_op("railfence", {"rails": 89, "mode": "encrypt"}, data) != data
+            expect(both, data, [("railfence", {"rails": rails, "mode": mode})], data)
+    assert time.monotonic() - start < 60
+    for size in (1, 2, 3, 89, 90):
+        for rails in (size - 1, size, size + 1):
+            if rails >= 2:
+                sealed = run_both(both, data[:size], [("railfence", {"rails": rails,
+                                                                     "mode": "encrypt"})])
+                expect(both, bytes.fromhex(sealed["hex"]), [("railfence", {"rails": rails})],
+                       data[:size])
+    assert run_both(both, data, [("railfence", {"rails": 89, "mode": "encrypt"})])["hex"] != \
+        data.hex()
 
 
 def test_hash(both):
@@ -827,8 +831,6 @@ def test_parameter_values_of_every_kind(both, name):
     run_both(both, data, [(name, base)])
     for p in spec.params:
         for value in ODD_VALUES:
-            if python_stops(name, p["name"], value, base):
-                continue
             run_both(both, data, [(name, dict(base, **{p["name"]: value}))])
         without = {k: v for k, v in base.items() if k != p["name"]}
         run_both(both, data, [(name, without)])
@@ -836,34 +838,7 @@ def test_parameter_values_of_every_kind(both, name):
     run_both(both, data, [(name, {"bogus": 1})])
 
 
-def python_stops(name, param, value, base=None):
-    """Does the Python edition stop with an internal error on this parameter
-    value (see PYTHON_STOPS; the C edition fails the step instead), or never
-    come back (see test_railfence_with_more_rails_than_python_can_count)?"""
-    def letters(text):
-        return [ch for ch in text if ch.isalpha()]
-    if name == "railfence" and param == "rails" and not isinstance(value, bool):
-        try:
-            return int(str(value).strip(), 0) > 3000
-        except ValueError:
-            return False
-    if isinstance(value, str) and any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
-        if name == "xor" and param == "key_text":
-            return not (base or {}).get("key") or param == "key"
-        return False
-    if name == "charset-decode" and param == "from" and isinstance(value, (list, dict)):
-        return True                     # unhashable: TypeError
-    if name == "vigenere" and param == "key":
-        return any(len(ch.upper()) != 1 for ch in letters(str(value)))
-    if name == "substitution" and param == "map":
-        found = letters(str(value))
-        if len(found) != 26 or len({ch.upper() for ch in found}) != 26:
-            return False
-        return {ch.upper() for ch in found} != set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    return False
-
-
-def test_parameters_that_are_not_an_object(both, c_client):
+def test_parameters_that_are_not_an_object(both):
     data = b"abc"
     for params in ("", [], {}, None, 0, False):
         expect(both, data, [("rot13", params)], b"nop")
@@ -875,15 +850,19 @@ def test_parameters_that_are_not_an_object(both, c_client):
     refused(both, data, [("rot-n", [1.5])], "unknown parameter 1.5 for rot-n")
     refused(both, data, [("rot-n", "n=1")], "unknown parameter '=' for rot-n")
     refused(both, data, [("nothing", [1, 2])], "unknown operation: 'nothing'")
-    # Where Python would go on with something that is not an object it stops
-    # with an internal error; the C edition fails the step.
-    for params in ("n", ["n"], [["n"]], [{"n": 1}], 5, True, 1.5):
-        status, result = c_client.post("decode", {
-            "source": hex_source(data), "recipe": [{"op": "to-hex", "params": {}},
-                                                   {"op": "rot-n", "params": params}]})
-        assert status == 200 and result["ok"] is False
+    # Where every name is a parameter (or a list holds a list or an object),
+    # what is not an object fails the step. (Python once stopped here with an
+    # internal error.)
+    for params in ("n", "nn", ["n"], [["n"]], [{"n": 1}], ["n", ["x"], "zz"], ["n", {"x": 1}],
+                   5, -1, True, 1.5):
+        result = refused(both, data, [("to-hex", {}), ("rot-n", params)],
+                         "params must be an object")
         assert result["error"] == "params must be an object"
         assert result["steps"] == [{"op": "to-hex", "size": 6}]
+    refused(both, data, [("xor", ["key", "key_text"])], "params must be an object")
+    status, result = both("decode", b'{"source": {"kind": "text", "value": "x"}, '
+                                    b'"recipe": [{"op": "rot-n", "params": NaN}]}')
+    assert status == 200 and result["error"] == "params must be an object"
 
 
 # --- sources --------------------------------------------------------------------
@@ -896,20 +875,17 @@ SOURCE_VALUES = ["", "plain", "caf\u00e9 \u2603 \U0001f600", "  spaced  ", "\x00
                  "aGVsbG8=", "aGVsbG8", "aGVs bG8=\n", "aGVsbG8==", "=aGVsbG8", "aGV=sbG8",
                  "aGVsbG8=x", "a", "ab", "abc", "abcd", "abcde", "ab==", "ab=", "ab===", "a===",
                  "ab==cd", "ab=c", "a b c d", "ab\tcd\r\nef==", "a-b_", "a+b/", "!!!!", "caf\u00e9",
-                 "YQ==YQ==", "YQ=\n=", "YWI=", "YWI", "YWJj", "====", "="]
+                 "YQ==YQ==", "YQ=\n=", "YWI=", "YWI", "YWJj", "====", "=",
+                 # not UTF-8 (a lone surrogate), not Latin-1 (for base64)
+                 "a\ud800b", "\udcff", "\ud800\ud800\ud800x\udc00", "aGk\u20ac", "\u0100",
+                 ["\u20ac"], ["\udc80"], {"\udc80": 1}]
 
 
-def test_sources_of_every_kind(both, c_client, py_client):
+def test_sources_of_every_kind(both):
     for kind in ("text", "hex", "base64"):
         for value in SOURCE_VALUES:
-            payload = {"source": {"kind": kind, "value": value}, "recipe": []}
-            if kind == "base64" and isinstance(value, str) and any(ord(ch) > 255 for ch in value):
-                # not Latin-1: an internal error in Python, a failed source here
-                assert py_client.post("decode", payload)[0] == 500
-                status, result = c_client.post("decode", payload)
-                assert status == 200 and "'latin-1' codec can't encode" in result["error"]
-                continue
-            both("decode", payload)
+            both("decode", {"source": {"kind": kind, "value": value}, "recipe": []})
+            both("decode/solve", {"source": {"kind": kind, "value": value}, "name": "caesar"})
         both("decode", {"source": {"kind": kind}})
         both("decode", {"source": {"kind": kind, "value": "6869", "extra": 1},
                         "recipe": [{"op": "to-hex"}]})
@@ -924,6 +900,15 @@ def test_sources_of_every_kind(both, c_client, py_client):
     status, result = both("decode", {"source": {"kind": "base64", "value": "a"}})
     assert result["error"] == ("invalid base64: Invalid base64-encoded string: number of data "
                                "characters (1) cannot be 1 more than a multiple of 4")
+    # text that cannot be UTF-8, base64 that cannot be Latin-1: a failed source
+    status, result = both("decode", {"source": {"kind": "text", "value": "a\ud800b"}})
+    assert status == 200 and result["ok"] is False and result["error"] == (
+        "'utf-8' codec can't encode character '\\ud800' in position 1: surrogates not allowed")
+    status, result = both("decode/solve", {"source": {"kind": "base64", "value": "aGk\u20ac"},
+                                           "name": "caesar"})
+    assert status == 200 and result == {"ok": False, "candidates": [], "error": (
+        "'latin-1' codec can't encode character '\\u20ac' in position 3: ordinal not in "
+        "range(256)")}
 
 
 def test_file_source_ranges(both):
@@ -965,6 +950,12 @@ def test_file_source_errors_match_python(both, tmp_path):
     notes.write_text("plain text, not a program\n" * 3)
     for source in ({"kind": "file"}, {"kind": "file", "path": ""}, {"kind": "file", "path": None},
                    {"kind": "file", "path": 0}, {"kind": "file", "path": []},
+                   # not text, or text no file can be named with
+                   {"kind": "file", "path": 5}, {"kind": "file", "path": ["a"]},
+                   {"kind": "file", "path": {"a": 1}}, {"kind": "file", "path": True},
+                   {"kind": "file", "path": 1.5}, {"kind": "file", "path": "a\x00b"},
+                   {"kind": "file", "path": "\x00"}, {"kind": "file", "path": "\ud800"},
+                   {"kind": "file", "path": str(tmp_path / "x\udfffy")},
                    {"kind": "file", "path": str(tmp_path / "missing")},
                    {"kind": "file", "path": str(notes)},
                    {"kind": "file", "path": str(tmp_path / "missing"), "offset": "bad"}):
@@ -1302,7 +1293,7 @@ def test_damaged_encodings_match_python(both):
                                                        "f e d c b a 123 !"})], b"Zyx cba")
 
 
-def test_letters_of_any_script_in_keys_and_maps(both, c_client):
+def test_letters_of_any_script_in_keys_and_maps(both):
     """Python takes every Unicode letter for a Vigenere key and a substitution
     map; so does the C edition."""
     data = b"Attack at dawn, said Zo\xc3\xab."
@@ -1323,16 +1314,23 @@ def test_letters_of_any_script_in_keys_and_maps(both, c_client):
     expect(both, b"1234 !?", [("substitution", {"map": greek})], b"1234 !?")
     half = "abcdefghijklm" + greek[:13]
     expect(both, b"Abc 123 mlk", [("substitution", {"map": half})], b"Abc 123 mlk")
-    # ... and where Python stops with a KeyError or a TypeError, a failed step
-    for recipe, message in (
-            ([("substitution", {"map": greek})], "map must be a 26-letter permutation"),
-            ([("substitution", {"map": half})], "map must be a 26-letter permutation"),
-            ([("vigenere", {"key": "stra\u00dfe"})], "vigenere needs a key of letters"),
-            ([("vigenere", {"key": "\ufb01"})], "vigenere needs a key of letters")):
-        status, result = c_client.post("decode", {
-            "source": {"kind": "text", "value": "Hello nop"},
-            "recipe": [{"op": name, "params": params} for name, params in recipe]})
-        assert status == 200 and result["ok"] is False and message in result["error"]
+    # ... and a failed step at the first letter that needs them (Python once
+    # stopped there with a KeyError)
+    for data in (b"Hello nop", b"abc", b"xyz", b"Abc 123 mlk z"):
+        for mapping in (greek, half):
+            if mapping is greek or any(ch in data.lower() for ch in b"nopqrstuvwxyz"):
+                refused(both, data, [("to-hex", {}), ("from-hex", {}),
+                                     ("substitution", {"map": mapping})],
+                        "map must be a 26-letter permutation of the alphabet")
+    # a key letter whose upper case is two letters (or three) is no key letter
+    # (Python once stopped there with a TypeError)
+    for key in ("stra\u00dfe", "\u00df", "\ufb01", "\u0390", "key\ufb01", ["\u00df"]):
+        for mode in ("encrypt", "decrypt"):
+            result = refused(both, b"Hello nop", [("vigenere", {"key": key, "mode": mode})],
+                             "vigenere needs a key of letters")
+            assert result["error"] == "vigenere needs a key of letters"
+    refused(both, b"Hello", [("vigenere", {"key": "\u00df", "mode": "x"})],
+            "mode must be decrypt or encrypt")
 
 
 # --- solvers --------------------------------------------------------------------
@@ -1734,13 +1732,14 @@ def test_cli_out_writes_the_bytes_and_never_overwrites(c_binary, tmp_path):
         assert sorted(p.name for p in folder.iterdir()) == sorted(
             ["out.bin", "quiet.bin", "rel.bin"] + (["dangling", "link", "target.bin"]
                                                    if os.name != "nt" else []))
-    # Where the file cannot be written: exit 1 from both (Python blames the
-    # --file argument, "cannot read None", which the C edition does not copy).
+    # Where the file cannot be written: the same one line and exit 1 from both.
     target = tmp_path / "no-such-folder" / "out.bin"
-    c, py = run_c(c_binary, "decode", "abc", "--out", target), \
-        run_python("decode", "abc", "--out", target)
-    assert c[0] == py[0] == 1 and c[1] == py[1] == ""
-    assert c[2] == f"vex: error: cannot write {target}: No such file or directory\n"
+    assert same_cli(c_binary, "decode", "abc", "--out", target) == (
+        1, "", f"vex: error: cannot write {target}: No such file or directory\n")
+    blocker = tmp_path / "a-file"
+    blocker.write_bytes(b"")
+    assert same_cli(c_binary, "--json", "decode", "abc", "--out", blocker / "out.bin") == (
+        1, "", f"vex: error: cannot write {blocker / 'out.bin'}: Not a directory\n")
 
 
 def test_practice_puzzles(c_binary, both):
@@ -1837,6 +1836,26 @@ def json_bodies():
         value('["\\ud800", "x\\udfff", "\\u00e9", "\\u200b", "\\u0378", "\\ue000", "\\ufffe"]'),
         value('{"\\u0000": "\\u0000"}'), value("[" * 100 + "]" * 100),
         value("[" * 510 + "]" * 510), value('{"a":' * 300 + "1" + "}" * 300),
+        # nested deeper than 512 levels (2 + 511), however that is spelt
+        value("[" * 511 + "]" * 511), value('{"a":' * 511 + "1" + "}" * 511),
+        value("[" * 600 + "]" * 599), value("[" * 600 + "]" * 600),
+        value('"' + "[{" * 2000 + '\\"[{"'), b"[" * 512 + b"]" * 512, b"[" * 513 + b"]" * 513,
+        b'"' + b"[{" * 3000 + b'"', b'["' + b"]" * 3000 + b'"]',
+        b'{"source": {"kind": "text", "value": ' + b"[" * 600 + b"]" * 600 +
+        b', "value": "the earlier value counts"}}',
+        ('{"source": {"kind": "text", "value": %s}}' % ("[" * 511 + "]" * 511)).encode("utf-16"),
+        # a recipe, parameters or a path of the wrong JSON type
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": 5}',
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": true}',
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": -0.5}',
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": NaN}',
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": 1e400}',
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": [{"op": "rot-n", "params": 5}]}',
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": [{"op": "rot-n", "params": "n"}]}',
+        b'{"source": {"kind": "text", "value": "x"}, "recipe": [{"op": "rot-n", "params": [["n"]]}]}',
+        b'{"source": {"kind": "file", "path": 5}}', b'{"source": {"kind": "file", "path": ["a"]}}',
+        b'{"source": {"kind": "file", "path": "a\\u0000b"}}',
+        b'{"source": {"kind": "file", "path": "\\ud800"}}',
         b'{"source": {"kind": "text", "value": "\xff"}}', b'{"source": {"kind": "text", "value": "\xc3"}}',
         b'{"source": {"kind": "text", "value": "\xed\xa0\x80"}}',
         b'{"source": {"kind": "text", "value": "\xed\xa0"}}',
@@ -1862,26 +1881,19 @@ def json_bodies():
 
 
 def agree(c, py, case):
-    """The two servers' answers to one request. Where the Python edition
-    stops with an internal error the C edition must fail cleanly."""
-    if py[0] == 500:
-        assert py[1]["error"].startswith("internal error: "), case
-        assert c[0] in (200, 400) and (c[0] == 400 or c[1]["ok"] is False), (case, c)
-        return False
+    """The two servers' answers to one request: the same, and never an
+    internal error."""
     assert c == py, case
-    return True
+    assert py[0] in (200, 400, 404), (case, py)
 
 
 @pytest.mark.parametrize("route", ["decode", "decode/solve"])
 def test_request_bodies_match_python(c_client, py_client, route):
-    matched = stopped = 0
-    for body in json_bodies():
+    bodies = json_bodies()
+    for body in bodies:
         c, py = c_client.request("POST", route, body), py_client.request("POST", route, body)
-        if agree(c, py, body[:120]):
-            matched += 1
-        else:
-            stopped += 1
-    assert matched > 180 and stopped < 15, (matched, stopped)
+        agree(c, py, body[:120])
+    assert len(bodies) > 200
 
 
 def test_json_values_read_like_python(both):
@@ -1921,9 +1933,8 @@ def test_json_values_read_like_python(both):
     for value in strings + [nested, 1.5, 10 ** 22, None, True]:
         both("decode", {"source": hex_source(b"Hello"),
                         "recipe": [{"op": "xor", "params": {"key_text": value}}]})
-        if not python_stops("vigenere", "key", value):
-            both("decode", {"source": hex_source(b"Hello"),
-                            "recipe": [{"op": "vigenere", "params": {"key": value}}]})
+        both("decode", {"source": hex_source(b"Hello"),
+                        "recipe": [{"op": "vigenere", "params": {"key": value}}]})
         both("decode", {"source": hex_source(b"Hello"),
                         "recipe": [{"op": value, "params": {"n": value}}]})
         both("decode/solve", {"source": hex_source(b"Hello"), "name": value})
@@ -1952,16 +1963,14 @@ def test_damaged_json_matches_python(c_client, py_client):
                          "recipe": [{"op": "railfence", "params": {"rails": 2.0, "mode": []}}],
                          "name": "substitution"}).encode()]
     alphabet = b'{}[]":,\\ \n0123456789.eE+-truefalsnNIaiyu\x00\x1f\x7f\x80\xc3\xa9\xed\xa0\xff'
-    matched = stopped = 0
+    compared = 0
     for seed in seeds:
         for body in mutations(rng, seed, 450, alphabet):
             for route in ("decode", "decode/solve"):
                 c, py = c_client.request("POST", route, body), py_client.request("POST", route, body)
-                if agree(c, py, body):
-                    matched += 1
-                else:
-                    stopped += 1
-    assert matched > 3000 and stopped < matched // 20
+                agree(c, py, body)
+                compared += 1
+    assert compared > 3000
 
 
 def test_api_wrong_method_token_and_route(c_client, py_client):
@@ -1978,65 +1987,91 @@ def test_api_wrong_method_token_and_route(c_client, py_client):
         py_client.request("POST", "decode", GOOD.encode())
 
 
-# Requests the Python edition answers with an internal error (HTTP 500, or a
-# traceback on the command line). The C edition answers each cleanly.
-PYTHON_STOPS = [
+GREEK_MAP = ("\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b7\u03b8\u03b9\u03ba\u03bb\u03bc\u03bd"
+             "\u03be\u03bf\u03c0\u03c1\u03c3\u03c4\u03c5\u03c6\u03c7\u03c8\u03c9\u03ac\u03ad")
+NOT_UTF8 = "'utf-8' codec can't encode character '\\{}' in position {}: surrogates not allowed"
+NOT_LATIN1 = ("'latin-1' codec can't encode character '\\{}' in position {}: ordinal not in "
+              "range(256)")
+TEXT_X = {"kind": "text", "value": "x"}
+
+# Requests the Python edition once answered with an internal error (HTTP 500),
+# and the answer both editions now give: (route, body, status, error).
+ONCE_STOPPED_PYTHON = [
     # a lone surrogate cannot be written as UTF-8 (text source, xor key_text)
-    ("decode", {"source": {"kind": "text", "value": "a\ud800b"}}),
-    ("decode", {"source": {"kind": "text", "value": "x"},
-                "recipe": [{"op": "xor", "params": {"key_text": "\udc80"}}]}),
+    ("decode", {"source": {"kind": "text", "value": "a\ud800b"}}, 200, NOT_UTF8.format("ud800", 1)),
+    ("decode/solve", {"source": {"kind": "text", "value": "a\ud800b"}, "name": "caesar"}, 200,
+     NOT_UTF8.format("ud800", 1)),
+    ("decode", {"source": TEXT_X, "recipe": [{"op": "xor", "params": {"key_text": "\udc80"}}]},
+     200, NOT_UTF8.format("udc80", 0)),
     # a base64 source with a character above U+00FF cannot be written as Latin-1
-    ("decode", {"source": {"kind": "base64", "value": "aGk\u20ac"}}),
-    ("decode/solve", {"source": {"kind": "base64", "value": "\u0100"}, "name": "caesar"}),
-    # a list where a name is looked up
-    ("decode", {"source": {"kind": "text", "value": "x"},
-                "recipe": [{"op": "charset-decode", "params": {"from": ["utf-8"]}}]}),
+    ("decode", {"source": {"kind": "base64", "value": "aGk\u20ac"}}, 200,
+     NOT_LATIN1.format("u20ac", 3)),
+    ("decode/solve", {"source": {"kind": "base64", "value": "\u0100"}, "name": "caesar"}, 200,
+     NOT_LATIN1.format("u0100", 0)),
+    # a list or an object where a name is looked up
+    ("decode", {"source": TEXT_X, "recipe": [{"op": "charset-decode", "params": {"from": ["utf-8"]}}]},
+     200, "from must be utf-8, utf-16le, utf-16be or latin-1"),
+    ("decode", {"source": TEXT_X, "recipe": [{"op": "charset-decode", "params": {"from": {"a": 1}}}]},
+     200, "from must be utf-8, utf-16le, utf-16be or latin-1"),
     # parameters, a recipe or a path of the wrong JSON type
-    ("decode", {"source": {"kind": "text", "value": "x"}, "recipe": [{"op": "rot-n", "params": 5}]}),
-    ("decode", {"source": {"kind": "text", "value": "x"}, "recipe": 5}),
-    ("decode", {"source": {"kind": "text", "value": "x"}, "recipe": True}),
-    ("decode", {"source": {"kind": "file", "path": 5}}),
-    ("decode", {"source": {"kind": "file", "path": ["a"]}}),
-    ("decode", {"source": {"kind": "file", "path": "a\x00b"}}),
+    ("decode", {"source": TEXT_X, "recipe": [{"op": "rot-n", "params": 5}]}, 200,
+     "params must be an object"),
+    ("decode", {"source": TEXT_X, "recipe": [{"op": "rot-n", "params": ["n"]}]}, 200,
+     "params must be an object"),
+    ("decode", {"source": TEXT_X, "recipe": 5}, 400, "recipe must be a list of steps"),
+    ("decode", {"source": TEXT_X, "recipe": True}, 400, "recipe must be a list of steps"),
+    ("decode", {"source": TEXT_X, "recipe": 1.5}, 400, "recipe must be a list of steps"),
+    ("decode", {"source": {"kind": "file", "path": 5}}, 400, "a file source needs a path"),
+    ("decode", {"source": {"kind": "file", "path": ["a"]}}, 400, "a file source needs a path"),
+    ("decode", {"source": {"kind": "file", "path": "a\x00b"}}, 400, "a file source needs a path"),
+    ("decode/solve", {"source": {"kind": "file", "path": "a\x00b"}, "name": "caesar"}, 400,
+     "a file source needs a path"),
     # letters whose upper case is not one letter, and maps of other letters
     ("decode", {"source": {"kind": "text", "value": "abc"},
-                "recipe": [{"op": "vigenere", "params": {"key": "stra\u00dfe"}}]}),
+                "recipe": [{"op": "vigenere", "params": {"key": "stra\u00dfe"}}]}, 200,
+     "vigenere needs a key of letters"),
     ("decode", {"source": {"kind": "text", "value": "abc"},
-                "recipe": [{"op": "substitution", "params": {
-                    "map": "\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b7\u03b8\u03b9\u03ba\u03bb"
-                           "\u03bc\u03bd\u03be\u03bf\u03c0\u03c1\u03c3\u03c4\u03c5\u03c6\u03c7"
-                           "\u03c8\u03c9\u03ac\u03ad"}}]}),
+                "recipe": [{"op": "vigenere", "params": {"key": "\ufb01"}}]}, 200,
+     "vigenere needs a key of letters"),
+    ("decode", {"source": {"kind": "text", "value": "abc"},
+                "recipe": [{"op": "substitution", "params": {"map": GREEK_MAP}}]}, 200,
+     "map must be a 26-letter permutation of the alphabet"),
 ]
 
 
-def test_where_python_stops_the_c_edition_fails_cleanly(c_client, py_client):
-    for route, payload in PYTHON_STOPS:
-        py = py_client.post(route, payload)
-        assert py[0] == 500, (payload, py)
-        status, result = c_client.post(route, payload)
-        assert status in (200, 400), payload
+def test_what_once_stopped_python_fails_alike(both):
+    for route, payload, status, error in ONCE_STOPPED_PYTHON:
+        got_status, result = both(route, payload)
+        assert got_status == status and result["error"] == error, (payload, result)
         if status == 200:
-            assert result["ok"] is False and result["error"], payload
+            assert result["ok"] is False
         else:
             assert set(result) == {"error"}
-    # JSON nested deeper than the C reader goes: Python reads on (to a depth of
-    # several thousand, then stops with a RecursionError)
-    deep = b'{"source": {"kind": "text", "value": ' + b"[" * 600 + b"]" * 600 + b"}}"
-    assert py_client.request("POST", "decode", deep)[0] == 200
-    assert c_client.request("POST", "decode", deep) == (400, {"error": "request body must be JSON"})
-    deeper = b'{"source": {"kind": "text", "value": ' + b"[" * 200000 + b"]" * 200000 + b"}}"
-    assert py_client.request("POST", "decode", deeper)[0] == 500
-    assert c_client.request("POST", "decode", deeper)[0] == 400
 
 
-def test_cli_where_python_stops(c_binary):
-    """Arguments that are not UTF-8, or not Latin-1 for --base64: a traceback
-    from Python, one line and exit status 1 from the C edition."""
+def test_json_nested_deeper_than_512_levels(both):
+    """The C reader goes 512 levels deep; Python used to read on (to a depth
+    of some thousands, then stop with a RecursionError). Now both refuse."""
+    def nested(levels):              # the body, the source and `levels` lists: 2 + levels
+        return b'{"source": {"kind": "text", "value": ' + b"[" * levels + b"]" * levels + b"}}"
+    for route in ("decode", "decode/solve"):
+        status, result = both(route, nested(510))
+        assert status == 200 and result["ok"]
+        for levels in (511, 600, 5000, 200000):
+            assert both(route, nested(levels)) == (400, {"error": "request body must be JSON"})
+
+
+def test_cli_arguments_that_are_not_utf8(c_binary):
+    """Arguments that are not UTF-8, or not Latin-1 for --base64: a failed
+    source, shown like any other, exit status 1, from both. (Python once
+    stopped with a traceback.)"""
     for args in (["decode", b"caf\xe9"], ["decode", "--text", b"\xff"],
-                 ["decode", "--base64", "aGk\u20ac"]):
-        code, out, err = run_c(c_binary, *args)
-        assert code == 1 and out != "" and err == ""
-        assert "codec can't encode" in out and out.endswith("looks like empty\n")
+                 ["decode", "--base64", "aGk\u20ac"], ["--json", "decode", "--text", b"\xff"],
+                 ["decode", "--text", b"\xed\xa0\x80", "--solve", "caesar"],
+                 ["decode", "abc", "--recipe", b"xor:key_text=\xff"]):
+        c, py = run_c(c_binary, *args), run_python(*[os.fsdecode(a) for a in args])
+        assert c == py, args
+        assert c[0] == 1 and c[2] == "" and "codec can't encode" in c[1]
     # in a recipe such bytes are shown the way Python shows them
     args = ["decode", "abc", "--recipe", b"caf\xe9\xff"]
     c, py = run_c(c_binary, *args), run_python(*[os.fsdecode(a) for a in args])
@@ -2062,15 +2097,15 @@ def random_params(rng, name):
         "alphabet": ["std", "url"], "variant": ["ascii85", "z85"],
         "from": ["utf-8", "utf-16le", "utf-16be", "latin-1"],
         "n": [0, 1, 13, 25, "7", " 0x10 "], "mode": ["decrypt", "encrypt"],
-        "rails": [2, 3, 4, "5", 7, 50, 1000], "algo": ["md5", "sha1", "sha256", "crc32"],
+        "rails": [2, 3, 4, "5", 7, 50, 1000, 10 ** 9, "0x" + "f" * 40], "algo": ["md5", "sha1", "sha256", "crc32"],
         "map": ["QWERTYUIOPASDFGHJKLZXCVBNM", "zyxwvutsrqponmlkjihgfedcba", "a-z? " +
-                "bcdefghijklmnopqrstuvwxyz"],
-        "key_text": ["k", "KEY!", "p\u00e4ss w\u00f6rd", "\u2603"], "counter": [0, 1, 7, 2 ** 32 - 1, "0x10"],
+                "bcdefghijklmnopqrstuvwxyz", GREEK_MAP],
+        "key_text": ["k", "KEY!", "p\u00e4ss w\u00f6rd", "\u2603", "\udc80"], "counter": [0, 1, 7, 2 ** 32 - 1, "0x10"],
         "nonce": [hexkey(12), hexkey(12), hexkey(16), hexkey(8)], "iv": [hexkey(16), hexkey(16), hexkey(8)],
         "tag": ["", hexkey(16)], "op": ["decrypt", "encrypt"], "unpad": ["pkcs7", "none"],
     }
     if name == "vigenere":
-        good["key"] = ["LEMON", "k", "The Key", "cl\u00e9 \u0391"]
+        good["key"] = ["LEMON", "k", "The Key", "cl\u00e9 \u0391", "stra\u00dfe"]
     elif name == "chacha20":
         good["key"] = [hexkey(32), hexkey(32), hexkey(31)]
     elif name == "aes":
@@ -2086,11 +2121,6 @@ def random_params(rng, name):
                 params[p["name"]] = random_value(rng, good[p["name"]])
     if rng.random() < 0.02:
         params[rng.choice(["bogus", "", "KEY", "n "])] = 1
-    for key, value in list(params.items()):
-        if python_stops(name, key, value, params):
-            del params[key]
-    if name == "xor" and python_stops(name, "key_text", params.get("key_text"), params):
-        del params["key_text"]
     return params
 
 

@@ -18,6 +18,7 @@
 
 #include "window.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +48,35 @@ static wchar_t g_profile[MAX_PATH];
 
 bool window_has_console(void) {
     return GetConsoleWindow() != NULL;
+}
+
+void window_trace(const char *format, ...) {
+    wchar_t path[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"VEX_WINDOW_LOG", path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH)
+        return;
+    FILE *log = _wfopen(path, L"a");
+    if (log == NULL)
+        return;
+    static ULONGLONG first;
+    ULONGLONG now = GetTickCount64();
+    if (first == 0)
+        first = now;
+    fprintf(log, "[%6lu ms] ", (unsigned long)(now - first));
+    va_list args;
+    va_start(args, format);
+    vfprintf(log, format, args);
+    va_end(args);
+    fputc('\n', log);
+    fclose(log);
+}
+
+/* A wide string for the log, as UTF-8 (in a static buffer: one at a time). */
+static const char *narrow(const wchar_t *text) {
+    static char out[PATH_CAP * 3];
+    if (WideCharToMultiByte(CP_UTF8, 0, text, -1, out, (int)sizeof out, NULL, NULL) <= 0)
+        strcpy(out, "?");
+    return out;
 }
 
 static wchar_t *to_wide(const char *text) {
@@ -138,10 +168,17 @@ static bool env_var(const wchar_t *name, wchar_t *out, bool *set) {
  * then), else Edge, else Chrome, by their registered and usual locations. */
 static bool find_browser(wchar_t *out) {
     bool chosen = false;
-    if (env_var(L"VEX_BROWSER", out, &chosen))
-        return is_file(out);
-    if (chosen)
+    if (env_var(L"VEX_BROWSER", out, &chosen)) {
+        if (is_file(out))
+            return true;
+        window_trace("app window: no browser: %%VEX_BROWSER%% names %s, which is not a file",
+                     narrow(out));
         return false;
+    }
+    if (chosen) {
+        window_trace("app window: no browser: %%VEX_BROWSER%% is set but empty or too long");
+        return false;
+    }
 
     static const wchar_t *const EXES[] = {L"msedge.exe", L"chrome.exe"};
     const HKEY roots[] = {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
@@ -177,6 +214,7 @@ static bool find_browser(wchar_t *out) {
                 return true;
         }
     out[0] = L'\0';
+    window_trace("app window: no browser: neither Edge nor Chrome was found");
     return false;
 }
 
@@ -253,12 +291,17 @@ static void remove_profile(void) {
     if (g_profile[0] == L'\0' || wcsstr(g_profile, L"" PROFILE_MARK) == NULL)
         return;
     /* The browser's helper processes can hold files for a moment after it ends. */
-    for (int attempt = 0; attempt < 15; attempt++) {
+    bool gone = false;
+    for (int attempt = 0; attempt < 15 && !gone; attempt++) {
         remove_tree(g_profile, 0);
-        if (GetFileAttributesW(g_profile) == INVALID_FILE_ATTRIBUTES)
-            break;
-        Sleep(200);
+        gone = GetFileAttributesW(g_profile) == INVALID_FILE_ATTRIBUTES;
+        if (!gone)
+            Sleep(200);
     }
+    if (gone)
+        window_trace("app window: profile deleted");
+    else
+        window_trace("app window: could not delete the profile %s", narrow(g_profile));
     g_profile[0] = L'\0';
 }
 
@@ -268,8 +311,13 @@ bool window_open(const char *url) {
     if (g_process != NULL || url == NULL || strchr(url, '"') != NULL)
         return false;
     wchar_t browser[PATH_CAP];
-    if (!find_browser(browser) || !make_profile())
+    if (!find_browser(browser))
         return false;
+    if (!make_profile()) {
+        window_trace("app window: could not create a profile folder (error %lu)",
+                     (unsigned long)GetLastError());
+        return false;
+    }
     wchar_t *wide_url = to_wide(url);
     if (wide_url == NULL) {
         remove_profile();
@@ -299,12 +347,16 @@ bool window_open(const char *url) {
     BOOL ok = CreateProcessW(browser, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &started);
     free(command);
     if (!ok) {
+        window_trace("app window: could not start %s (error %lu)", narrow(browser),
+                     (unsigned long)GetLastError());
         remove_profile();
         return false;
     }
     CloseHandle(started.hThread);
     g_process = started.hProcess;
     g_pid = started.dwProcessId;
+    window_trace("app window: started %s (process %lu)", narrow(browser), (unsigned long)g_pid);
+    window_trace("app window: profile %s", narrow(g_profile));
     g_started = g_last_look = GetTickCount64();
     g_had_window = false;
     g_looks_without_window = 0;
@@ -342,10 +394,16 @@ WindowState window_poll(void) {
         DWORD code = 1;
         GetExitCodeProcess(g_process, &code);
         ULONGLONG lived = GetTickCount64() - g_started;
+        WindowState state = lived >= QUICK_EXIT_MS ? WINDOW_CLOSED
+                          : code == 0              ? WINDOW_LOST
+                                                   : WINDOW_FAILED;
+        window_trace("app window: %s: the browser ended after %lu ms with exit status %lu%s",
+                     state == WINDOW_CLOSED ? "closed" : state == WINDOW_LOST ? "lost" : "failed",
+                     (unsigned long)lived, (unsigned long)code,
+                     state == WINDOW_LOST ? " (a browser that was already running may have"
+                                            " taken the window over)" : "");
         forget_process();
-        if (lived >= QUICK_EXIT_MS)
-            return WINDOW_CLOSED;
-        return code == 0 ? WINDOW_LOST : WINDOW_FAILED;
+        return state;
     }
     /* A browser can stay in the background after its last window closes. Once
      * its window has been seen and is then gone for two looks, it is closed. */
@@ -355,9 +413,14 @@ WindowState window_poll(void) {
         WindowWalk walk = {g_pid, 0, false};
         EnumWindows(walk_window, (LPARAM)&walk);
         if (walk.visible > 0) {
+            if (!g_had_window)
+                window_trace("app window: its window is on screen after %lu ms",
+                             (unsigned long)(now - g_started));
             g_had_window = true;
             g_looks_without_window = 0;
         } else if (g_had_window && ++g_looks_without_window >= 2) {
+            window_trace("app window: closed: its window is gone but the browser is still "
+                         "running, so it is ended");
             TerminateProcess(g_process, 0);
             WaitForSingleObject(g_process, 3000);
             forget_process();
@@ -370,6 +433,7 @@ WindowState window_poll(void) {
 void window_close(void) {
     if (g_process != NULL) {
         if (WaitForSingleObject(g_process, 0) == WAIT_TIMEOUT) {
+            window_trace("app window: closing it");
             WindowWalk walk = {g_pid, 0, true};
             EnumWindows(walk_window, (LPARAM)&walk);
             if (WaitForSingleObject(g_process, 3000) == WAIT_TIMEOUT) {
@@ -406,6 +470,34 @@ bool window_has_console(void) {
     return true;
 }
 
+static long ms_since(const struct timespec *then) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (long)(now.tv_sec - then->tv_sec) * 1000 + (now.tv_nsec - then->tv_nsec) / 1000000;
+}
+
+void window_trace(const char *format, ...) {
+    const char *path = getenv("VEX_WINDOW_LOG");
+    if (path == NULL || path[0] == '\0')
+        return;
+    FILE *log = fopen(path, "a");
+    if (log == NULL)
+        return;
+    static struct timespec first;
+    static bool started;
+    if (!started) {
+        clock_gettime(CLOCK_MONOTONIC, &first);
+        started = true;
+    }
+    fprintf(log, "[%6ld ms] ", ms_since(&first));
+    va_list args;
+    va_start(args, format);
+    vfprintf(log, format, args);
+    va_end(args);
+    fputc('\n', log);
+    fclose(log);
+}
+
 void window_message(const char *text) {
     (void)text;
 }
@@ -436,8 +528,11 @@ static bool is_file(const char *path) {
 static bool find_browser(char *out) {
     const char *chosen = getenv("VEX_BROWSER");
     if (chosen != NULL) {
-        if (strlen(chosen) >= PATH_CAP || !is_file(chosen))
+        if (strlen(chosen) >= PATH_CAP || !is_file(chosen)) {
+            window_trace("app window: no browser: $VEX_BROWSER names %s, which is not a file",
+                         chosen);
             return false;
+        }
         strcpy(out, chosen);
         return true;
     }
@@ -456,8 +551,10 @@ static bool find_browser(char *out) {
                                         "chromium-browser", "microsoft-edge",
                                         "microsoft-edge-stable", "brave-browser"};
     const char *path = getenv("PATH");
-    if (path == NULL || path[0] == '\0')
+    if (path == NULL || path[0] == '\0') {
+        window_trace("app window: no browser: $PATH is empty");
         return false;
+    }
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
         for (const char *dir = path; dir != NULL;) {
             const char *end = strchr(dir, ':');
@@ -470,6 +567,7 @@ static bool find_browser(char *out) {
             }
             dir = end != NULL ? end + 1 : NULL;
         }
+    window_trace("app window: no browser: no Chrome, Chromium, Edge or Brave on the PATH");
     return false;
 }
 
@@ -525,13 +623,18 @@ static void remove_profile(void) {
     if (g_profile[0] == '\0' || strstr(g_profile, PROFILE_MARK) == NULL)
         return;
     /* The browser's helper processes can write for a moment after it ends. */
-    for (int attempt = 0; attempt < 10; attempt++) {
+    bool gone = false;
+    for (int attempt = 0; attempt < 10 && !gone; attempt++) {
         remove_tree(g_profile, 0);
         struct stat st;
-        if (lstat(g_profile, &st) != 0)
-            break;
-        nap(100);
+        gone = lstat(g_profile, &st) != 0;
+        if (!gone)
+            nap(100);
     }
+    if (gone)
+        window_trace("app window: profile deleted");
+    else
+        window_trace("app window: could not delete the profile %s", g_profile);
     g_profile[0] = '\0';
 }
 
@@ -541,8 +644,12 @@ bool window_open(const char *url) {
     if (g_pid > 0 || url == NULL)
         return false;
     char browser[PATH_CAP];
-    if (!find_browser(browser) || !make_profile())
+    if (!find_browser(browser))
         return false;
+    if (!make_profile()) {
+        window_trace("app window: could not create a profile folder: %s", strerror(errno));
+        return false;
+    }
     size_t app_cap = strlen(url) + 16, dir_cap = strlen(g_profile) + 32;
     char *app = malloc(app_cap), *dir = malloc(dir_cap);
     if (app == NULL || dir == NULL) {
@@ -577,10 +684,13 @@ bool window_open(const char *url) {
     free(app);
     free(dir);
     if (pid < 0) {
+        window_trace("app window: could not start %s: %s", browser, strerror(errno));
         remove_profile();
         return false;
     }
     g_pid = pid;
+    window_trace("app window: started %s (process %ld)", browser, (long)pid);
+    window_trace("app window: profile %s", g_profile);
     return true;
 }
 
@@ -591,20 +701,31 @@ WindowState window_poll(void) {
     pid_t ended = waitpid(g_pid, &status, WNOHANG);
     if (ended == 0 || (ended < 0 && errno == EINTR))
         return WINDOW_OPEN;
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    long lived = (long)(now.tv_sec - g_started.tv_sec) * 1000 +
-                 (now.tv_nsec - g_started.tv_nsec) / 1000000;
+    long lived = ms_since(&g_started);
     g_pid = -1;
-    remove_profile();
-    if (lived >= QUICK_EXIT_MS)
-        return WINDOW_CLOSED;
     bool clean = ended > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
-    return clean ? WINDOW_LOST : WINDOW_FAILED;
+    WindowState state = lived >= QUICK_EXIT_MS ? WINDOW_CLOSED
+                      : clean                  ? WINDOW_LOST
+                                               : WINDOW_FAILED;
+    char how[48];
+    if (ended > 0 && WIFEXITED(status))
+        snprintf(how, sizeof how, "exit status %d", WEXITSTATUS(status));
+    else if (ended > 0 && WIFSIGNALED(status))
+        snprintf(how, sizeof how, "signal %d", WTERMSIG(status));
+    else
+        snprintf(how, sizeof how, "an unknown status");
+    window_trace("app window: %s: the browser ended after %ld ms with %s%s",
+                 state == WINDOW_CLOSED ? "closed" : state == WINDOW_LOST ? "lost" : "failed",
+                 lived, how,
+                 state == WINDOW_LOST ? " (a browser that was already running may have"
+                                        " taken the window over)" : "");
+    remove_profile();
+    return state;
 }
 
 void window_close(void) {
     if (g_pid > 0) {
+        window_trace("app window: closing it");
         kill(g_pid, SIGTERM);
         for (int i = 0; i < 100 && g_pid > 0; i++) {
             if (waitpid(g_pid, NULL, WNOHANG) != 0)

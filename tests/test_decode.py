@@ -727,3 +727,309 @@ def test_cli_exits_1_when_a_step_fails(capsys):
     code, out, _err = cli(capsys, "decode", "--text", "plain", "--recipe", "to-hex|gunzip")
     assert code == 1
     assert "error:" in out and "to-hex" in out          # the result is still shown
+
+
+# --- inputs that used to stop the Python edition -----------------------------
+# Found while porting the workbench to C: each used to hang, or end in a
+# traceback (HTTP 500), where the C edition gives an ordinary failure. The
+# messages are the C edition's, so that the two editions agree.
+
+import contextlib                      # noqa: E402
+import signal                          # noqa: E402
+import time                            # noqa: E402
+
+BAD_MAP = "map must be a 26-letter permutation of the alphabet"
+GREEK_MAP = ("αβγδεζηθικλμν"
+             "ξοπρστυφχψωάέ")
+
+
+class _TookTooLong(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def _time_limit(seconds):
+    """Fails the block (rather than letting it run for hours) when it takes
+    longer than `seconds`; where there is no SIGALRM, checks afterwards."""
+    start = time.monotonic()
+    if hasattr(signal, "setitimer"):
+        def stop(signum, frame):
+            raise _TookTooLong(f"took longer than {seconds} s")
+        previous = signal.signal(signal.SIGALRM, stop)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+    else:                               # pragma: no cover - Windows
+        yield
+    assert time.monotonic() - start < seconds
+
+
+def _rail_fence_reference(data, rails):
+    """Rail-fence encryption written another way: each byte's rail is its
+    distance from the nearest top of the zig-zag, and the rails are read in
+    turn, each from left to right."""
+    period = 2 * (rails - 1)
+
+    def rail(i):
+        return min(i % period, period - i % period)
+    return bytes(data[i] for i in sorted(range(len(data)), key=lambda i: (rail(i), i)))
+
+
+def test_railfence_with_more_rails_than_bytes_costs_nothing():
+    """More rails than bytes: each byte has a rail to itself, so the text
+    comes out as it went in, however many rails there are."""
+    data = bytes(range(33, 33 + 90))
+    with _time_limit(5):
+        for rails in (90, 91, 5000, 10 ** 9, 2 ** 64, 10 ** 40, "0x" + "f" * 60, "9" * 4300):
+            for mode in ("encrypt", "decrypt"):
+                assert op("railfence", data, rails=rails, mode=mode) == data
+        assert op("railfence", b"", rails=10 ** 30) == b""
+        assert op("railfence", b"x", rails=10 ** 9) == b"x"
+
+
+def test_railfence_near_the_length_of_the_data():
+    text = bytes(range(33, 33 + 60))
+    for size in (0, 1, 2, 3, 4, 5, 9, 31, 60):
+        data = text[:size]
+        for rails in (size - 1, size, size + 1, 2, 3):
+            if rails < 2:
+                continue
+            sealed = op("railfence", data, rails=rails, mode="encrypt")
+            assert sealed == _rail_fence_reference(data, rails), (size, rails)
+            assert op("railfence", sealed, rails=rails) == data, (size, rails)
+    # one rail fewer than bytes: only the last two bytes trade places
+    assert op("railfence", b"abcdef", rails=5, mode="encrypt") == b"abcdfe"
+    assert op("railfence", b"abcdef", rails=6, mode="encrypt") == b"abcdef"
+    assert op("railfence", b"abcdfe", rails=5) == b"abcdef"
+
+
+def test_railfence_on_long_input_takes_time_in_proportion_to_the_data():
+    data = bytes(range(256)) * 400                  # 100 KiB
+    with _time_limit(20):
+        for rails in (2, 3, 1000, len(data) // 2, len(data) - 1):
+            sealed = op("railfence", data, rails=rails, mode="encrypt")
+            assert op("railfence", sealed, rails=rails) == data
+
+
+def test_cli_out_that_cannot_be_written(capsys, tmp_path):
+    target = tmp_path / "no-such-folder" / "out.bin"
+    assert cli(capsys, "decode", "abc", "--out", str(target)) == (
+        1, "", f"vex: error: cannot write {target}: No such file or directory\n")
+    blocker = tmp_path / "a-file"
+    blocker.write_bytes(b"")
+    target = blocker / "out.bin"
+    assert cli(capsys, "decode", "abc", "--out", str(target)) == (
+        1, "", f"vex: error: cannot write {target}: Not a directory\n")
+
+
+def _surrogates(text, position, codec="utf-8", reason="surrogates not allowed"):
+    return f"'{codec}' codec can't encode character {text!a} in position {position}: {reason}"
+
+
+def test_a_lone_surrogate_in_a_text_source_is_a_failed_source():
+    for value, error in (
+            ("a\ud800b", _surrogates("\ud800", 1)),
+            ("\udcff", _surrogates("\udcff", 0)),
+            ("\ud800\ud800\ud800x\udc00",
+             "'utf-8' codec can't encode characters in position 0-2: surrogates not allowed")):
+        result = decode.run(lambda: decode.source_bytes("text", value), [("to-hex", {})])
+        assert result == {"ok": False, "size": 0, "hex": "", "text": "", "looks_like": "empty",
+                          "steps": [], "error": error}
+        assert decode.solve("caesar", lambda: decode.source_bytes("text", value)) == {
+            "ok": False, "candidates": [], "error": error}
+
+
+def test_a_lone_surrogate_in_an_xor_key_text_fails_the_step():
+    result = run(b"x", [("to-hex", {}), ("xor", {"key_text": "\udc80"})])
+    assert result["ok"] is False and result["steps"] == [{"op": "to-hex", "size": 2}]
+    assert result["error"] == _surrogates("\udc80", 0)
+    # rc4 wraps it the way it wraps any failure of its key
+    assert run(b"x", [("rc4", {"key_text": "\ud800x"})])["error"] == \
+        "rc4 failed: " + _surrogates("\ud800", 0)
+
+
+def test_a_base64_source_that_is_not_latin_1_is_a_failed_source():
+    for value, error in (("aGk€", _surrogates("€", 3, "latin-1",
+                                                   "ordinal not in range(256)")),
+                         ("Ā", _surrogates("Ā", 0, "latin-1",
+                                                "ordinal not in range(256)")),
+                         ("\ud800", _surrogates("\ud800", 0, "latin-1",
+                                                "ordinal not in range(256)"))):
+        result = decode.run(lambda: decode.source_bytes("base64", value), [])
+        assert result["ok"] is False and result["error"] == error and result["size"] == 0
+
+
+def test_cli_text_that_is_not_utf8(capsys):
+    """An argument that is not UTF-8 reaches Python with the bytes it could
+    not read as surrogates (b"\\xff" is "\\udcff"): a failed source, shown
+    like any other, exit 1."""
+    for args, error in ((["decode", "--text", "\udcff"], _surrogates("\udcff", 0)),
+                        (["decode", "caf\udce9"], _surrogates("\udce9", 3)),
+                        (["decode", "--base64", "aGk€"],
+                         _surrogates("€", 3, "latin-1", "ordinal not in range(256)"))):
+        assert cli(capsys, *args) == (1, f"error: {error}\n\n0 bytes · looks like empty\n", "")
+        code, out, err = cli(capsys, "--json", *args)
+        assert code == 1 and err == "" and json.loads(out)["error"] == error
+    code, out, err = cli(capsys, "decode", "--text", "\udcff", "--solve", "caesar")
+    assert (code, out, err) == (1, f"error: {_surrogates(chr(0xdcff), 0)}\n", "")
+    code, out, err = cli(capsys, "decode", "abc", "--recipe", "xor:key_text=\udcff")
+    assert code == 1 and err == "" and out.startswith(f"error: {_surrogates(chr(0xdcff), 0)}\n")
+
+
+def test_charset_decode_from_a_list_or_dict():
+    for value in (["utf-8"], [], {"utf-8": 1}, {}):
+        result = run(b"x", [("charset-decode", {"from": value})])
+        assert result["ok"] is False
+        assert result["error"] == "from must be utf-8, utf-16le, utf-16be or latin-1"
+
+
+def test_parameters_that_are_not_an_object():
+    """The HTTP API passes on whatever JSON it is sent: a string or a list is
+    read for names of parameters, and anything that is not an object fails
+    the step."""
+    for params in (5, -1, True, 1.5, float("nan"), "n", "nn", ["n"], [["n"]], [{"n": 1}],
+                   ["n", ["x"], "zz"], ["n", {"x": 1}]):
+        result = run(b"x", [("to-hex", {}), ("rot-n", params)])
+        assert result["ok"] is False and result["error"] == "params must be an object", params
+        assert result["steps"] == [{"op": "to-hex", "size": 2}]
+    assert run(b"x", [("xor", ["key", "key_text"])])["error"] == "params must be an object"
+    # names that are not parameters are still reported first, in order
+    assert run(b"x", [("rot-n", "nx")])["error"] == "unknown parameter 'x' for rot-n"
+    assert run(b"x", [("rot-n", ["n", 5, ["n"]])])["error"] == "unknown parameter 5 for rot-n"
+    assert run(b"x", [("nope", 5)])["error"] == "unknown operation: 'nope'"
+
+
+def test_vigenere_key_letters_whose_upper_case_is_two_letters():
+    for key in ("straße", "ß", "ﬁ", "ΐ", "keyﬁ"):
+        result = run(b"Hello", [("vigenere", {"key": key})])
+        assert result["ok"] is False and result["error"] == "vigenere needs a key of letters", key
+    assert run(b"Hello", [("vigenere", {"key": ["ß"]})])["error"] == \
+        "vigenere needs a key of letters"
+    # the mode is looked at first
+    assert run(b"Hello", [("vigenere", {"key": "ß", "mode": "x"})])["error"] == \
+        "mode must be decrypt or encrypt"
+
+
+def test_substitution_map_of_letters_that_are_not_a_to_z():
+    half = "abcdefghijklm" + GREEK_MAP[:13]
+    for data, mapping in ((b"Hello nop", GREEK_MAP), (b"abc", GREEK_MAP), (b"xyz", half),
+                          (b"Abc 123 mlk z", half)):
+        result = run(data, [("substitution", {"map": mapping})])
+        assert result["ok"] is False and result["error"] == BAD_MAP, (data, mapping)
+    # fine while no letter of the data needs them
+    assert op("substitution", b"1234 !?", map=GREEK_MAP) == b"1234 !?"
+    assert op("substitution", b"Abc 123 mlk", map=half) == b"Abc 123 mlk"
+
+
+def test_an_unexpected_exception_in_an_operation_is_a_failed_step(monkeypatch):
+    def broken(data):
+        raise ZeroDivisionError("boom")
+    monkeypatch.setattr(decode.REGISTRY["rot13"], "fn", broken)
+    result = run(b"abc", [("to-hex", {}), ("rot13", {}), ("to-hex", {})])
+    assert result["ok"] is False and result["steps"] == [{"op": "to-hex", "size": 6}]
+    assert result["error"] == "rot13 failed: ZeroDivisionError: boom"
+    assert result["text"] == "616263"
+
+
+def test_an_unexpected_exception_in_a_source_is_a_failed_source():
+    def broken():
+        raise KeyError("gone")
+    assert decode.run(broken, [("to-hex", {})]) == {
+        "ok": False, "size": 0, "hex": "", "text": "", "looks_like": "empty", "steps": [],
+        "error": "cannot read the source: KeyError: 'gone'"}
+    assert decode.solve("caesar", broken) == {
+        "ok": False, "candidates": [], "error": "cannot read the source: KeyError: 'gone'"}
+
+
+def _post_raw(client, name, body):
+    status, ctype, data = client.request("POST", f"/api/{name}", body=body,
+                                         headers={"Content-Type": "application/json"})
+    return status, json.loads(data)
+
+
+def test_api_answers_these_inputs_without_an_internal_error(client):
+    text = {"kind": "text", "value": "abc"}
+    for route, payload, error in (
+            ("decode", {"source": {"kind": "text", "value": "a\ud800b"}},
+             _surrogates("\ud800", 1)),
+            ("decode", {"source": text, "recipe": [{"op": "xor", "params": {"key_text": "\udc80"}}]},
+             _surrogates("\udc80", 0)),
+            ("decode", {"source": {"kind": "base64", "value": "aGk€"}},
+             _surrogates("€", 3, "latin-1", "ordinal not in range(256)")),
+            ("decode", {"source": text, "recipe": [{"op": "charset-decode",
+                                                    "params": {"from": ["utf-8"]}}]},
+             "from must be utf-8, utf-16le, utf-16be or latin-1"),
+            ("decode", {"source": text, "recipe": [{"op": "rot-n", "params": 5}]},
+             "params must be an object"),
+            ("decode", {"source": text, "recipe": [{"op": "vigenere",
+                                                    "params": {"key": "straße"}}]},
+             "vigenere needs a key of letters"),
+            ("decode", {"source": text, "recipe": [{"op": "substitution",
+                                                    "params": {"map": GREEK_MAP}}]}, BAD_MAP)):
+        status, result = _post(client, route, payload)
+        assert status == 200 and result["ok"] is False and result["error"] == error, payload
+    for route in ("decode", "decode/solve"):
+        status, result = _post(client, route, {"source": {"kind": "base64", "value": "Ā"},
+                                               "name": "caesar"})
+        assert status == 200 and result["ok"] is False
+        assert result["error"] == _surrogates("Ā", 0, "latin-1", "ordinal not in range(256)")
+
+
+def test_api_recipe_that_is_not_a_list(client):
+    for recipe in (5, True, 1.5, -1):
+        assert _post(client, "decode", {"source": {"kind": "text", "value": "x"},
+                                        "recipe": recipe}) == \
+            (400, {"error": "recipe must be a list of steps"})
+    for body in (b'{"source": {"kind": "text", "value": "x"}, "recipe": NaN}',
+                 b'{"source": {"kind": "text", "value": "x"}, "recipe": 1e400}'):
+        assert _post_raw(client, "decode", body) == (400, {"error": "recipe must be a list of steps"})
+    # what Python takes as no steps
+    for recipe in (0, 0.0, False, None, "", "to-hex", [], {}, {"op": "to-hex"}):
+        status, result = _post(client, "decode", {"source": {"kind": "text", "value": "x"},
+                                                  "recipe": recipe})
+        assert status == 200 and result["ok"] and result["steps"] == [], recipe
+
+
+def test_api_file_path_that_is_not_text(client):
+    for path in (5, ["a"], {"a": 1}, True, 1.5, "a\x00b", "\x00"):
+        for route in ("decode", "decode/solve"):
+            assert _post(client, route, {"source": {"kind": "file", "path": path},
+                                         "name": "caesar"}) == \
+                (400, {"error": "a file source needs a path"}), path
+    # one that cannot be a file name on this system names no file
+    for path in ("\ud800", "x\udfffy"):
+        status, result = _post(client, "decode", {"source": {"kind": "file", "path": path}})
+        assert status == 404
+        assert result == {"error": f"no such file or folder: {os.path.abspath(path)}"}
+
+
+def test_api_json_nested_deeper_than_512_levels(client):
+    def nested(levels):              # the body, the source and `levels` lists: 2 + levels
+        return (b'{"source": {"kind": "text", "value": ' + b"[" * levels + b"]" * levels +
+                b"}}")
+    status, result = _post_raw(client, "decode", nested(510))
+    assert status == 200 and result["ok"] and result["size"] == 2 * 510
+    for levels in (511, 600, 5000, 200000):
+        for route in ("decode", "decode/solve"):
+            assert _post_raw(client, route, nested(levels)) == \
+                (400, {"error": "request body must be JSON"}), levels
+    assert _post_raw(client, "decode", b"[" * 512 + b"]" * 512) == \
+        (400, {"error": "request body must be a JSON object"})
+    assert _post_raw(client, "decode", b"[" * 513 + b"]" * 513) == \
+        (400, {"error": "request body must be JSON"})
+    objects = b'{"source": {"kind": "text", "value": ' + b'{"a": ' * 511 + b"1" + b"}" * 511 + b"}}"
+    assert _post_raw(client, "decode", objects) == (400, {"error": "request body must be JSON"})
+    # brackets inside strings are text, not nesting
+    inside = json.dumps({"source": {"kind": "text", "value": "[{" * 3000 + '\\"['}}).encode()
+    status, result = _post_raw(client, "decode", inside)
+    assert status == 200 and result["text"] == "[{" * 3000 + '\\"['
+    # a document that is a string of brackets is not nested at all
+    assert _post_raw(client, "decode", json.dumps("[{" * 3000).encode()) == \
+        (400, {"error": "request body must be a JSON object"})
+    # an earlier value of a repeated key counts too
+    repeated = (b'{"source": {"kind": "text", "value": ' + b"[" * 600 + b"]" * 600 +
+                b', "value": "x"}}')
+    assert _post_raw(client, "decode", repeated) == (400, {"error": "request body must be JSON"})

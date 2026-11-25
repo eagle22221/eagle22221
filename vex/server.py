@@ -13,7 +13,9 @@ three things keep other web pages in the same browser from driving it:
 """
 from __future__ import annotations
 
+import errno
 import hmac
+import itertools
 import json
 import os
 import re
@@ -426,12 +428,36 @@ def _api_patch_string(ws, p, body):
 
 # --- decode & cipher workbench ---------------------------------------------------
 
+# JSON is read no deeper than this many nested lists and objects, as the C
+# edition reads it (J_MAX_DEPTH in c/src/json.h).
+JSON_MAX_DEPTH = 512
+_JSON_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"', re.DOTALL)
+_JSON_NOT_A_BRACKET = re.compile(r"[^\[\]{}]+")
+_JSON_STEP = {"[": 1, "{": 1, "]": -1, "}": -1}
+
+
+def _json_too_deep(raw: bytes) -> bool:
+    """Is this document (one json.loads has read) nested deeper than
+    JSON_MAX_DEPTH? Measured on the text, so that the earlier value of a
+    repeated key, which json.loads drops, counts as well."""
+    text = raw.decode(json.detect_encoding(raw), "surrogatepass")
+    if text.count("[") + text.count("{") <= JSON_MAX_DEPTH:
+        return False                    # too few brackets to be that deep
+    brackets = _JSON_NOT_A_BRACKET.sub("", _JSON_STRING.sub("", text))
+    deepest = max(itertools.accumulate(map(_JSON_STEP.__getitem__, brackets)), default=0)
+    return deepest > JSON_MAX_DEPTH
+
+
 def _json_body(body) -> dict:
-    """Parse a POST request body as a JSON object; a malformed body is 400."""
+    """Parse a POST request body as a JSON object; a malformed body is 400,
+    and so is one nested deeper than JSON_MAX_DEPTH."""
+    raw = body.read() or b"{}"
     try:
-        parsed = json.loads(body.read() or b"{}")
-    except (json.JSONDecodeError, ValueError):
+        parsed = json.loads(raw)
+    except (ValueError, RecursionError):
         raise ApiError(400, "request body must be JSON") from None
+    if _json_too_deep(raw):
+        raise ApiError(400, "request body must be JSON")
     if not isinstance(parsed, dict):
         raise ApiError(400, "request body must be a JSON object")
     return parsed
@@ -449,8 +475,14 @@ def _decode_source(ws, source) -> Callable:
         return lambda: decode.source_bytes(kind, value)
     if kind == "file":
         path = source.get("path")
-        if not path:
+        # A path that is not text (or holds a NUL) names no file.
+        if not path or not isinstance(path, str) or "\x00" in path:
             raise ApiError(400, "a file source needs a path")
+        try:
+            os.fsencode(path)
+        except UnicodeEncodeError:      # a lone surrogate: no file has that name
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT),
+                                    os.path.abspath(path)) from None
         data = ws.binary(path).data
         offset, length = source.get("offset") or 0, source.get("length")
         return lambda: decode.source_bytes("file", data=data, offset=offset, length=length)
@@ -466,8 +498,11 @@ def _api_decode(ws, p, body):
     from . import decode
     req = _json_body(body)
     get_source = _decode_source(ws, req.get("source"))
+    steps = req.get("recipe") or []
+    if not isinstance(steps, (list, dict, str)):
+        raise ApiError(400, "recipe must be a list of steps")
     recipe = [(str(step.get("op")), step.get("params") or {})
-              for step in (req.get("recipe") or []) if isinstance(step, dict)]
+              for step in steps if isinstance(step, dict)]
     return decode.run(get_source, recipe)
 
 

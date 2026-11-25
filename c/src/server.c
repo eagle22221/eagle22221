@@ -1,10 +1,12 @@
-/* The graphical interface: `vex gui [PATH] [--port N] [--no-browser]`
+/* The graphical interface: `vex gui [PATH] [--port N] [--browser] [--no-browser]`
  * (port of server.py).
  *
  * A single-threaded HTTP server bound to the loopback interface. It serves
  * the embedded single-page web interface (see tools/embed_web.py) and a JSON
  * API built from the same views the command line prints, so the two outputs
- * cannot disagree.
+ * cannot disagree. The server runs on a thread of its own; the program's main
+ * thread shows the page (window.h: vex's own window on Windows, else an app
+ * window, else a browser tab) and stops everything when that is closed.
  *
  * Three things keep other web pages in the same browser from driving it, as
  * in server.py: every /api/ call needs a random per-session token sent in a
@@ -27,12 +29,14 @@
 
 #include <errno.h>
 #include <signal.h>
+#include <stdatomic.h>
 
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <process.h>
 typedef SOCKET socket_t;
 #define BAD_SOCKET INVALID_SOCKET
 #define closesock closesocket
@@ -42,12 +46,15 @@ typedef SOCKET socket_t;
 #include <dirent.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 typedef int socket_t;
 #define BAD_SOCKET (-1)
@@ -64,6 +71,7 @@ typedef int socket_t;
 #include "split.h"
 #include "strings.h"
 #include "views.h"
+#include "window.h"
 
 /* server.py: CSP, MAX_UPLOAD. */
 static const char CSP[] =
@@ -75,6 +83,7 @@ static const char RAW_CSP[] = "sandbox; default-src 'none'";
 #define MAX_PREVIEW ((big)64 << 20)
 #define MAX_HEADER_BYTES 65536
 #define RECV_TIMEOUT_SECS 20
+#define WAIT_SLICE_MS 250           /* how often a waiting server looks at the stop flag */
 
 /* --- server and request state ------------------------------------------------ */
 
@@ -486,7 +495,41 @@ static void send_json_error(Req *req, int status, const char *message) {
 
 /* --- reading the request ----------------------------------------------------- */
 
+static bool gui_stopping(void);
+
+/* Wait up to `ms` for `fd` to have something to read (data, a connection to
+ * accept, or its end): 1 when it has, 0 when the time ran out, -1 on error. */
+static int wait_readable(socket_t fd, int ms) {
+#ifdef _WIN32
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(fd, &readable);
+    struct timeval tv = {ms / 1000, (ms % 1000) * 1000};
+    int n = select(0, &readable, NULL, NULL, &tv);
+    return n > 0 ? 1 : n == 0 ? 0 : -1;
+#else
+    struct pollfd p = {fd, POLLIN, 0};
+    int n = poll(&p, 1, ms);
+    if (n < 0 && errno == EINTR)
+        return 0;
+    return n > 0 ? 1 : n;
+#endif
+}
+
+/* recv(), waiting at most RECV_TIMEOUT_SECS for the first byte. It waits in
+ * short slices so that a client which keeps a connection open without sending
+ * anything (a browser's spare connection) cannot hold up stopping: once the
+ * program is stopping it gives up, as on a timeout. */
 static ssize_t sock_recv(socket_t fd, void *buf, size_t n) {
+    for (int waited = 0;; waited += WAIT_SLICE_MS) {
+        if (gui_stopping() || waited >= RECV_TIMEOUT_SECS * 1000)
+            return -1;
+        int ready = wait_readable(fd, WAIT_SLICE_MS);
+        if (ready > 0)
+            break;
+        if (ready < 0)
+            return -1;
+    }
 #ifdef _WIN32
     return recv(fd, (char *)buf, (int)(n > (1 << 20) ? (1 << 20) : n), 0);
 #else
