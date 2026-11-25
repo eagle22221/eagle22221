@@ -20,7 +20,8 @@ const HEIGHT = 900;
   page.on('pageerror', (e) => errors.push(e.message));
 
   const size = (height) => page.setViewportSize({ width: WIDTH, height });
-  const settle = async (ms) => { await page.mouse.move(2, HEIGHT - 2); await page.waitForTimeout(ms || 700); };
+  // park the pointer where it highlights nothing, then let the view finish drawing
+  const settle = async (ms) => { await page.mouse.move(4, 4); await page.waitForTimeout(ms || 700); };
   // a view from the sidebar, by the exact name it shows there
   const view = async (id, label) => {
     await page.click(`#nav .nav-item:has(.nav-label:text-is("${label}"))`);
@@ -29,10 +30,11 @@ const HEIGHT = 900;
   };
   // open a file or folder in a new tab, the way a person types its path into the Open dialog
   const open = async (target) => {
+    const tabs = await page.locator('.filetab').count();
     await page.click('#tab-add');
     await page.fill('#path-input', target);
     await page.press('#path-input', 'Enter');
-    await page.waitForSelector(`.filetab.is-active .filetab-open[title="${target}"]`);
+    await page.waitForFunction((n) => document.querySelectorAll('.filetab').length > n, tabs);
     await page.waitForSelector('#main .view');
     await settle(1200);
   };
@@ -94,7 +96,7 @@ const HEIGHT = 900;
   await page.click('.view-decode .op-chip:has(.op-chip-name:text-is("gunzip"))');
   await page.waitForSelector('.view-decode .decode-steplist');
   await page.waitForTimeout(600);
-  await size(1380);   // input, operations, recipe and output
+  await size(1290);   // input, operations, recipe and output
   await scrollTop();
   await settle(400);
   await page.screenshot({ path: out('decode') });
@@ -105,26 +107,30 @@ const HEIGHT = 900;
   await view('split', 'Split');
   // the list of pieces arrives after the view itself
   await page.waitForSelector('.view-split table.pieces', { timeout: 5000 }).catch(() => {});
-  await size(1240);   // tall enough for the whole list
+  await size(1010);   // tall enough for the whole list
   await scrollTop();
   await settle(400);
   await page.screenshot({ path: out('split') });
   await size(HEIGHT);
 
   if (game) {
+    // the game folder opens in a third tab; tall enough for the packs and the opened pack with its preview
+    await size(680);
     await open(game);
     await page.waitForSelector('#main .view-assets');
     const pack = page.locator('.view-assets .table-wrap button.link').first();
     if (await pack.count()) { await pack.click(); await page.waitForSelector('.view-assets .split tbody tr'); await page.waitForTimeout(600); }
     const image = page.locator('.view-assets .split tr:has-text(".png")').first();
     if (await image.count()) { await image.click(); await page.waitForSelector('.view-assets .preview img'); await page.waitForTimeout(600); }
+    // scroll the list of packs to the top
     await page.evaluate(() => {
       const heading = Array.from(document.querySelectorAll('#main h2')).find((h) => h.textContent.startsWith('Asset packs here'));
       const scroller = document.getElementById('scroller');
-      if (heading) scroller.scrollTop += heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12;
+      if (heading) scroller.scrollTop += heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
     });
     await settle(400);
     await page.screenshot({ path: out('assets') });
+    await size(HEIGHT);
   }
   console.log('page errors:', JSON.stringify(errors));
   await browser.close();

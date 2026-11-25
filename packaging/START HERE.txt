@@ -14,18 +14,33 @@ Double-click vex-app.exe. vex opens in a window of its own, with its own
 title bar, icon and taskbar button, like any installed program: no web
 browser and no console window. Everything happens on your own computer
 (nothing is uploaded, and the file you look at is never run). Choose
-"Open file or folder" and pick a program, or drag any .exe or .dll onto
-vex-app.exe to open it straight away. Try it with practice\hello_pe64.exe.
-Closing the window quits vex.
+"Open File" and pick a program, or drag any .exe or .dll onto vex-app.exe
+to open it straight away. Try it with practice\hello_pe64.exe. Closing the
+window quits vex.
 
 The first start on a computer can take a few seconds; the window says
 "Starting vex..." while it gets ready.
 
-The interface has an Overview (what the file is and how it is protected),
-Techniques (anti-debug, VM checks, injection, hooking, packing), Code (the
-instructions, grouped into functions), Strings, Imports, Sections, a Bytes
-view, Assets (game asset packs), Split (save the parts of the program as
-separate files), Decode (a decode and cipher workbench), and Modify.
+When vex starts, its logo plays a short opening animation; a click, Esc,
+Enter or Space skips it. The gear button at the top right switches between
+the dark and the light look and turns the animated background off.
+
+Each file you open gets a tab of its own at the top; "+" next to the tabs
+opens another. The Overview comes first: what the file is, how it is
+protected, a map of its parts and an entropy chart. The sidebar on the left
+lists the other views in three groups:
+
+    Analysis    Techniques (anti-debug, VM checks, injection, hooking,
+                packing), Code (the instructions, grouped into functions),
+                Strings, Imports, Exports, Sections and Bytes (hex)
+    Resources   Assets (game asset packs)
+    Advanced    Entropy (a chart of how random the bytes are along the
+                file), Split (save the parts of the program as separate
+                files), Decode (a decode and cipher workbench) and
+                Patching / Modify
+
+"Export Report", on the card at the top of each file, downloads a summary
+of what vex found, as Markdown or as JSON.
 
 This folder holds three program files:
 
@@ -54,6 +69,8 @@ an empty part of the folder and choose "Open PowerShell window here" (or
     info FILE                            what the file is, hashes, protections
     report FILE                          everything at a glance
     sections FILE                        the parts of the file, with entropy
+    entropy FILE                         how random the bytes are along the
+                                         file (packed parts come close to 8)
     imports FILE                         system functions the program uses
     exports FILE                         functions a library offers
     symbols FILE                         names kept in the file
@@ -100,7 +117,8 @@ Use practice\hello_pe64.exe, a tiny program that prints two lines of text.
 2. Where is everything?
        .\vex.exe sections practice\hello_pe64.exe
    ".text" is the code, ".rdata" holds text and constants. Entropy near 8
-   means compressed contents.
+   means compressed contents. To see it along the whole file:
+       .\vex.exe entropy practice\hello_pe64.exe
 
 3. What text does it carry?
        .\vex.exe strings practice\hello_pe64.exe --grep fixture

@@ -58,10 +58,13 @@ b { font-weight: 600; }
 .goal { font-size: 12pt; color: var(--ink-2); margin-bottom: 10pt; max-width: 150mm; }
 figure { margin: 9pt 0 10pt; break-inside: avoid; }
 figure img { width: 100%; border: .8pt solid var(--ink); display: block; }
-figure.crop img { height: 72mm; object-fit: cover; object-position: top left; }
-figure.crop-tall img { height: 70mm; object-fit: cover; object-position: 0 88%; }
-figure.crop-short img { height: 58mm; object-fit: cover; object-position: 0 42%; }
-figure.crop-decode img { height: 100mm; object-fit: cover; object-position: 0 34%; }
+/* The screenshots are 1440 pixels wide, so 1 mm here is about 8.3 of their pixels. Each class
+   shows the part of a screenshot its lesson is about: from the top, or a band (object-position). */
+figure.crop img { height: 96mm; object-fit: cover; object-position: top left; }
+figure.crop-table img { height: 64mm; object-fit: cover; object-position: top left; }
+figure.crop-short img { height: 72.5mm; object-fit: cover; object-position: top left; }
+figure.crop-code img { height: 74.5mm; object-fit: cover; object-position: 0 57.5%; }
+figure.crop-decode img { height: 109.6mm; object-fit: cover; object-position: 0 81.7%; }
 figcaption { font-size: 9pt; color: var(--ink-2); margin-top: 3.5pt; }
 .box { border: .8pt solid var(--ink); padding: 8pt 10pt; margin: 8pt 0 10pt; break-inside: avoid; background: var(--paper); }
 .box h3 { margin-top: 0; }
@@ -102,7 +105,7 @@ td code { white-space: nowrap; }
   <ol>
     <li><span class="n">Start here</span><span class="t">Install and open the interface</span><span class="d">Two commands, then a window of its own.</span></li>
     <li><span class="n">Lesson 1</span><span class="t">The overview</span><span class="d">What kind of program is this?</span></li>
-    <li><span class="n">Lesson 2</span><span class="t">The file map and sections</span><span class="d">Where the code and data sit inside the file.</span></li>
+    <li><span class="n">Lesson 2</span><span class="t">The file map and sections</span><span class="d">Where the code and data sit, and how random they look.</span></li>
     <li><span class="n">Lesson 3</span><span class="t">Strings</span><span class="d">The readable text a program carries.</span></li>
     <li><span class="n">Lesson 4</span><span class="t">Code</span><span class="d">Functions, calls and a small vocabulary.</span></li>
     <li><span class="n">Lesson 5</span><span class="t">Imports</span><span class="d">What the program asks the system to do.</span></li>
@@ -134,7 +137,8 @@ td code { white-space: nowrap; }
       <pre><code>vex gui</code></pre>
       vex opens in a window of its own, served from your own computer. Keep the terminal open while you work; closing the window stops vex. It is a window of Chrome, Chromium, Edge or Brave, with a profile of its own that shares nothing with your browsing. Without one of these you get a browser tab instead; stop it with Ctrl+C in the terminal. If nothing opens, copy the link the terminal prints.</li>
   </ol>
-  <figure><img src="img/welcome.png" alt="The vex start page"><figcaption>The start page. Drop a file anywhere on it, or choose <b>Open file or folder</b>.</figcaption></figure>
+  <figure class="crop"><img src="img/welcome.png" alt="The vex start page"><figcaption>The start page. Drop a file anywhere on it, or choose <b>Open File</b>.</figcaption></figure>
+  <p>When vex starts, its logo plays a short opening animation, once per session. Click anywhere, or press Escape, Enter or Space, to skip it. The gear button at the top right opens the settings: a dark or light look, and a switch that keeps the animated background still.</p>
   <h3>The practice files</h3>
   <p>The folder <code>tests/fixtures/bin</code> holds small programs made for practising. The lessons use <code>hello_pe64.exe</code>, a tiny Windows program that prints two lines of text. Linux programs such as <code>libsample.so</code> in the same folder work in exactly the same way, and you can open either kind on either system.</p>
 </section>
@@ -144,19 +148,30 @@ td code { white-space: nowrap; }
   <h2>The overview</h2>
   <p class="goal">Goal: say what a program is before looking at any detail.</p>
   <ol>
-    <li>Choose <b>Open file or folder</b>, go to <code>tests/fixtures/bin</code> and pick <code>hello_pe64.exe</code>.</li>
-    <li>You land on <b>Overview</b>. Read the block at the top from left to right.</li>
+    <li>Choose <b>Open File</b>, go to <code>tests/fixtures/bin</code> and pick <code>hello_pe64.exe</code>. You can also type or paste its path into the box at the top of that window and choose <b>Open</b>.</li>
+    <li>The file opens in a tab of its own at the top, and you land on <b>Overview</b>. The card above the view gives the file's name, folder, system, processor and size.</li>
+    <li>Read the three cards in the middle from left to right: <b>File Information</b>, <b>Protections &amp; Security</b> and <b>Quick Insights</b>.</li>
   </ol>
-  <figure><img src="img/overview.png" alt="Overview of the practice program"><figcaption>The overview: identity at the top, then build settings, libraries and notable strings.</figcaption></figure>
+  <figure><img src="img/overview.png" alt="Overview of the practice program"><figcaption>The overview: the file's card and the row of view tabs at the top, the file map, then the three cards, an entropy chart and the sections.</figcaption></figure>
   <table>
     <tr><th>Field</th><th>What it tells you</th></tr>
     <tr><td>Type</td><td>Linux or Windows, program or library, and the processor it was built for.</td></tr>
-    <tr><td>Entry point</td><td>The address of the first instruction.</td></tr>
+    <tr><td>Entry Point</td><td>The address of the first instruction.</td></tr>
     <tr><td>Entropy</td><td>How random the bytes look, from 0 to 8. A value above about 7.2 usually means the contents are compressed.</td></tr>
-    <tr><td>SHA-256</td><td>A fingerprint of the file. Two files with the same fingerprint are identical.</td></tr>
-    <tr><td>Protections</td><td>Safety features the program was built with, such as address randomisation. Green means present.</td></tr>
-    <tr><td>Libraries</td><td>Other files the program needs in order to start.</td></tr>
+    <tr><td>Protections &amp; Security</td><td>Safety features the program was built with, such as address randomisation. A green tick means present; a red cross means a usual one is missing.</td></tr>
+    <tr><td>Libraries</td><td>Other files the program needs in order to start. The arrow beside them opens <b>Imports</b>.</td></tr>
+    <tr><td>SHA-256</td><td>A fingerprint of the file, under <b>Hashes</b>. Two files with the same fingerprint are identical. The button beside it copies it.</td></tr>
   </table>
+  <div class="keep">
+  <h3>Finding your way around</h3>
+  <ul>
+    <li><b>The sidebar</b> on the left lists every view, grouped into <b>Analysis</b>, <b>Resources</b> and <b>Advanced</b>. The row of tabs under the file's card leads to the same views.</li>
+    <li><b>The file's card</b> has four buttons. <b>Open File</b> opens another file, <b>Refresh</b> reads this one again after it has changed, <b>Export Report</b> saves what vex found to your downloads, as a <b>Markdown report</b> to read or as <b>JSON data</b> for other tools, and <b>Tools</b> leads to Split, Decode, Patching / Modify and Assets.</li>
+    <li><b>The tabs at the top</b> hold one file each. <b>+</b> opens another file, and each tab keeps its own place; × closes it.</li>
+    <li><b>The box at the top right</b> jumps to an address or a function name, such as <code>entry</code>.</li>
+    <li><b>The status bar</b> at the bottom shows whether vex has finished reading the file, how long it took, and the file's size and format.</li>
+  </ul>
+  </div>
   <p class="learned"><b>You learned:</b> the practice file is a 64-bit Windows program for x86-64 processors that needs one system library, <code>KERNEL32.dll</code>.</p>
 </section>
 
@@ -164,13 +179,13 @@ td code { white-space: nowrap; }
   <div class="lesson-no">Lesson 2</div>
   <h2>The file map and sections</h2>
   <p class="goal">Goal: know where the code and the data are.</p>
-  <p>The strip under the top bar is the whole file, drawn to scale from its first byte to its last. Each kind of content has its own hatching, the way materials do in a technical drawing.</p>
+  <p>The strip in the <b>Binary Layout</b> card, at the top of the overview, is the whole file, drawn to scale from its first byte to its last. Each kind of content has its own hatching, the way materials do in a technical drawing; the key is on the right of the card.</p>
   <ol>
-    <li>Move the pointer along the strip. The line on the right names each part and gives its position and size.</li>
-    <li>Choose <b>Sections</b> on the left for the same information as a table.</li>
+    <li>Move the pointer along the strip. The line at the top right of the card names each part and gives its position and size. Click a part to see its bytes.</li>
+    <li>Choose <b>Sections</b> in the sidebar for the same information as a table.</li>
     <li>Click a section name, for example <code>.rdata</code>, to see its bytes in the <b>Bytes</b> view.</li>
   </ol>
-  <figure><img src="img/sections.png" alt="The Sections table"><figcaption>Sections of the practice program. "read, run" marks code.</figcaption></figure>
+  <figure class="crop-table"><img src="img/sections.png" alt="The Sections table"><figcaption>Sections of the practice program. "R-X" and "read, run" mark code.</figcaption></figure>
   <div class="two">
     <table>
       <tr><th>Windows name</th><th>Holds</th></tr>
@@ -187,7 +202,17 @@ td code { white-space: nowrap; }
       <tr><td><code>.plt</code>, <code>.got</code></td><td>Links to library functions</td></tr>
     </table>
   </div>
-  <p class="learned"><b>You learned:</b> a program is made of named parts with different jobs, and the code is often a small slice of the file. If the map shows "appended data" at the end, extra content is attached after the program; many games and installers store their files there.</p>
+  <div class="keep">
+  <h3>How random the bytes are</h3>
+  <p>Entropy, which you met in lesson 1, can also be measured part by part. The <b>Entropy</b> view draws it along the whole file, one block at a time, so a packed or encrypted stretch stands out as a plateau near 8.</p>
+  <ol>
+    <li>Choose <b>Entropy</b> in the sidebar, under <b>Advanced</b>. <b>Explore</b> on the overview's entropy card opens it too.</li>
+    <li>Move the pointer along the chart. The line above it gives the block, its position and its entropy; click to see the block's bytes.</li>
+    <li>Read the shading and the dashed line: the bands are the parts from the file map, in the same colours, and blocks above the dashed line at 7.2 usually hold compressed or encrypted data. The cards on the right sum up the file, and <b>Entropy by section</b> below the chart gives one figure per section.</li>
+  </ol>
+  </div>
+  <figure class="crop"><img src="img/entropy.png" alt="The Entropy view"><figcaption>The Entropy view of the practice program. Every block stays well below 7.2: nothing in it is packed or encrypted.</figcaption></figure>
+  <p class="learned"><b>You learned:</b> a program is made of named parts with different jobs, and the code is often a small slice of the file. If the map shows "appended data" at the end, extra content is attached after the program; many games and installers store their files there. The Entropy view shows whether any part looks packed or encrypted.</p>
 </section>
 
 <section class="lesson">
@@ -196,13 +221,13 @@ td code { white-space: nowrap; }
   <p class="goal">Goal: find a piece of readable text and see which code uses it.</p>
   <p>Programs keep their messages, file names and web addresses as plain text. Reading them is the quickest way to get a feel for what a program does.</p>
   <ol>
-    <li>Choose <b>Strings</b>.</li>
+    <li>Choose <b>Strings</b> in the sidebar.</li>
     <li>Type <code>fixture</code> in the search box. The list narrows as you type.</li>
     <li>Tick <b>Only links, addresses and paths</b> to keep just the strings vex recognises as web addresses, IP addresses, e-mail addresses, file paths or registry keys. Untick it again.</li>
     <li>On the row that starts with "Hello from", choose <b>Find uses</b>. vex answers with the function that reads this text.</li>
     <li>Click the answer to see that function in the <b>Code</b> view.</li>
   </ol>
-  <figure><img src="img/strings.png" alt="The Strings view"><figcaption>The Strings view. <b>Find uses</b> connects a piece of text to the function that reads it.</figcaption></figure>
+  <figure class="crop-table"><img src="img/strings.png" alt="The Strings view"><figcaption>The Strings view. <b>Find uses</b> connects a piece of text to the function that reads it.</figcaption></figure>
   <p class="learned"><b>You learned:</b> strings work as an index into the code. A message or a file name leads you to the function that handles it.</p>
 </section>
 
@@ -212,12 +237,12 @@ td code { white-space: nowrap; }
   <p class="goal">Goal: follow what a function does without knowing every instruction.</p>
   <p>The <b>Code</b> view has three columns: the functions vex found, the instructions of the one you chose, and <b>Used by</b>, which lists the places that call it.</p>
   <ol>
-    <li>Choose <b>Code</b>, then <code>print</code> in the function list.</li>
+    <li>Choose <b>Code (Disassembly)</b> in the sidebar, then <code>print</code> in the function list.</li>
     <li>Read the green lines first. Those are calls, and the note after the semicolon names what is called. Here the function calls <code>text_length</code>, then two Windows functions, <code>GetStdHandle</code> and <code>WriteFile</code>.</li>
     <li>Click the address on the <code>text_length</code> line to go to that function. <b>Back</b> returns you.</li>
     <li>Look at <b>Used by</b>: it shows that <code>print</code> is called twice from <code>entry</code>.</li>
   </ol>
-  <figure class="crop"><img src="img/code.png" alt="The Code view"><figcaption>The Code view. Left: functions. Middle: instructions with notes. Right: who uses this function.</figcaption></figure>
+  <figure class="crop-code"><img src="img/code.png" alt="The Code view"><figcaption>The Code view. Left: functions. Middle: instructions with notes. Right: who uses this function.</figcaption></figure>
   <div class="keep">
   <h3>A small vocabulary</h3>
   <table>
@@ -240,10 +265,10 @@ td code { white-space: nowrap; }
   <p class="goal">Goal: see what a program asks the operating system to do.</p>
   <p>A program does not draw windows, open files or use the network by itself. It asks the system, by calling functions in system libraries. The list of those functions is a good summary of what the program is able to do.</p>
   <ol>
-    <li>Choose <b>Imports</b>. Functions are grouped by the library they come from.</li>
+    <li>Choose <b>Imports</b> in the sidebar. Functions are grouped by the library they come from.</li>
     <li>Find <code>WriteFile</code> and choose <b>Find uses</b>. The answer is the function you read in lesson 4.</li>
   </ol>
-  <figure><img src="img/imports.png" alt="The Imports view"><figcaption>Imports of the practice program, grouped by library.</figcaption></figure>
+  <figure class="crop-table"><img src="img/imports.png" alt="The Imports view"><figcaption>Imports of the practice program, grouped by library.</figcaption></figure>
   <table>
     <tr><th>If you see…</th><th>The program probably…</th></tr>
     <tr><td><code>CreateFile</code>, <code>ReadFile</code>, <code>fopen</code></td><td>reads or writes files</td></tr>
@@ -251,6 +276,7 @@ td code { white-space: nowrap; }
     <tr><td><code>RegOpenKey</code>, <code>RegSetValue</code></td><td>reads or changes Windows settings</td></tr>
     <tr><td><code>CreateWindow</code>, <code>MessageBox</code></td><td>shows windows and dialogs</td></tr>
   </table>
+  <p>The <b>Exports</b> view, just below <b>Imports</b> in the sidebar, is the other side of the exchange: the functions a file offers to other programs. Most programs offer none; open <code>sample.dll</code> or <code>libsample.so</code> from the same folder to see a library's list.</p>
   <p class="learned"><b>You learned:</b> imports show a program's abilities at a glance, and <b>Find uses</b> shows where each one is used.</p>
 </section>
 
@@ -260,20 +286,20 @@ td code { white-space: nowrap; }
   <p class="goal">Goal: find out which engine a game uses, look inside an asset pack, and swap one file for your own.</p>
   <p>Games keep their pictures, sounds and scripts in packs. vex can open the common open formats: ZIP-based packs (<code>.zip</code>, <code>.pk3</code>, <code>.love</code>, <code>.jar</code>), Quake <code>.pak</code>, Doom <code>.wad</code>, Godot <code>.pck</code>, Electron <code>.asar</code> and Ren'Py <code>.rpa</code>.</p>
   <ol>
-    <li>Choose <b>Open file or folder</b>, go to the game's folder and choose <b>Open this folder as a game</b>. To practise, use <code>examples/demo_game</code>, a pretend game that comes with vex.</li>
+    <li>Choose <b>Open File</b>, go to the game's folder and choose <b>Open this folder as a game</b>. To practise, use <code>examples/demo_game</code>, a pretend game that comes with vex.</li>
     <li>The <b>Assets</b> view names the engine if it recognises one, explains why, and lists the packs it found.</li>
     <li>Click a pack. Its files appear in a list. Select one to preview it: pictures are shown, text is displayed, anything else is shown as bytes.</li>
-    <li>To take everything out, choose <b>Extract everything to a folder</b>.</li>
-    <li>To change a file, select it, choose <b>Replace with my file</b>, pick your file, and give a name for the new pack. vex writes a complete new pack with your file in place of the old one.</li>
+    <li>To take everything out, choose <b>Extract everything to a folder…</b></li>
+    <li>To change a file, select it, choose <b>Replace with my file…</b>, pick your file, and give a name for the new pack. vex writes a complete new pack with your file in place of the old one.</li>
   </ol>
-  <figure class="crop-tall"><img src="img/assets.png" alt="The Assets view with a pack open"><figcaption>The Assets view: engine at the top, packs below, and the contents of the pack you opened with a preview.</figcaption></figure>
+  <figure class="crop-short"><img src="img/assets.png" alt="The Assets view with a pack open"><figcaption>The practice game in a third tab: the pack vex found, and the files inside it with a preview.</figcaption></figure>
   <div class="box">
     <h3>Good to know</h3>
     <ul>
       <li>The original pack stays as it was. To try your version, keep a copy of the original and put the new pack in its place.</li>
       <li>Encrypted packs are shown as encrypted and are not opened.</li>
       <li>Some engines use formats vex does not rebuild. In that case the Assets view names the community tool made for that engine.</li>
-      <li>Windows programs can also carry icons and version details inside them. They appear in the same view under <b>Built-in resources</b>.</li>
+      <li>Icons and version details in Windows programs appear here too, under <b>Built-in resources</b>.</li>
     </ul>
   </div>
   <p class="learned"><b>You learned:</b> how to go from a game folder to the files inside its packs, and how to make a new pack with one file changed.</p>
@@ -285,12 +311,12 @@ td code { white-space: nowrap; }
   <p class="goal">Goal: save the parts of a program as separate files, and know what each file is.</p>
   <p>Lesson 2 showed the parts of a program on the file map. <b>Split</b> saves each part as its own file, together with a copy of every complete file it finds inside the program, such as a picture, a sound or a ZIP archive. The program itself is not changed, and nothing is run.</p>
   <ol>
-    <li>Open <code>bundle_pe64.exe</code> from <code>examples/split_sample</code>: a small practice program with a picture, a sound and a ZIP archive attached to its end.</li>
-    <li>Choose <b>Split</b> on the left. The table lists every piece and the file name it will get. Nothing is saved yet.</li>
+    <li>Choose <b>+</b> next to the tabs and open <code>bundle_pe64.exe</code> from <code>examples/split_sample</code>, a small practice program with a picture, a sound and a ZIP archive attached to its end. It opens in a tab of its own.</li>
+    <li>Choose <b>Split</b> in the sidebar, under <b>Advanced</b>, or from <b>Tools</b> on the file's card. The table lists every piece and the file name it will get. Nothing is saved yet.</li>
     <li>Choose <b>Split into a folder…</b> and type a name for a new or empty folder.</li>
     <li>Open the folder and read <code>index.txt</code> first.</li>
   </ol>
-  <figure class="crop-short"><img src="img/split.png" alt="The Split view"><figcaption>The Split view lists every piece before anything is saved: the parts in file order first, then the files found inside.</figcaption></figure>
+  <figure><img src="img/split.png" alt="The Split view"><figcaption>The Split view lists every piece before anything is saved: the parts in file order first, then the files found inside.</figcaption></figure>
   <table>
     <tr><th>In the folder</th><th>What it holds</th></tr>
     <tr><td><code>parts/</code></td><td>The program cut into its parts, in file order: headers, code, data, tables and anything attached after the program. Put back together in order, they give the original file, byte for byte.</td></tr>
@@ -312,15 +338,15 @@ td code { white-space: nowrap; }
   <div class="lesson-no">Lesson 8</div>
   <h2>Decode and decipher data</h2>
   <p class="goal">Goal: turn encoded or encrypted data back into something readable, one step at a time.</p>
-  <p>Data is not always stored in the clear. A piece of text might be base64, a lump of bytes might be gzipped, and a string from a file might be scrambled with a cipher. The <b>Decode</b> view is a small workbench for turning such data back into something you can read. It works only on data you give it: some text you type, a hex or base64 blob you paste, or a range of the program you have open.</p>
+  <p>Data is not always stored in the clear. A piece of text might be base64, a lump of bytes might be gzipped, and a string from a file might be scrambled with a cipher. The <b>Decode</b> view is a small workbench for turning such data back into something you can read. It works only on data you give it.</p>
   <ol>
-    <li>Choose <b>Decode</b> on the left.</li>
-    <li>Say where the data comes from. Type or paste some text, paste a <b>hex</b> or <b>base64</b> blob, or pick a range of the open program by its offset and length. For a quick try, choose <b>Base64</b> and paste <code>H4sIAAAAAAAC/8tIzcnJV0grys9VKEut4AIA4cVYqQ8AAAA=</code>.</li>
-    <li>Build a <b>recipe</b> by adding operations one after another; vex applies them in order, top to bottom. For the blob above, add <code>gunzip</code> — it was a gzipped message. (Starting instead from <b>Text</b>, you would add <code>from-base64</code> first, then <code>gunzip</code>.)</li>
-    <li>Read the result under <b>Output</b>: the data as text (tick <b>Hex dump</b> for the raw bytes), the size, and a short guess of what it is — <code>printable text</code>, <code>PNG image</code>, <code>gzip</code>, and so on. Here it reads <code>hello from vex</code>.</li>
-    <li>To decrypt, add a cipher step and type in the key you already have: for example <code>xor</code> with its key, <code>aes</code> with its key and starting value (IV), or <code>chacha20</code> with its key and nonce. Steps the edition you are running cannot do are greyed out. The file <code>examples/decode_sample/secrets.txt</code> has five small puzzles to practise on, each with a hint.</li>
+    <li>Choose <b>Decode</b> in the sidebar, under <b>Advanced</b>.</li>
+    <li>Say where the data comes from, under <b>Input</b>: type or paste some text, paste a <b>Hex</b> or <b>Base64</b> blob, or pick a range of the open program with <b>From this file</b>. For a quick try, choose <b>Base64</b> and paste <code>H4sIAAAAAAAC/8tIzcnJV0grys9VKEut4AIA4cVYqQ8AAAA=</code>.</li>
+    <li>Build a <b>recipe</b> by choosing operations one after another under <b>Operations</b>; vex applies them in order, top to bottom. For the blob above, add <code>gunzip</code> — it was a gzipped message. (Starting instead from <b>Text</b>, you would add <code>from-base64</code> first, then <code>gunzip</code>.)</li>
+    <li>Read the result under <b>Output</b>: the data as text (tick <b>Hex dump</b> for the raw bytes), its size and a guess of what it is, such as <code>printable text</code> or <code>gzip</code>. Here it reads <code>hello from vex</code>.</li>
+    <li>To decrypt, add a cipher step and type in the key you already have: for example <code>xor</code> with its key, <code>aes</code> with its key and starting value (IV), or <code>chacha20</code> with its key and nonce. Steps the edition you are running cannot do are greyed out.</li>
   </ol>
-  <figure class="crop-decode"><img src="img/decode.png" alt="The Decode view"><figcaption>The Decode view: the input at the top, the operations you can add on the left, and the result on the right with the steps that produced it.</figcaption></figure>
+  <figure class="crop-decode"><img src="img/decode.png" alt="The Decode view"><figcaption>The Decode view: the input at the top, the operations and the recipe on the left, the result on the right.</figcaption></figure>
   <table>
     <tr><th>Group</th><th>What it does</th></tr>
     <tr><td>Encoding</td><td>Turn base64, base32, hex, base85, URL or quoted-printable text back into bytes; also ROT13, reverse, and reading one character set as another.</td></tr>
@@ -329,7 +355,7 @@ td code { white-space: nowrap; }
     <tr><td>Symmetric</td><td>AES, ChaCha20, RC4, DES and Triple DES — decrypted only with the key you supply.</td></tr>
     <tr><td>Hash</td><td>The MD5, SHA-1, SHA-256 or CRC32 of the data (one way, for checking — not a way to decode).</td></tr>
   </table>
-  <p><b>Auto-solve</b> tries every Caesar shift, every single-byte XOR key or a short repeating XOR key, and ranks the results by how much they read like English. They help with a simple puzzle; they are not an attack on real encryption, and they only ever work on the data you give them.</p>
+  <p>Text from the <b>Strings</b> view comes here with the <b>Decode</b> link beside it, and the bytes on show in the <b>Bytes</b> view with <b>Open in Decode</b>. <b>Auto-solve</b>, under the output, tries every Caesar shift, every single-byte XOR key or a short repeating XOR key, and ranks the results by how much they read like English. They help with a simple puzzle; they are not an attack on real encryption, and they only ever work on the data you give them. To practise, <code>examples/decode_sample/secrets.txt</code> has five small puzzles, each with a hint.</p>
   <div class="box">
     <h3>What decode does not do</h3>
     <ul>
@@ -352,6 +378,7 @@ td code { white-space: nowrap; }
     <tr><td><code>vex info FILE</code></td><td>The overview (lesson 1)</td></tr>
     <tr><td><code>vex report FILE</code></td><td>Overview, sections, imports, notable strings and functions together</td></tr>
     <tr><td><code>vex sections FILE</code></td><td>The section table (lesson 2)</td></tr>
+    <tr><td><code>vex entropy FILE [--points N]</code></td><td>Entropy along the file, block by block (lesson 2)</td></tr>
     <tr><td><code>vex hexdump FILE 0x2000</code></td><td>Bytes at an address</td></tr>
     <tr><td><code>vex strings FILE --grep TEXT</code></td><td>Strings containing TEXT (lesson 3)</td></tr>
     <tr><td><code>vex strings FILE --tagged</code></td><td>Only links, addresses and paths</td></tr>
@@ -360,7 +387,7 @@ td code { white-space: nowrap; }
     <tr><td><code>vex xrefs FILE NAME</code></td><td>Where a function or import is used</td></tr>
     <tr><td><code>vex xrefs FILE --string TEXT</code></td><td>Where a string is used</td></tr>
     <tr><td><code>vex imports FILE</code></td><td>Imported functions (lesson 5)</td></tr>
-    <tr><td><code>vex exports FILE</code></td><td>Functions a library offers</td></tr>
+    <tr><td><code>vex exports FILE</code></td><td>Functions a library offers (lesson 5)</td></tr>
     <tr><td><code>vex engine FOLDER</code></td><td>The game engine and its packs (lesson 6)</td></tr>
     <tr><td><code>vex assets list PACK</code></td><td>Files in a pack</td></tr>
     <tr><td><code>vex assets extract PACK FOLDER</code></td><td>Unpacks a pack</td></tr>

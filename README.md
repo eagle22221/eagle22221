@@ -15,7 +15,7 @@ A step-by-step beginner's guide with screenshots is in
 |---|---|
 | Identity | Format, CPU, entry point, hashes, build details, compiler, debug-file path |
 | Protections | NX/DEP, PIE/ASLR, RELRO, stack canaries, Control Flow Guard, signatures |
-| Layout | Sections and segments with permissions and entropy; data appended after the program |
+| Layout | Sections and segments with permissions and entropy; entropy block by block along the whole file; data appended after the program |
 | Imports and exports | Which system functions a program uses, and where it calls them |
 | Strings | ASCII and UTF-16 text, with URLs, IP addresses, e-mails, paths and registry keys flagged |
 | Code | Disassembly (x86, x86-64, ARM64; ARM, MIPS, PowerPC best-effort) with names, strings and imports annotated |
@@ -54,7 +54,7 @@ vex gui --browser      # use a tab in your web browser instead of a window
 ```
 
 This starts a small server on your own computer and opens the interface in a window of its own.
-Nothing is sent anywhere. Drop a file on the window or use **Open file or folder**.
+Nothing is sent anywhere. Drop a file on the window or use **Open File**.
 
 The window is an app window of Google Chrome, Chromium, Microsoft Edge or Brave, whichever is
 installed: one window with no tabs or address bar, and a separate throw-away profile that shares
@@ -63,17 +63,33 @@ the window. Without one of these browsers, vex opens a normal tab in your web br
 press Ctrl+C in the terminal when you are done. `--browser` always uses a normal tab, and
 `--no-browser` only prints the link.
 
-- **Overview** — what the file is, how it is protected, what it needs.
-- **Techniques** — protection and evasion techniques (anti-debug, VM checks, injection, hooking, packing, drivers) with their evidence; "Find uses" jumps to the code that uses each API.
-- **Code** — functions on the left, instructions in the middle, "used by" on the right. Click a call to follow it.
-- **Strings** — search the text in the file; **Find uses** jumps to the code that reads it.
-- **Imports**, **Sections**, **Bytes** — the supporting tables and a hex view.
-- **Assets** — the game engine, its asset packs, and resources inside Windows programs.
-- **Split** — lists the parts of the program and the complete files found inside it, and saves them as separate files in a folder you choose.
-- **Decode** — a decode and cipher workbench: paste or select some data, chain decoding and decryption steps into a recipe, and read the result as text, hex and a guessed file type.
-- **Modify** — save a patched copy.
+Each file you open gets a tab of its own across the top, and **+** opens another. A card at the
+top of each tab names the file and holds **Open File**, **Refresh** (read the file again),
+**Export Report** (a Markdown or JSON summary of what vex found, saved to your downloads) and
+**Tools** (Split, Decode, Patching / Modify and Assets). Under it, a row of tabs leads to the
+views, which the sidebar lists in three groups; the status bar at the bottom says when the
+analysis is complete and shows the file's size and format.
 
-The strip across the top is the file drawn to scale: click any part to see its bytes.
+- **Overview** — what the file is, how it is protected and what it needs, with a map of the file
+  drawn to scale (click any part to see its bytes), an entropy chart and the sections.
+- **Analysis**
+  - **Techniques** — protection and evasion techniques (anti-debug, VM checks, injection, hooking, packing, drivers) with their evidence; "Find uses" jumps to the code that uses each API.
+  - **Code (Disassembly)** — functions on the left, instructions in the middle, "used by" on the right. Click a call to follow it.
+  - **Strings** — search the text in the file; **Find uses** jumps to the code that reads it.
+  - **Imports**, **Exports** — the functions the program borrows from libraries, and those it offers to other programs.
+  - **Sections**, **Bytes (Hex)** — the section table and a hex view.
+- **Resources**
+  - **Assets** — the game engine, its asset packs, and resources inside Windows programs.
+- **Advanced**
+  - **Entropy** — a chart of how random the bytes are, block by block along the whole file, over the file's parts; packed or encrypted data stands out near 8. Click a block to see its bytes.
+  - **Split** — lists the parts of the program and the complete files found inside it, and saves them as separate files in a folder you choose.
+  - **Decode** — a decode and cipher workbench: paste or select some data, chain decoding and decryption steps into a recipe, and read the result as text, hex and a guessed file type.
+  - **Patching / Modify** — save a patched copy.
+
+When vex starts, its logo plays a short opening animation, once per session; a click, Escape,
+Enter or Space skips it. The gear button at the top right switches between the dark and the light
+look and turns the animated background off; the background also stays still when the system asks
+for reduced motion.
 
 ## The command line
 
@@ -90,6 +106,7 @@ vex disasm FILE [LOCATION] [-n COUNT]
 vex xrefs FILE TARGET             who uses this function, import or address
 vex xrefs FILE --string TEXT      who uses strings containing TEXT
 vex hexdump FILE [LOCATION] [--offset N] [-n BYTES]
+vex entropy FILE [--points N]     entropy along the file, block by block
 vex techniques FILE               protection and evasion techniques in a program
 vex split FILE FOLDER             save the parts of a program as separate files
 vex decode SOURCE [--recipe ...]  decode, decompress and decipher supplied data
