@@ -79,8 +79,8 @@
   --spark-halo: rgba(196, 181, 253, .55);
   --code-ink: #F4A23C;
   --data-ink: #3DDBC4;
-  --credit: #9DA3C4;
-  --credit-scrim: rgba(3, 4, 16, .7);
+  --credit: #C3C7E2;
+  --credit-scrim: rgba(4, 5, 18, .78);
   --r-xl: 18px;
   --r-lg: 14px;
   --r-md: 10px;
@@ -149,11 +149,15 @@
   --spark: #FFFFFF;
   --spark-halo: rgba(255, 255, 255, .6);
   --credit: #FFFFFF;
-  --credit-scrim: rgba(8, 28, 112, .62);
+  --credit-scrim: rgba(8, 28, 112, .6);
   /* a soft shadow under text that sits on the sky, for where a ribbon passes */
   --sky-shadow: 0 1px 2px rgba(6, 22, 92, .55), 0 0 10px rgba(6, 22, 92, .4);
   color-scheme: light;
 }
+/* Each surface restarts the text colour from its own tokens (with no
+   specificity, so any rule that names a colour still wins). */
+:where(.sidebar, .topbar, .scroller, .card, .panel, .engine, .box, .table-wrap, .pane, .notice, .stat, .steps li,
+  .entropy-big, .popover, .dialog, .toast, .statusbar, .viewtabs) { color: var(--ink); }
 /* the sky set: whatever sits directly on the background */
 :root[data-theme="light"] :is(.sidebar, .topbar, .scroller) {
   --ink: #FFFFFF;
@@ -195,11 +199,11 @@ a { color: var(--link); }
 /* --- animated backdrop -------------------------------------------------- */
 /* One sky behind the sidebar and the main area. From the back: three large,
    very soft radial-gradient glows (dark theme; no blur filter) drifting and
-   breathing; a far layer of soft sparkles; three layers of ribbons; a near
+   breathing; a far layer of soft sparkles; two layers of ribbons; a near
    layer of fine sparkles; and a few motes that twinkle.
    Each ribbon layer is an SVG tile that repeats seamlessly across (its glow
-   is drawn into the tile), laid twice side by side on an element one tile
-   wider than the window; flowing moves it by exactly one tile per cycle, so
+   is drawn into the tile), repeated across an element one tile wider than
+   the window; flowing moves it by exactly one tile per cycle, so
    the loop never shows. The ribbons in a tile run level: a fixed skew on the
    layer's parent tilts them so they rise from below the sidebar menu at the
    lower left towards the right (each layer at its own angle, so they fan
@@ -230,7 +234,9 @@ a { color: var(--link); }
   background: radial-gradient(closest-side, var(--glow-b), transparent); }
 .glow-c { width: 64vmax; height: 56vmax; right: -26vmax; top: 18vh;
   background: radial-gradient(closest-side, var(--glow-c), transparent); }
-:root[data-theme="light"] .glow { display: none; }
+/* hidden rather than removed in the light theme, so their animations keep
+   to the shared clock when the theme changes back */
+:root[data-theme="light"] .glow { visibility: hidden; }
 
 /* ribbons: --rise-x is where a layer's centre line meets the bottom of the
    window, --rise how far above the bottom it is at the right-hand edge */
@@ -240,20 +246,17 @@ a { color: var(--link); }
   transform: skewY(-24deg);
   transform: skewY(atan2(calc(-1 * var(--rise)), calc(100vw - var(--rise-x))));
 }
-.ribbons-a { --rise: min(56vh, 60vw); }
-.ribbons-b { --rise: min(42vh, 46vw); }
-.ribbons-c { --rise: min(68vh, 74vw); }
+.ribbons-a { --rise: min(54vh, 58vw); }
+.ribbons-b { --rise: min(66vh, 72vw); }
 .ribbon { position: absolute; left: 0; top: 0; height: 100%; will-change: transform; background-repeat: repeat-x; background-position: 0 0; }
 .ribbon-a { width: calc(100vw + 1800px); background-size: 1800px 360px; background-image: url("/static/ribbons-dark-a.svg"); }
 .ribbon-b { width: calc(100vw + 2100px); background-size: 2100px 360px; background-image: url("/static/ribbons-dark-b.svg"); }
-.ribbon-c { width: calc(100vw + 1500px); background-size: 1500px 360px; background-image: url("/static/ribbons-dark-c.svg"); }
 :root[data-theme="light"] .ribbon-a { background-image: url("/static/ribbons-light-a.svg"); }
 :root[data-theme="light"] .ribbon-b { background-image: url("/static/ribbons-light-b.svg"); }
-:root[data-theme="light"] .ribbon-c { background-image: url("/static/ribbons-light-c.svg"); }
 
 /* sparkles */
 .sparkles { position: absolute; left: 0; top: 0; will-change: transform; background-repeat: repeat; background-position: 0 0; }
-.sparkles-a { width: calc(100% + 480px); height: calc(100% + 360px); background-size: 480px 360px; background-image: url("/static/sparkles-dark-a.svg"); }
+.sparkles-a { width: calc(100% + 480px); height: calc(100% + 480px); background-size: 480px 480px; background-image: url("/static/sparkles-dark-a.svg"); }
 .sparkles-b { width: 100%; height: calc(100% + 630px); background-size: 840px 630px; background-image: url("/static/sparkles-dark-b.svg"); }
 :root[data-theme="light"] .sparkles-a { background-image: url("/static/sparkles-light-a.svg"); }
 :root[data-theme="light"] .sparkles-b { background-image: url("/static/sparkles-light-b.svg"); }
@@ -283,17 +286,18 @@ a { color: var(--link); }
 .mote:nth-child(17) { left: 47%; top: 29%; } .mote:nth-child(18) { left: 81%; top: 51%; }
 
 @media (prefers-reduced-motion: no-preference) {
-  /* glows: steps per keyframe segment (= duration / 2) x 250 ms */
+  /* glows: steps per keyframe segment (= duration / 2) x 250 ms; each step
+     moves them a whole number of pixels, which the compositor draws faster */
   :root:not([data-motion="off"]) .glow-a { animation: drift-a 38s steps(76) infinite alternate; }
   :root:not([data-motion="off"]) .glow-b { animation: drift-b 46s steps(92) infinite alternate; }
   :root:not([data-motion="off"]) .glow-c { animation: drift-c 54s steps(108) infinite alternate; }
-  /* ribbons: one tile per cycle, a single segment; nearer layers move faster */
-  :root:not([data-motion="off"]) .ribbon-a { animation: ribbon-a 300s steps(1200) infinite; }
-  :root:not([data-motion="off"]) .ribbon-b { animation: ribbon-b 420s steps(1680) infinite; }
-  :root:not([data-motion="off"]) .ribbon-c { animation: ribbon-c 450s steps(1800) infinite; }
-  /* sparkles: one tile per cycle, a single segment */
-  :root:not([data-motion="off"]) .sparkles-a { animation: sparkles-a 240s steps(960) infinite; }
-  :root:not([data-motion="off"]) .sparkles-b { animation: sparkles-b 420s steps(1680) infinite; }
+  /* ribbons: one tile per cycle, a single segment, whole pixels a step (2 for
+     the near layer, 1 for the far one) */
+  :root:not([data-motion="off"]) .ribbon-a { animation: ribbon-a 225s steps(900) infinite; }
+  :root:not([data-motion="off"]) .ribbon-b { animation: ribbon-b 525s steps(2100) infinite; }
+  /* sparkles: one tile per cycle, a single segment, a whole pixel a step */
+  :root:not([data-motion="off"]) .sparkles-a { animation: sparkles-a 120s steps(480) infinite; }
+  :root:not([data-motion="off"]) .sparkles-b { animation: sparkles-b 157.5s steps(630) infinite; }
   /* motes: two keyframe segments */
   :root:not([data-motion="off"]) .mote { animation: twinkle 6s steps(12) infinite; }
   :root:not([data-motion="off"]) .mote:nth-child(2n) { animation-duration: 7.5s; animation-timing-function: steps(15); animation-delay: -2.5s; }
@@ -301,25 +305,25 @@ a { color: var(--link); }
   :root:not([data-motion="off"]) .mote:nth-child(5n) { animation-duration: 5s; animation-timing-function: steps(10); animation-delay: -1.5s; }
   :root:not([data-motion="off"]) .mote:nth-child(7n) { animation-delay: -3.25s; }
 }
+/* every leg is a whole number of pixels per step (76, 92 and 108 steps) */
 @keyframes drift-a {
-  0% { transform: translate3d(0, 0, 0) scale(1); opacity: .82; }
-  50% { transform: translate3d(-9vw, 5vh, 0) scale(1.12); opacity: 1; }
-  100% { transform: translate3d(7vw, 2vh, 0) scale(.94); opacity: .76; }
+  0% { transform: translate3d(0, 0, 0); opacity: .8; }
+  50% { transform: translate3d(-152px, 76px, 0); opacity: 1; }
+  100% { transform: translate3d(76px, 0, 0); opacity: .74; }
 }
 @keyframes drift-b {
-  0% { transform: translate3d(0, 0, 0) scale(1); opacity: .7; }
-  50% { transform: translate3d(12vw, -10vh, 0) scale(1.08); opacity: 1; }
-  100% { transform: translate3d(4vw, 8vh, 0) scale(.92); opacity: .8; }
+  0% { transform: translate3d(0, 0, 0); opacity: .7; }
+  50% { transform: translate3d(184px, -184px, 0); opacity: 1; }
+  100% { transform: translate3d(92px, 92px, 0); opacity: .8; }
 }
 @keyframes drift-c {
-  0% { transform: translate3d(0, 0, 0) scale(.95); opacity: .65; }
-  50% { transform: translate3d(-10vw, 12vh, 0) scale(1.1); opacity: 1; }
-  100% { transform: translate3d(-3vw, -6vh, 0) scale(1); opacity: .7; }
+  0% { transform: translate3d(0, 0, 0); opacity: .65; }
+  50% { transform: translate3d(-216px, 108px, 0); opacity: 1; }
+  100% { transform: translate3d(-108px, -108px, 0); opacity: .7; }
 }
 @keyframes ribbon-a { from { transform: translate3d(-1800px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
 @keyframes ribbon-b { from { transform: translate3d(-2100px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
-@keyframes ribbon-c { from { transform: translate3d(-1500px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
-@keyframes sparkles-a { from { transform: translate3d(-480px, 0, 0); } to { transform: translate3d(0, -360px, 0); } }
+@keyframes sparkles-a { from { transform: translate3d(-480px, 0, 0); } to { transform: translate3d(0, -480px, 0); } }
 @keyframes sparkles-b { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(0, -630px, 0); } }
 @keyframes twinkle {
   0% { transform: translate3d(0, 0, 0) scale(.4); opacity: 0; }
@@ -428,8 +432,8 @@ label.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13
 .credit { position: relative; z-index: 0; margin: 0; font-size: 11.5px; color: var(--credit); letter-spacing: .02em; max-width: none;
   text-shadow: 0 1px 2px rgba(3, 4, 16, .6), 0 0 8px rgba(3, 4, 16, .5); }
 .credit::before {
-  content: ""; position: absolute; z-index: -1; inset: -16px -30px; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(closest-side, var(--credit-scrim), transparent);
+  content: ""; position: absolute; z-index: -1; inset: -18px -40px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, var(--credit-scrim) 50%, transparent);
 }
 :root[data-theme="light"] .credit { text-shadow: var(--sky-shadow); }
 
@@ -764,11 +768,11 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .link:hover { text-decoration: underline; }
 .tag {
   display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .01em; padding: 2px 8px;
-  border-radius: var(--r-pill); margin-right: 5px; color: var(--data);
+  border-radius: var(--r-pill); margin-right: 5px; color: var(--data-ink);
   border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
   background: color-mix(in srgb, currentColor 13%, transparent);
 }
-.tag-url, .tag-ipv4, .tag-email { color: var(--code); }
+.tag-url, .tag-ipv4, .tag-email { color: var(--code-ink); }
 .bar-cell { display: flex; align-items: center; gap: 10px; }
 .meter { flex: none; width: 80px; height: 7px; border-radius: var(--r-pill); background: var(--raised-2); overflow: hidden; }
 .meter > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22C58B, var(--good)); }
@@ -799,7 +803,7 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .insn-text { white-space: pre-wrap; color: var(--ink); }
 .mn { font-weight: 600; }
 .mn-call { color: var(--good); } .mn-jump { color: var(--warn); } .mn-ret { color: var(--overlay); }
-.insn-comment { color: var(--data); overflow-wrap: anywhere; }
+.insn-comment { color: var(--data-ink); overflow-wrap: anywhere; }
 .fn-label { padding: 10px 14px 2px; font-weight: 600; color: var(--accent); font-family: var(--mono); }
 .xref-list { list-style: none; margin: 0; padding: 0; }
 .xref-list li { padding: 9px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
@@ -812,7 +816,7 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .hex-row { display: grid; grid-template-columns: 6.5em 10em 31em 1fr; gap: 0 14px; border-radius: 5px; padding: 0 4px; }
 .hex-row:hover { background: var(--accent-wash); }
 .hex-off, .hex-addr { color: var(--ink-3); }
-.hex-ascii { color: var(--data); }
+.hex-ascii { color: var(--data-ink); }
 
 /* --- assets & modify ---------------------------------------------------- */
 .stack { display: grid; gap: 18px; }
@@ -870,7 +874,7 @@ tbody tr.is-selected { background: var(--accent-wash); box-shadow: inset 3px 0 0
 .browser button { display: grid; grid-template-columns: 5.5em 1fr auto; gap: 10px; width: 100%; border: 0; border-bottom: 1px solid var(--line); background: none; padding: 10px 18px; cursor: pointer; text-align: left; font: 400 13.5px/1.3 var(--ui); color: var(--ink); transition: background-color .1s ease; }
 .browser button:hover { background: var(--accent-wash); }
 .browser .kind { font-size: 11px; font-weight: 600; color: var(--ink-3); align-self: center; text-transform: uppercase; letter-spacing: .04em; }
-.browser .kind-binary { color: var(--code); } .browser .kind-archive { color: var(--data); } .browser .kind-folder { color: var(--accent); }
+.browser .kind-binary { color: var(--code-ink); } .browser .kind-archive { color: var(--data-ink); } .browser .kind-folder { color: var(--accent); }
 .browser .size { font: 400 11.5px/1.3 var(--mono); color: var(--ink-3); align-self: center; }
 .dialog-hint { margin: 0; padding: 12px 18px 16px; color: var(--ink-3); font-size: 12.5px; max-width: none; }
 

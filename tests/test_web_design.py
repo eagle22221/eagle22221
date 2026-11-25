@@ -78,13 +78,31 @@ def registry(script):
 
 # --- the sidebar ------------------------------------------------------------------
 
-def test_sidebar_has_the_logo_lockup_and_the_credit_with_the_wave(page):
+def test_sidebar_has_the_logo_lockup_and_the_credit(page):
     aside = page[page.index('<aside class="sidebar"'):page.index("</aside>")]
     head = aside[aside.index('class="sidebar-head"'):aside.index('<nav')]
     assert 'src="/static/logo.svg"' in head
     assert 'vex <span class="brand-pro">Pro</span>' in head and "Binary Analysis Suite" in head
     foot = aside[aside.index('class="sidebar-foot"'):]
-    assert 'class="wave"' in foot and "Developed by SS" in foot
+    assert "Developed by SS" in foot
+    assert "wave" not in aside  # the background's ribbons replaced the foot's wave
+
+
+def rule(code, selector):
+    """Declarations of the first top-level rule with exactly this selector."""
+    found = re.search(r"(?m)^" + re.escape(selector) + r" \{([^}]*)\}", code)
+    assert found, selector
+    return found.group(1)
+
+
+def test_sidebar_shares_the_background_with_the_main_area(css):
+    code = without_comments(css)
+    sidebar = rule(code, ".sidebar")
+    for prop in ("background", "border", "box-shadow", "border-radius"):
+        assert not re.search(rf"(^|[\s;]){prop}\s*:", sidebar), prop
+    # only the phone layout, where the menu drops over the ribbons, gives it a panel
+    phone = code[code.index("@media (max-width: 760px)"):]
+    assert re.search(r"\.sidebar \{[^}]*background:", phone[:phone.index("\n}\n")])
 
 
 def test_sidebar_groups_follow_the_design_with_only_views_vex_has(script):
@@ -206,9 +224,12 @@ def keyframes(css):
     return found
 
 
+BACKDROP_ANIMATIONS = {"drift-a", "drift-b", "drift-c", "ribbon-a", "ribbon-b", "sparkles-a", "sparkles-b", "twinkle"}
+
+
 def test_animations_only_move_and_fade_never_blur(css):
     frames = keyframes(css)
-    assert {"drift-a", "drift-b", "drift-c", "float", "flow"} <= set(frames)
+    assert BACKDROP_ANIMATIONS <= set(frames)
     for name, (_, props) in frames.items():
         assert props <= {"transform", "opacity"}, name
     code = without_comments(css)
@@ -216,15 +237,44 @@ def test_animations_only_move_and_fade_never_blur(css):
     assert "blur(" not in code.replace("backdrop-filter: blur(3px)", "")  # only the open dialog's scrim
 
 
-def test_background_is_layered_glows_motes_and_wave(page, css):
-    backdrop = page[page.index('<div class="backdrop" aria-hidden="true">'):page.index('<div class="app">')]
-    assert backdrop.count('class="glow ') == 3 and backdrop.count('class="mote"') >= 12
+def backdrop(page):
+    return page[page.index('<div class="backdrop" aria-hidden="true">'):page.index('<div class="app">')]
+
+
+def test_background_is_glows_ribbons_sparkles_and_motes(page, css):
+    layers = backdrop(page)
+    assert layers.count('class="glow ') == 3 and layers.count('class="mote"') >= 12
+    ribbons = re.findall(r'<div class="ribbons ribbons-(\w)"><div class="ribbon ribbon-\1"></div></div>', layers)
+    assert len(ribbons) >= 2
+    sparkles = re.findall(r'<div class="sparkles sparkles-(\w)"></div>', layers)
+    assert len(sparkles) >= 2
     code = without_comments(css)
     for cls in (".glow-a", ".glow-b", ".glow-c"):
-        rule = re.search(re.escape(cls) + r" \{([^}]*)\}", code).group(1)
-        assert "radial-gradient" in rule
-    wave = (WEB / "wave.svg").read_text()
-    assert "<script" not in wave and "href" not in wave
+        assert "radial-gradient" in rule(code, cls)
+    # each layer has its own tile in each theme, and the tilt that makes the
+    # ribbons rise is a fixed skew on the (unanimated) parent
+    for kind, names in (("ribbon", ribbons), ("sparkles", sparkles)):
+        for n in names:
+            for theme in ("dark", "light"):
+                assert f'url("/static/{kind.rstrip("s")}s-{theme}-{n}.svg")' in code, (kind, n, theme)
+    wrapper = rule(code, ".ribbons")
+    assert "skewY(" in wrapper and "atan2(" in wrapper
+    assert "animation" not in wrapper
+
+
+def test_light_theme_is_a_blue_sky_with_white_text_on_it(css):
+    code = without_comments(css)
+    sky = code[code.index(':root[data-theme="light"] .backdrop {'):]
+    sky = sky[:sky.index("}")]
+    for colour in ("#1636B8", "#1F5AE0", "#2F86EA", "#49B7EA"):
+        assert colour in sky
+    on_sky = rule(code, ':root[data-theme="light"] :is(.sidebar, .topbar, .scroller)')
+    assert "--ink: #FFFFFF" in on_sky and "text-shadow: var(--sky-shadow)" in on_sky
+    cards = code[code.index(':root[data-theme="light"],\n:root[data-theme="light"] :is(.card'):]
+    cards = cards[:cards.index("}")]
+    for surface in (".card", ".box", ".popover", ".dialog", ".statusbar", ".filetab.is-active", "input"):
+        assert surface in cards[:cards.index("{")], surface
+    assert "--ink: #1B1938" in cards and "text-shadow: none" in cards
 
 
 def test_background_steps_on_one_slow_clock_and_stops_when_asked(css):
@@ -263,15 +313,106 @@ def test_motion_setting_is_wired_and_respects_reduced_motion(script):
     assert "matchMedia('(prefers-reduced-motion: reduce)')" in script
 
 
-def test_wave_tile_is_seamless(client):
-    status, ctype, body = client.get("/static/wave.svg")
-    assert (status, ctype) == (200, "image/svg+xml")
+def test_theme_change_keeps_the_background_on_one_clock(css):
+    """An animation restarts when its element stops being rendered, and would
+    then step out of phase with the rest (twice the redraws). So a theme may
+    hide a backdrop layer, but never take it out with display: none."""
+    code = without_comments(css)
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", code):
+        if re.search(r"\.(glow|ribbons?|sparkles|motes?)\b", selector.split(",")[-1]):
+            assert "display: none" not in body, selector.strip()
+
+
+def per_step(css):
+    """{animation name: [(dx, dy) pixels per step for each keyframe segment]},
+    for the backdrop animations that only translate."""
+    code = without_comments(css)
+    frames = keyframes(css)
+    steps = {}
+    for name, count in re.findall(r"animation: ([\w-]+) [\d.]+s steps\((\d+)\)", code):
+        steps.setdefault(name, int(count))
+    found = {}
+    for name in BACKDROP_ANIMATIONS:
+        points = []
+        for _, body in frames[name][0]:
+            move = re.search(r"transform:\s*([^;]+)", body)
+            if move is None:
+                continue
+            if not re.fullmatch(r"translate3d\((-?\d+)(?:px)?, (-?\d+)(?:px)?, 0\)", move.group(1).strip()):
+                break
+            points.append(tuple(int(v) for v in re.findall(r"-?\d+", move.group(1))[:2]))
+        else:
+            if len(points) == 1:
+                points.insert(0, (0, 0))
+            found[name] = [((b[0] - a[0]) / steps[name], (b[1] - a[1]) / steps[name]) for a, b in zip(points, points[1:])]
+    return found
+
+
+def test_layers_that_only_move_move_whole_pixels(css):
+    """A layer moved by a whole number of pixels is copied, not resampled: a
+    large part of the cost where the compositor has no GPU."""
+    moves = per_step(css)
+    assert {"drift-a", "drift-b", "drift-c", "ribbon-a", "ribbon-b", "sparkles-a", "sparkles-b"} <= set(moves)
+    for name, segments in moves.items():
+        for dx, dy in segments:
+            assert dx.is_integer() and dy.is_integer() and abs(dx) <= 3 and abs(dy) <= 3, (name, dx, dy)
+
+
+def tile(client, name):
+    status, ctype, body = client.get(f"/static/{name}")
+    assert (status, ctype) == (200, "image/svg+xml"), name
     svg = body.decode()
-    width = int(re.search(r'viewBox="0 0 (\d+) \d+"', svg).group(1))
-    paths = re.findall(r'<path d="M0 ([\d.]+) ([^"]*?)L%d ([\d.]+)' % width, svg)
-    assert len(paths) >= 10
-    for first, _, last in paths:
-        assert abs(float(first) - float(last)) < 0.01  # each line ends where the next tile starts
+    assert "<script" not in svg and not re.search(r"\bon\w+=", svg)
+    assert all(ref.startswith("#") for ref in re.findall(r'href="([^"]*)"', svg))  # nothing outside the file
+    width, height = map(int, re.search(r'viewBox="0 0 (\d+) (\d+)"', svg).groups())
+    return svg, width, height
+
+
+def test_ribbon_tiles_are_seamless_and_flow_one_tile_per_cycle(client, css):
+    code = without_comments(css)
+    for n in ("a", "b"):
+        layer = rule(code, f".ribbon-{n}")
+        size = re.search(r"background-size: (\d+)px (\d+)px", layer).groups()
+        shift = re.search(rf"@keyframes ribbon-{n} \{{ from {{ transform: translate3d\(-(\d+)px", code).group(1)
+        for theme in ("dark", "light"):
+            svg, width, height = tile(client, f"ribbons-{theme}-{n}.svg")
+            assert size == (str(width), str(height)) and shift == str(width)
+            assert f"width: calc(100vw + {width}px)" in layer
+            paths = re.findall(r'<path id="\w+" d="M([^"]*)Z"/>', svg)
+            assert len(paths) >= 2
+            for d in paths:
+                points = [tuple(map(float, p.split())) for p in re.split(r"[ML]", d) if p]
+                turn = max(range(len(points)), key=lambda i: points[i][0])
+                for edge in (points[:turn + 1], points[turn + 1:]):
+                    xs = [x for x, _ in edge]
+                    assert min(xs) < 0 and max(xs) > width  # drawn past both ends, so the glow wraps too
+                    at = {round(x, 1): y for x, y in edge}
+                    pairs = [(y, at[round(x + width, 1)]) for x, y in at.items() if round(x + width, 1) in at]
+                    assert len(pairs) >= 10
+                    for y, y2 in pairs:
+                        assert abs(y - y2) < 0.11  # each edge carries on where the next tile starts
+
+
+def test_sparkle_tiles_wrap_and_drift_one_tile_per_cycle(client, css):
+    code = without_comments(css)
+    for n in ("a", "b"):
+        size = tuple(map(int, re.search(r"background-size: (\d+)px (\d+)px", rule(code, f".sparkles-{n}")).groups()))
+        moves = re.search(rf"@keyframes sparkles-{n} \{{([^@]*)\}}", code).group(1)
+        coords = [tuple(map(int, xy)) for xy in re.findall(r"translate3d\((-?\d+)(?:px)?, (-?\d+)(?:px)?, 0\)", moves)]
+        travel = (abs(coords[1][0] - coords[0][0]), abs(coords[1][1] - coords[0][1]))
+        assert all(t in (0, s) for t, s in zip(travel, size)) and any(travel)
+        for theme in ("dark", "light"):
+            svg, width, height = tile(client, f"sparkles-{theme}-{n}.svg")
+            assert (width, height) == size
+            dots = [(float(x), float(y), float(r)) for x, y, r in
+                    re.findall(r'<circle cx="([-\d.]+)" cy="([-\d.]+)" r="([\d.]+)"', svg)]
+            assert len(dots) >= 20
+            seen = {(round(x), round(y), r) for x, y, r in dots}
+            for x, y, r in dots:  # whatever crosses an edge is drawn again on the other side
+                for crosses, (dx, dy) in ((x - r < 0, (width, 0)), (x + r > width, (-width, 0)),
+                                          (y - r < 0, (0, height)), (y + r > height, (0, -height))):
+                    if crosses:
+                        assert (round(x + dx), round(y + dy), r) in seen, (theme, n, x, y)
 
 
 # --- fonts and the policy -----------------------------------------------------------
