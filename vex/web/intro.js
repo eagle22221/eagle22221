@@ -15,7 +15,8 @@
  *   underneath while it plays. Any error removes it.
  * - Landing spot: the first visible [data-intro-target] element, else an
  *   <img> of logo.svg. It must show logo.svg (viewBox 0 0 256 256).
- * - When it is gone, "vex:intro-done" is dispatched on document.
+ * - While it plays <html> has the class "vxi-active"; when it is gone,
+ *   "vex:intro-done" is dispatched on document.
  */
 (function () {
   'use strict';
@@ -24,7 +25,8 @@
   var NS = 'http://www.w3.org/2000/svg';
   // The timeline lives in intro.css; these only back it up. The overlay
   // leaves when its clock animation ends, the sidebar logo reappears when the
-  // landing clock ends, and it is removed when the field has faded out.
+  // landing clock ends, and the overlay is removed once the emblem has settled
+  // on it (or, with nothing to land on, once the field has faded out).
   var EXIT_MS = 1300;       // longest the exit may take before removal anyway
   var STILL_MS = 650;       // reduced motion: how long the still emblem shows
   var FAILSAFE_MS = 8000;   // whatever happens, the overlay is gone by then
@@ -192,7 +194,7 @@
 
     // The light sweep: a soft band crossing the emblem's faces on a diagonal.
     var lens = svg('g', { 'clip-path': 'url(#vxi-clip)' }, root);
-    var tilt = svg('g', { transform: 'rotate(22 128 132)' }, lens);
+    var tilt = svg('g', { 'class': 'vxi-tilt', transform: 'rotate(22 128 132)' }, lens);
     svg('rect', {
       'class': 'vxi-shine', x: -10, y: -60, width: 72, height: 380, fill: 'url(#vxi-sheen)'
     }, tilt);
@@ -286,12 +288,18 @@
     later(teardown, 200);
   }
 
+  // Skip keys are kept from the app (Enter must not also press a button);
+  // every other key goes through untouched.
   function onKey(e) {
-    var k = e.key;
-    if (k === 'Escape' || k === 'Esc' || k === 'Enter' || k === ' ' || k === 'Spacebar') {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      skip();
+    try {
+      var k = e.key;
+      if (k === 'Escape' || k === 'Esc' || k === 'Enter' || k === ' ' || k === 'Spacebar') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        skip();
+      }
+    } catch (x) {
+      teardown();
     }
   }
 

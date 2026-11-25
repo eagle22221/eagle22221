@@ -116,8 +116,10 @@ html.vxi-landing .vxi-target { opacity: 0 !important; transition: none !importan
   left: calc(var(--vxi-size) * -20 / 216);
   top: calc(var(--vxi-size) * -8 / 216);
 }
-/* SVG parts transform about the eye, in logo.svg user units. */
+/* SVG parts transform about the eye, in logo.svg user units (the sheen's
+   tilt is a transform attribute with its own centre, so it keeps 0 0). */
 .vxi .vxi-svg * { transform-box: view-box; transform-origin: 128px 132px; }
+.vxi .vxi-svg .vxi-tilt { transform-origin: 0 0; }
 
 .vxi .vxi-blades { animation: vxi-spin 940ms var(--vxi-out) 80ms both; }
 .vxi .vxi-blade { animation: vxi-blade-in 900ms var(--vxi-out) 80ms both; }
@@ -153,7 +155,7 @@ html.vxi-landing .vxi-target { opacity: 0 !important; transition: none !importan
   vector-effect: non-scaling-stroke;
   animation: vxi-shock 820ms cubic-bezier(.2, .7, .3, 1) 1220ms both;
 }
-.vxi .vxi-shine { opacity: 0; animation: vxi-shine 680ms cubic-bezier(.45, 0, .25, 1) 1620ms both; }
+.vxi .vxi-shine { opacity: 0; animation: vxi-shine 900ms cubic-bezier(.45, 0, .35, 1) 1560ms both; }
 
 /* --- the wordmark -------------------------------------------------------- */
 .vxi .vxi-word {
