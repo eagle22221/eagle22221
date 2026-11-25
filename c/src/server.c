@@ -387,7 +387,7 @@ static void json_write_string(JsonOut *o, Str s) {
     while (i < s.n) {
         /* what needs no escape goes out in one piece */
         size_t run = i;
-        while (run < s.n && (uint8_t)s.p[run] >= 0x20 && (uint8_t)s.p[run] < 0x80 &&
+        while (run < s.n && (uint8_t)s.p[run] >= 0x20 && (uint8_t)s.p[run] < 0x7F &&
                s.p[run] != '"' && s.p[run] != '\\')
             run++;
         if (run > i) {

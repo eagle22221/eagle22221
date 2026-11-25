@@ -4,6 +4,7 @@
  * urllib, the codecs) the library's behaviour is reproduced here. */
 #include "decode.h"
 
+#include "aes.h"
 #include "hash.h"
 #include "inflate.h"
 #include "pystr.h"
@@ -329,7 +330,6 @@ static bool base64_decode(Op *c, const uint8_t *in, size_t n, bool url, Bytes *o
     size_t at = 0;                  /* next unread byte of `in` */
     unsigned quad = 0, pads = 0;
     uint8_t left = 0;
-    bool padding_started = false;
     for (size_t i = 0; i < length; i++) {
         uint8_t ch = '=';
         if (i < total) {
@@ -337,16 +337,14 @@ static bool base64_decode(Op *c, const uint8_t *in, size_t n, bool url, Bytes *o
                 at++;
             ch = in[at++];
         }
-        if (i == 0 && ch == '=')
-            return fail(c, "invalid base64: Leading padding not allowed");
         if (ch == '=') {
-            padding_started = true;
-            if (quad >= 2 && quad + ++pads >= 4) {
-                if (i + 1 < length)
-                    return fail(c, "invalid base64: Excess data after padding");
-                return true;
-            }
-            continue;
+            pads++;
+            if (quad >= 2 && quad + pads <= 4)
+                continue;
+            if (quad == 1)
+                break;              /* reported below */
+            return fail(c, quad == 0 && i == 0 ? "invalid base64: Leading padding not allowed"
+                                               : "invalid base64: Excess padding not allowed");
         }
         if (url && ch == '-')
             ch = '+';
@@ -355,9 +353,10 @@ static bool base64_decode(Op *c, const uint8_t *in, size_t n, bool url, Bytes *o
         int v = b64_value(ch);
         if (v < 0)
             return fail(c, "invalid base64: Only base64 data is allowed");
-        if (padding_started)
-            return fail(c, "invalid base64: Discontinuous padding not allowed");
-        pads = 0;
+        if (pads != 0)
+            return fail(c, quad + pads == 4
+                               ? "invalid base64: Excess data after padding"
+                               : "invalid base64: Discontinuous padding not allowed");
         switch (quad) {
         case 0:
             quad = 1;
@@ -383,7 +382,7 @@ static bool base64_decode(Op *c, const uint8_t *in, size_t n, bool url, Bytes *o
         return fail(c, "invalid base64: Invalid base64-encoded string: number of data "
                        "characters (%zu) cannot be 1 more than a multiple of 4",
                     out->n / 3 * 4 + 1);
-    if (quad != 0)
+    if (quad != 0 && quad + pads < 4)
         return fail(c, "invalid base64: Incorrect padding");
     return true;
 }
@@ -1532,6 +1531,127 @@ static bool op_rc4(Op *c, const uint8_t *in, size_t n, Bytes *out) {
     return true;
 }
 
+/* A hex parameter that may be left out (then it is empty). */
+static bool optional_hex(Op *c, const char *name, Bytes *out) {
+    if (!has_param(c, name)) {
+        bytes_reserve(out, 1);
+        out->n = 0;
+        return true;
+    }
+    return hex_param(c, param(c, name), out);
+}
+
+/* crypto.py's _pkcs7_unpad(): the length without the padding. */
+static bool pkcs7_unpad(Op *c, const uint8_t *data, size_t n, size_t *length) {
+    if (n == 0 || n % 16 != 0)
+        return fail(c, "aes failed: invalid PKCS#7 padding: length not a block multiple");
+    size_t pad = data[n - 1];
+    if (pad < 1 || pad > 16)
+        return fail(c, "aes failed: invalid PKCS#7 padding: bad pad byte");
+    for (size_t i = n - pad; i < n; i++)
+        if (data[i] != pad)
+            return fail(c, "aes failed: invalid PKCS#7 padding: inconsistent pad bytes");
+    *length = n - pad;
+    return true;
+}
+
+/* AES in ECB, CBC or CTR mode, as crypto.py's aes(). GCM is not in this
+ * build: the Python edition has it. */
+static bool aes_run(Op *c, const uint8_t *in, size_t n, Bytes *out, Bytes *key, Bytes *iv,
+                    Bytes *nonce) {
+    enum { ECB, CBC, CTR } mode;
+    if (param_is(c, "mode", "gcm"))
+        return fail(c, "aes-gcm is not available in this build");
+    if (param_is(c, "mode", "ecb"))
+        mode = ECB;
+    else if (!has_param(c, "mode") || param_is(c, "mode", "cbc"))
+        mode = CBC;
+    else if (param_is(c, "mode", "ctr"))
+        mode = CTR;
+    else
+        return fail(c, "mode must be ecb, cbc, ctr or gcm");
+    bool encrypt = param_is(c, "op", "encrypt");
+    if (has_param(c, "op") && !encrypt && !param_is(c, "op", "decrypt"))
+        return fail(c, "op must be decrypt or encrypt");
+    bool padded = !param_is(c, "unpad", "none");
+    if (has_param(c, "unpad") && padded && !param_is(c, "unpad", "pkcs7"))
+        return fail(c, "unpad must be pkcs7 or none");
+    /* Every hex parameter is read, in this order, whatever the mode needs. */
+    Bytes tag = {0};
+    bool ok = hex_param(c, param(c, "key"), key) && optional_hex(c, "iv", iv) &&
+              optional_hex(c, "nonce", nonce) && optional_hex(c, "tag", &tag);
+    bytes_free(&tag);
+    if (!ok)
+        return false;
+    AesKey schedule;
+    if (!aes_set_key(&schedule, key->p, key->n))
+        return fail(c, "aes failed: AES key must be 16, 24, or 32 bytes, got %zu", key->n);
+
+    if (mode == CTR) {
+        if (nonce->n == 0 || nonce->n > 16)
+            return fail(c, "aes failed: AES-CTR needs a 1..16 byte nonce (16 for NIST vectors)");
+        /* The counter block: the nonce, zeros after it, counted up as one
+         * big-endian number of 128 bits. */
+        uint8_t counter[16] = {0}, stream[16];
+        memcpy(counter, nonce->p, nonce->n);
+        bytes_reserve(out, n + 1);
+        for (size_t i = 0; i < n; i += 16) {
+            aes_encrypt_block(&schedule, counter, stream);
+            size_t run = n - i < 16 ? n - i : 16;
+            for (size_t k = 0; k < run; k++)
+                out->p[i + k] = in[i + k] ^ stream[k];
+            for (int k = 15; k >= 0 && ++counter[k] == 0; k--)
+                ;
+        }
+        out->n = n;
+        return true;
+    }
+    const char *name = mode == ECB ? "ECB" : "CBC";
+    if (mode == CBC && iv->n != 16)
+        return fail(c, "aes failed: AES-CBC needs a 16-byte iv");
+    uint8_t chain[16] = {0}, block[16];
+    if (mode == CBC)
+        memcpy(chain, iv->p, 16);
+    if (encrypt) {
+        if (!padded && n % 16 != 0)
+            return fail(c, "aes failed: AES-%s encrypt with unpad=none needs a multiple of 16 "
+                           "bytes", name);
+        size_t total = padded ? n + (16 - n % 16) : n;
+        uint8_t pad = (uint8_t)(total - n);
+        bytes_reserve(out, total + 1);
+        for (size_t i = 0; i < total; i += 16) {
+            for (size_t k = 0; k < 16; k++)
+                block[k] = (i + k < n ? in[i + k] : pad) ^ chain[k];
+            aes_encrypt_block(&schedule, block, out->p + i);
+            if (mode == CBC)
+                memcpy(chain, out->p + i, 16);
+        }
+        out->n = total;
+        return true;
+    }
+    if (n % 16 != 0)
+        return fail(c, "aes failed: AES-%s decrypt needs a multiple of 16 bytes", name);
+    bytes_reserve(out, n + 1);
+    for (size_t i = 0; i < n; i += 16) {
+        aes_decrypt_block(&schedule, in + i, block);
+        for (size_t k = 0; k < 16; k++)
+            out->p[i + k] = block[k] ^ chain[k];
+        if (mode == CBC)
+            memcpy(chain, in + i, 16);
+    }
+    out->n = n;
+    return !padded || pkcs7_unpad(c, out->p, n, &out->n);
+}
+
+static bool op_aes(Op *c, const uint8_t *in, size_t n, Bytes *out) {
+    Bytes key = {0}, iv = {0}, nonce = {0};
+    bool ok = aes_run(c, in, n, out, &key, &iv, &nonce);
+    bytes_free(&key);
+    bytes_free(&iv);
+    bytes_free(&nonce);
+    return ok;
+}
+
 /* --- the operation registry -------------------------------------------------------- */
 
 typedef bool (*OpFn)(Op *c, const uint8_t *in, size_t n, Bytes *out);
@@ -1619,7 +1739,7 @@ static const OpSpec OPS[] = {
     {"railfence", "Classic cipher", "rail-fence transposition", WITH(P_RAILFENCE), op_railfence},
     {"substitution", "Classic cipher", "monoalphabetic substitution", WITH(P_SUBSTITUTION),
      op_substitution},
-    {"aes", "Symmetric", "AES (needs a supplied key)", WITH(P_AES), NULL},
+    {"aes", "Symmetric", "AES (needs a supplied key)", WITH(P_AES), op_aes},
     {"chacha20", "Symmetric", "ChaCha20 (RFC 8439, self-inverse)", WITH(P_CHACHA20), op_chacha20},
     {"rc4", "Symmetric", "RC4 (self-inverse)", WITH(P_KEY), op_rc4},
     {"des", "Symmetric", "DES (needs a supplied key)", WITH(P_DES), NULL},

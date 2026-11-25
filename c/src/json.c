@@ -202,7 +202,7 @@ static void dump_string(FILE *out, Str s) {
         case '\b': fputs("\\b", out); break;
         case '\f': fputs("\\f", out); break;
         default:
-            if (c < 0x20) {
+            if (c < 0x20 || c == 0x7F) {    /* json.dumps escapes DEL too */
                 fputs("\\u00", out);
                 fputc(hex[c >> 4], out);
                 fputc(hex[c & 15], out);

@@ -274,6 +274,41 @@ bool py_encode_latin1(Arena *a, Str s, Str *out, Str *error) {
 
 /* --- repr(float) --------------------------------------------------------------- */
 
+/* `text` is a number as "%.Ne" writes it: [-]d[.ddd]e(+|-)XX. Writes to
+ * `out` the number whose last digit is one more (step > 0) or one less. False
+ * when that number has fewer digits. */
+static bool neighbour(const char *text, int step, char out[48]) {
+    bool negative = text[0] == '-';
+    const char *p = text + negative;
+    unsigned long long digits = 0;
+    int count = 0;
+    for (; *p != '\0' && *p != 'e'; p++) {
+        if (*p == '.')
+            continue;
+        digits = digits * 10 + (unsigned)(*p - '0');
+        count++;
+    }
+    long exponent = *p == 'e' ? strtol(p + 1, NULL, 10) : 0;
+    unsigned long long limit = 1;       /* 10 ** count */
+    for (int i = 0; i < count; i++)
+        limit *= 10;
+    if (step > 0) {
+        if (++digits == limit) {        /* 9.99 -> 1.00, one power of ten up */
+            digits = limit / 10;
+            exponent++;
+        }
+    } else {
+        if (digits <= limit / 10)
+            return false;               /* 1.00 -> 0.99: a shorter number */
+        digits--;
+    }
+    char plain[24];
+    snprintf(plain, sizeof plain, "%llu", digits);
+    snprintf(out, 48, "%s%c%s%se%ld", negative ? "-" : "", plain[0], count > 1 ? "." : "",
+             plain + 1, exponent);
+    return true;
+}
+
 Str py_repr_float(Arena *a, double value) {
     if (value != value)
         return str_c("nan");
@@ -281,12 +316,22 @@ Str py_repr_float(Arena *a, double value) {
         return str_c("inf");
     if (value < -DBL_MAX)
         return str_c("-inf");
-    /* The shortest decimal that reads back as the same double. */
-    char text[48];
+    /* The shortest decimal that reads back as the same double and, of those,
+     * the one nearest to it. That is the correctly rounded one ("%.Ne") or,
+     * next to a power of two, where doubles are twice as dense on one side,
+     * its neighbour. */
+    char text[48], other[48];
     for (int precision = 0; precision <= 16; precision++) {
         snprintf(text, sizeof text, "%.*e", precision, value);
         if (strtod(text, NULL) == value)
             break;
+        bool found = false;
+        for (int step = 1; step >= -1 && !found; step -= 2)
+            found = neighbour(text, step, other) && strtod(other, NULL) == value;
+        if (found) {
+            memcpy(text, other, sizeof text);
+            break;
+        }
     }
     /* text is [-]d[.ddd]e(+|-)XX */
     const char *p = text;

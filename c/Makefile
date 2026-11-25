@@ -24,7 +24,7 @@ SANITIZE  = -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-
 
 BUILD     = build
 CORE      = util hash model elf pe strings json views techniques render platform fswalk split patch \
-            pystr inflate decode cli main server
+            pystr inflate aes decode cli main server
 HEADERS   = $(wildcard src/*.h)
 
 # --- web interface (vex gui) -----------------------------------------------
