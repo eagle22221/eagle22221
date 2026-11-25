@@ -3,7 +3,11 @@
    Every element's plain style is its final, resting look, and each animation
    runs with fill-mode `both` from a hidden start. So a reduced-motion run,
    which switches the animations off, shows the finished emblem at once.
-   Only transform, opacity and stroke-dashoffset are animated. */
+   Only transform, opacity and stroke-dashoffset are animated.
+   Two fields, matching the app's two skies: the deep indigo one (dark, the
+   default) and, when the app's theme is light (intro.js adds .is-light), a
+   bright blue sky with a warm glow at the left and a cyan one at the bottom
+   left. Both carry a few twinkling sparkles. */
 
 @font-face { font-family: "vex intro"; font-weight: 500; font-display: block;
   src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
@@ -11,8 +15,9 @@
   src: url("fonts/inter-latin-700-normal.woff2") format("woff2"); }
 
 /* Between intro.js running in <head> and the overlay being in place, keep
-   the page dark and the app unpainted, so nothing flashes first. */
+   the page the field's colour and the app unpainted, so nothing flashes. */
 html.vxi-boot { background: #070818; }
+html.vxi-boot.vxi-light { background: #1F5AE0; }
 html.vxi-boot body { visibility: hidden; }
 
 /* The sidebar logo the emblem lands on: hidden while the emblem glides to
@@ -56,6 +61,54 @@ html.vxi-landing .vxi-target { opacity: 0 !important; transition: none !importan
     radial-gradient(120% 95% at 50% 46%, rgba(5, 6, 18, 0) 55%, rgba(2, 3, 10, .6) 100%),
     linear-gradient(180deg, #0B0D26 0%, #080920 48%, #05060F 100%);
 }
+/* Sparkles: points of light that twinkle in one after another while the
+   whole layer drifts up a little. intro.js makes 18 of them; every fifth
+   one is a larger, softer out-of-focus one. */
+.vxi .vxi-sparks {
+  position: absolute;
+  inset: 0;
+  opacity: .62;
+  animation: vxi-drift 3300ms linear 0ms both;
+}
+.vxi .vxi-spark {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    #FFFFFF 0, #FFFFFF 24%, rgba(206, 192, 255, .55) 40%, rgba(196, 181, 253, 0));
+  opacity: .75;
+  animation: vxi-twinkle 1700ms ease-in-out 240ms both;
+}
+.vxi .vxi-spark:nth-child(5n) {
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  background: radial-gradient(closest-side,
+    rgba(255, 255, 255, .7) 0, rgba(226, 216, 255, .35) 34%, rgba(196, 181, 253, 0));
+  opacity: .45;
+}
+.vxi .vxi-spark:nth-child(3n) { width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; }
+.vxi .vxi-spark:nth-child(1)  { left: 7%;  top: 18%; animation-delay: 160ms; }
+.vxi .vxi-spark:nth-child(2)  { left: 16%; top: 64%; animation-delay: 620ms; animation-duration: 1900ms; }
+.vxi .vxi-spark:nth-child(3)  { left: 25%; top: 31%; animation-delay: 940ms; }
+.vxi .vxi-spark:nth-child(4)  { left: 11%; top: 87%; animation-delay: 380ms; animation-duration: 2100ms; }
+.vxi .vxi-spark:nth-child(5)  { left: 29%; top: 11%; animation-delay: 520ms; animation-duration: 2300ms; }
+.vxi .vxi-spark:nth-child(6)  { left: 33%; top: 79%; animation-delay: 1180ms; }
+.vxi .vxi-spark:nth-child(7)  { left: 64%; top: 8%;  animation-delay: 300ms; animation-duration: 1500ms; }
+.vxi .vxi-spark:nth-child(8)  { left: 72%; top: 28%; animation-delay: 820ms; }
+.vxi .vxi-spark:nth-child(9)  { left: 83%; top: 14%; animation-delay: 1360ms; animation-duration: 1500ms; }
+.vxi .vxi-spark:nth-child(10) { left: 91%; top: 41%; animation-delay: 700ms; animation-duration: 2300ms; }
+.vxi .vxi-spark:nth-child(11) { left: 78%; top: 63%; animation-delay: 1040ms; }
+.vxi .vxi-spark:nth-child(12) { left: 88%; top: 80%; animation-delay: 460ms; animation-duration: 1900ms; }
+.vxi .vxi-spark:nth-child(13) { left: 68%; top: 89%; animation-delay: 1500ms; }
+.vxi .vxi-spark:nth-child(14) { left: 95%; top: 8%;  animation-delay: 1000ms; }
+.vxi .vxi-spark:nth-child(15) { left: 5%;  top: 45%; animation-delay: 1260ms; animation-duration: 2100ms; }
+.vxi .vxi-spark:nth-child(16) { left: 58%; top: 81%; animation-delay: 1640ms; animation-duration: 1500ms; }
+.vxi .vxi-spark:nth-child(17) { left: 36%; top: 88%; animation-delay: 860ms; }
+.vxi .vxi-spark:nth-child(18) { left: 46%; top: 6%;  animation-delay: 1420ms; animation-duration: 1900ms; }
+
 .vxi .vxi-center {
   position: absolute;
   inset: 0;
@@ -226,6 +279,68 @@ html.vxi-landing .vxi-target { opacity: 0 !important; transition: none !importan
   animation: vxi-clock 2500ms linear 0ms both;
 }
 
+/* --- the light theme: a blue sky ------------------------------------------ */
+/* The app's light sky (deep blue at the top left to bright sky blue at the
+   bottom right, a warm glow at the left, a cyan one at the bottom left), with
+   a soft bloom where the emblem forms. The emblem keeps its own colours; a
+   soft deep-blue shade behind it (the aura's place) keeps its cyan edges and
+   dark faces reading clearly on the bright field. Text is white with a soft
+   shadow. */
+.vxi.is-light { color: #FFFFFF; }
+.vxi.is-light .vxi-bg {
+  background:
+    radial-gradient(44% 40% at 50% 41%, rgba(176, 226, 255, .22), rgba(176, 226, 255, 0) 100%),
+    radial-gradient(60% 55% at 0% 70%, rgba(255, 214, 190, .75), rgba(255, 214, 190, 0) 60%),
+    radial-gradient(70% 60% at 15% 100%, rgba(120, 230, 240, .85), rgba(120, 230, 240, 0) 65%),
+    linear-gradient(160deg, #1636B8 0%, #1F5AE0 38%, #2F86EA 70%, #49B7EA 100%);
+}
+.vxi.is-light .vxi-sparks { opacity: 1; }
+.vxi.is-light .vxi-spark {
+  width: 13px;
+  height: 13px;
+  margin: -6.5px 0 0 -6.5px;
+  background: radial-gradient(closest-side,
+    #FFFFFF 0, #FFFFFF 18%, rgba(255, 255, 255, .55) 30%, rgba(255, 255, 255, .16) 58%, rgba(255, 255, 255, 0));
+  opacity: .92;
+}
+.vxi.is-light .vxi-spark:nth-child(3n) { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
+.vxi.is-light .vxi-spark:nth-child(5n) {
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  background: radial-gradient(closest-side,
+    rgba(255, 255, 255, .8) 0, rgba(255, 255, 255, .34) 34%, rgba(255, 255, 255, 0));
+  opacity: .5;
+}
+.vxi.is-light .vxi-aura {
+  background: radial-gradient(closest-side,
+    rgba(7, 22, 92, .36), rgba(9, 28, 108, .22) 20%, rgba(12, 36, 124, .08) 36%, rgba(12, 36, 124, 0) 52%);
+}
+.vxi.is-light .vxi-ember {
+  background: radial-gradient(closest-side,
+    rgba(255, 80, 66, .2), rgba(255, 80, 66, .06) 50%, rgba(255, 80, 66, 0));
+}
+.vxi.is-light .vxi-word { filter: drop-shadow(0 2px 10px rgba(8, 26, 110, .32)); }
+.vxi.is-light .vxi-name { color: #FFFFFF; }
+.vxi.is-light .vxi-pro { color: #DCCBFF; }
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .vxi.is-light .vxi-pro {
+    background: linear-gradient(180deg, #F4EEFF 0%, #DCCBFF 52%, #C3A8FF 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+.vxi.is-light .vxi-tag { color: rgba(255, 255, 255, .9); }
+.vxi.is-light .vxi-credit {
+  color: rgba(255, 255, 255, .8);
+  text-shadow: 0 1px 6px rgba(8, 26, 110, .45);
+}
+.vxi.is-light .vxi-credit::before, .vxi.is-light .vxi-credit::after {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, .7));
+}
+.vxi.is-light .vxi-credit b { color: #FFFFFF; }
+
 /* --- leaving ------------------------------------------------------------- */
 .vxi.is-leaving { pointer-events: none; }
 .vxi.is-leaving .vxi-bg { animation: vxi-field-out 660ms cubic-bezier(.4, 0, .2, 1) 160ms both; }
@@ -292,6 +407,12 @@ html.vxi-landing .vxi-target { opacity: 0 !important; transition: none !importan
   55% { opacity: 1; }
 }
 @keyframes vxi-credit { from { opacity: 0; transform: translateY(8px); } }
+@keyframes vxi-drift { from { transform: translateY(16px); } }
+@keyframes vxi-twinkle {
+  from { opacity: 0; transform: scale(.2); }
+  32% { opacity: 1; transform: scale(1.4); }
+  62% { opacity: .35; transform: scale(.85); }
+}
 /* The two clocks: when to leave, and when the sidebar logo reappears. */
 @keyframes vxi-clock { from { opacity: 0; } to { opacity: 0; } }
 @keyframes vxi-land { from { opacity: 0; } to { opacity: 0; } }

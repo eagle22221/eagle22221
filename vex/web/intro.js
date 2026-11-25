@@ -17,11 +17,18 @@
  *   <img> of logo.svg. It must show logo.svg (viewBox 0 0 256 256).
  * - While it plays <html> has the class "vxi-active"; when it is gone,
  *   "vex:intro-done" is dispatched on document.
+ * - Theme: it plays on the app's own sky, so it reads the theme the way
+ *   app.js will (it runs first): localStorage "vex-theme", no key prefix.
+ *   "light" gets the blue sky (.vxi.is-light, and "vxi-light" on <html> until
+ *   it is gone); "dark" or nothing stored, the indigo field. With nothing
+ *   stored, or storage unavailable, a data-theme="light" already on <html>
+ *   counts too; otherwise it is dark.
  */
 (function () {
   'use strict';
 
   var KEY = 'vex-intro-played';
+  var THEME_KEY = 'vex-theme';     // app.js: remember('vex-theme', …) / recall(…)
   var NS = 'http://www.w3.org/2000/svg';
   // The timeline lives in intro.css; these only back it up. The overlay
   // leaves when its clock animation ends, the sidebar logo reappears when the
@@ -34,6 +41,7 @@
   var doc = document;
   var html = doc.documentElement;
   var state = 'idle';       // idle → playing → leaving / skipping → done
+  var light = false;        // the app's theme is light: play on the blue sky
   var overlay = null;
   var clock = null;
   var target = null;
@@ -56,6 +64,7 @@
   var TRIANGLE = ['M128 56L194 170L128 170', 'M128 56L62 170L128 170'];
   var RING = ['M128 105A27 27 0 0 1 128 159', 'M128 105A27 27 0 0 0 128 159'];
   var CYAN = '#3FE0E6';
+  var SPARKS = 18;          // points of light on the field (placed by intro.css)
 
   function guard(fn) {
     return function () {
@@ -77,6 +86,14 @@
     if (doc.visibilityState === 'hidden') return false;
     try { if (window.sessionStorage.getItem(KEY)) return false; } catch (e) { /* play */ }
     return true;
+  }
+
+  // Read like app.js's recall(): storage can be missing or refuse.
+  function storedTheme() {
+    var value = null;
+    try { value = window.localStorage.getItem(THEME_KEY); } catch (e) { /* unavailable */ }
+    if (value === 'light' || value === 'dark') return value;
+    return html.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   }
 
   function reducedMotion() {
@@ -202,9 +219,11 @@
   }
 
   function build(still) {
-    var root = el('div', 'vxi' + (still ? ' is-still' : ''));
+    var root = el('div', 'vxi' + (light ? ' is-light' : '') + (still ? ' is-still' : ''));
     root.setAttribute('aria-hidden', 'true');
-    el('div', 'vxi-bg', root);
+    // The field, with its sparkles in it, so they leave together.
+    var sparks = el('div', 'vxi-sparks', el('div', 'vxi-bg', root));
+    for (var i = 0; i < SPARKS; i++) el('i', 'vxi-spark', sparks);
     var center = el('div', 'vxi-center', root);
     var mark = el('div', 'vxi-mark', center);
     el('div', 'vxi-aura', mark);
@@ -327,6 +346,7 @@
     doc.removeEventListener('visibilitychange', onVisibility);
     try { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (e) { /* ignore */ }
     html.classList.remove('vxi-boot');
+    html.classList.remove('vxi-light');
     html.classList.remove('vxi-active');
     html.classList.remove('vxi-landing');
     try { if (target) target.classList.remove('vxi-target'); } catch (e) { /* ignore */ }
@@ -377,7 +397,9 @@
   try {
     if (!shouldPlay()) return;
     try { window.sessionStorage.setItem(KEY, '1'); } catch (e) { /* storage unavailable */ }
+    light = storedTheme() === 'light';
     html.classList.add('vxi-boot');
+    if (light) html.classList.add('vxi-light');
     later(teardown, FAILSAFE_MS);
     whenBody(guard(mount));
   } catch (e) {

@@ -1,9 +1,11 @@
 """The opening animation (vex/web/intro.css + intro.js): served by the Python
-server with the right types, embedded in the C edition the same way, and kept
-to the page's strict Content-Security-Policy (no inline code or styles, nothing
-from outside)."""
+server with the right types, embedded in the C edition the same way, kept to
+the page's strict Content-Security-Policy (no inline code or styles, nothing
+from outside), and played on the app's own sky: the blue one when the stored
+theme is light, the indigo one otherwise."""
 import http.client
 import importlib.util
+import json
 import pathlib
 import re
 import shutil
@@ -161,3 +163,94 @@ def test_index_loads_the_intro_from_the_head_after_its_stylesheet(client):
     assert not re.search(r"\b(defer|async|type=\"module\")", script.group(0))  # runs before <body>
     assert '<link rel="stylesheet" href="/static/intro.css">' in head
     assert head.index("/static/intro.css") < head.index("/static/intro.js")
+
+
+# --- the theme ---------------------------------------------------------------
+
+def test_intro_reads_the_theme_where_app_js_keeps_it(js):
+    code = code_only(js)
+    key = re.search(r"THEME_KEY\s*=\s*'([^']+)'", code)
+    assert key and key.group(1) == "vex-theme"
+    # read inside try/catch: storage can be missing or refuse
+    assert re.search(r"try\s*\{[^{}]*localStorage\.getItem\(THEME_KEY\)[^{}]*\}\s*catch", code)
+    assert "getAttribute('data-theme')" in code     # nothing stored: <html data-theme> counts
+    # app.js stores it under the same key, with no prefix
+    app = code_only((WEB / "app.js").read_text(encoding="utf-8"))
+    assert re.search(r"remember\(\s*'vex-theme'", app) and re.search(r"recall\(\s*'vex-theme'\s*\)", app)
+    assert re.search(r"function recall\(key\)\s*\{[^}]*localStorage\.getItem\(key\)", app)
+
+
+def test_intro_marks_the_light_theme_and_cleans_it_up(js):
+    code = code_only(js)
+    assert "' is-light'" in code                     # on the overlay
+    assert "classList.add('vxi-light')" in code      # on <html> while it boots and plays
+    assert "classList.remove('vxi-light')" in code   # and gone with it
+
+
+def test_intro_styles_a_blue_sky_field_for_the_light_theme(css):
+    code = code_only(css)
+    field = re.search(r"\.vxi\.is-light \.vxi-bg\s*\{([^}]*)\}", code)
+    assert field, "the light field is styled"
+    for colour in ("#1636B8", "#1F5AE0", "#2F86EA", "#49B7EA"):   # the app's light sky
+        assert colour.lower() in field.group(1).lower(), colour
+    assert re.search(r"html\.vxi-boot\.vxi-light\s*\{[^}]*background", code)  # no dark flash first
+    assert re.search(r"\.vxi\.is-light \.vxi-name\s*\{[^}]*color:\s*#FFFFFF", code, re.I)
+    for part in (".vxi-pro", ".vxi-tag", ".vxi-credit", ".vxi-aura", ".vxi-spark"):
+        assert f".vxi.is-light {part}" in code, part
+    # the dark field is still the default
+    assert re.search(r"\.vxi \.vxi-bg\s*\{[^}]*#0B0D26", code)
+
+
+def test_every_sparkle_the_script_makes_has_a_place(js, css):
+    count = int(re.search(r"SPARKS\s*=\s*(\d+)", code_only(js)).group(1))
+    placed = set(int(n) for n in re.findall(r"\.vxi-spark:nth-child\((\d+)\)\s*\{[^}]*left:", code_only(css)))
+    assert placed == set(range(1, count + 1))
+
+
+# intro.js run in node against a stub page that has no <body> yet: it decides
+# the theme at once and marks <html> (vxi-boot, and vxi-light for light).
+THEME_HARNESS = r"""
+const fs = require('fs'), vm = require('vm');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const results = JSON.parse(process.argv[2]).map(([stored, attr]) => {
+  const classes = new Set();
+  const html = {
+    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    getAttribute: (name) => (name === 'data-theme' ? attr : null),
+  };
+  const store = (value) => ({ getItem: () => value, setItem: () => {}, removeItem: () => {} });
+  const window = { sessionStorage: store(null), addEventListener() {}, removeEventListener() {} };
+  Object.defineProperty(window, 'localStorage', {
+    get() { if (stored === 'throws') throw new Error('denied'); return store(stored); },
+  });
+  const document = { documentElement: html, body: null, visibilityState: 'visible',
+    addEventListener() {}, removeEventListener() {} };
+  vm.runInNewContext(source, { window, document, navigator: { webdriver: false },
+    location: { search: '', hash: '' }, setTimeout: () => 0, clearTimeout() {} });
+  return [...classes].sort();
+});
+console.log(JSON.stringify(results));
+"""
+
+
+@pytest.mark.parametrize("stored, attr, light", [
+    (None, None, False),          # nothing stored: dark
+    ("light", None, True),
+    ("dark", None, False),
+    ("sepia", None, False),       # anything else app.js would show dark
+    ("light", "dark", True),      # index.html's static data-theme="dark" does not hide it
+    ("dark", "light", False),     # what is stored wins, as in app.js
+    (None, "light", True),        # nothing stored: a data-theme on <html> counts
+    (None, "dark", False),
+    ("throws", "light", True),    # storage refuses: <html data-theme> or dark
+    ("throws", None, False),
+])
+def test_intro_picks_its_field_from_the_stored_theme(stored, attr, light):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    result = subprocess.run([node, "-e", THEME_HARNESS, str(WEB / "intro.js"), json.dumps([[stored, attr]])],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    (classes,) = json.loads(result.stdout)
+    assert classes == (["vxi-boot", "vxi-light"] if light else ["vxi-boot"])
