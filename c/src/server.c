@@ -349,6 +349,7 @@ static void json_write(Buf *b, const JVal *v) {
     case J_INT: buf_addc(b, dec_big(number, v->u.number)); break;
     case J_FLOAT: buf_addc(b, format_rounded(number, v->u.real)); break;
     case J_STR: json_write_string(b, v->u.text); break;
+    case J_RAW: buf_adds(b, v->u.text); break;
     case J_LIST:
         buf_addch(b, '[');
         for (size_t i = 0; i < v->u.list.n; i++) {
@@ -363,7 +364,7 @@ static void json_write(Buf *b, const JVal *v) {
         for (size_t i = 0; i < v->u.dict.n; i++) {
             if (i)
                 buf_addch(b, ',');
-            json_write_string(b, str_c(v->u.dict.v[i].key));
+            json_write_string(b, (Str){v->u.dict.v[i].key, v->u.dict.v[i].key_len});
             buf_addch(b, ':');
             json_write(b, v->u.dict.v[i].value);
         }
