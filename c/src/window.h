@@ -1,0 +1,61 @@
+/* Front ends for the graphical interface: where the page is shown.
+ *
+ *   - a native window (Windows): vex's own window, hosting the system web view
+ *     (Microsoft Edge WebView2) inside the vex process;
+ *   - an app window: a Chromium-family browser (Edge, Chrome, Chromium) started
+ *     in app mode with a throw-away profile - one window, no tabs, no address
+ *     bar - used where there is no native window;
+ *   - failing both, an ordinary browser tab (server.c).
+ */
+#ifndef VEX_WINDOW_H
+#define VEX_WINDOW_H
+
+#include <stdbool.h>
+
+/* --- the app window ---------------------------------------------------------- */
+
+typedef enum {
+    WINDOW_NONE,        /* no window is being followed */
+    WINDOW_OPEN,        /* the window is up */
+    WINDOW_CLOSED,      /* it was up and has been closed: time to stop */
+    WINDOW_FAILED,      /* it ended at once with an error: it never opened */
+    WINDOW_LOST         /* it ended at once without error: vex cannot follow it */
+} WindowState;
+
+/* Start the app window on `url`. False when no suitable browser is installed
+ * or it could not be started. */
+bool window_open(const char *url);
+
+/* Call a few times a second while serving. WINDOW_OPEN while the window is up;
+ * CLOSED, FAILED or LOST once when it ends, and WINDOW_NONE after that. */
+WindowState window_poll(void);
+
+/* Close the window if it is still open and delete its throw-away profile. */
+void window_close(void);
+
+/* --- the native window (Windows only) ---------------------------------------- */
+
+typedef enum {
+    NATIVE_UNAVAILABLE, /* it could not be shown: use another front end */
+    NATIVE_CLOSED       /* it was shown, and the user has closed it */
+} NativeResult;
+
+/* Show vex's own window on `url` and run it until it is closed. Must be called
+ * on the program's main thread; the server has to run on another thread
+ * meanwhile. Always NATIVE_UNAVAILABLE on systems other than Windows. */
+NativeResult native_window_run(const char *url);
+
+/* True when the program has a console to print to (always, except for the
+ * windowed Windows build started from the desktop). */
+bool window_has_console(void);
+
+/* Tell the user something when there is no console to print it to: a message
+ * box that the call waits on (Windows). Does nothing where there is a console. */
+void window_message(const char *text);
+
+/* The same box as the program's only control: it is shown without blocking,
+ * and `on_dismiss` is called (on another thread) when the user closes it.
+ * Does nothing where there is a console. */
+void window_stop_box(const char *text, void (*on_dismiss)(void));
+
+#endif
