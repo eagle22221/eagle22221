@@ -6,7 +6,9 @@
 const { chromium } = require('playwright');
 const path = require('path');
 const [, , base, token, exe, game, bundle] = process.argv;
-const out = (name) => path.join(__dirname, 'img', name + '.png');
+// JPEG: the backgrounds' soft gradients make PNGs about six times larger.
+const out = (name) => path.join(__dirname, 'img', name + '.jpg');
+const SHOT = { type: 'jpeg', quality: 92 };
 
 const WIDTH = 1440;          // wide enough for the three-column overview and the full row of view tabs
 const HEIGHT = 900;
@@ -43,17 +45,17 @@ const HEIGHT = 900;
   await page.goto(`${base}/#token=${token}`);
   await page.waitForSelector('.welcome');
   await settle();
-  await page.screenshot({ path: out('welcome') });
+  await page.screenshot({ ...SHOT, path: out('welcome') });
 
   await page.goto(`${base}/#token=${token}&open=${encodeURIComponent(exe)}`);
   await page.reload();
   await page.waitForSelector('#main .view-overview');
   await page.waitForSelector('.ov-sections table');
   await settle(1200);
-  await page.screenshot({ path: out('overview') });
+  await page.screenshot({ ...SHOT, path: out('overview') });
 
   await view('sections', 'Sections');
-  await page.screenshot({ path: out('sections') });
+  await page.screenshot({ ...SHOT, path: out('sections') });
 
   await view('entropy', 'Entropy');
   await page.waitForSelector('.view-entropy .chart-large svg');
@@ -68,25 +70,25 @@ const HEIGHT = 900;
   });
   if (dot) await page.mouse.move(dot.x, dot.y + 40);
   await page.waitForTimeout(400);
-  await page.screenshot({ path: out('entropy') });
+  await page.screenshot({ ...SHOT, path: out('entropy') });
 
   await view('strings', 'Strings');
   await page.fill('.view-strings input[placeholder="Search text"]', 'fixture');
   await page.waitForTimeout(700);
   await page.click('.view-strings tr:has-text("Hello from") button:has-text("Find uses")');
   await settle(900);
-  await page.screenshot({ path: out('strings') });
+  await page.screenshot({ ...SHOT, path: out('strings') });
 
   await view('code', 'Code (Disassembly)');
   await page.click('.fn-list button:has(.fn-name:text-is("print"))');
   await page.waitForSelector('.view-code .xref-list');
   await settle(900);
-  await page.screenshot({ path: out('code') });
+  await page.screenshot({ ...SHOT, path: out('code') });
 
   await view('imports', 'Imports');
   await page.click('.view-imports tr:has-text("WriteFile") button:has-text("Find uses")');
   await settle(900);
-  await page.screenshot({ path: out('imports') });
+  await page.screenshot({ ...SHOT, path: out('imports') });
 
   // the decode & cipher workbench, captured on the open practice program
   await view('decode', 'Decode');
@@ -99,7 +101,7 @@ const HEIGHT = 900;
   await size(1290);   // input, operations, recipe and output
   await scrollTop();
   await settle(400);
-  await page.screenshot({ path: out('decode') });
+  await page.screenshot({ ...SHOT, path: out('decode') });
   await size(HEIGHT);
 
   // the bundle opens in a second tab, next to the practice program
@@ -110,7 +112,7 @@ const HEIGHT = 900;
   await size(1010);   // tall enough for the whole list
   await scrollTop();
   await settle(400);
-  await page.screenshot({ path: out('split') });
+  await page.screenshot({ ...SHOT, path: out('split') });
   await size(HEIGHT);
 
   if (game) {
@@ -129,7 +131,7 @@ const HEIGHT = 900;
       if (heading) scroller.scrollTop += heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
     });
     await settle(400);
-    await page.screenshot({ path: out('assets') });
+    await page.screenshot({ ...SHOT, path: out('assets') });
     await size(HEIGHT);
   }
   console.log('page errors:', JSON.stringify(errors));
