@@ -536,6 +536,49 @@ def _api_split(ws, p, body):
     return split.split(binary, dest, pieces)
 
 
+# --- the page's own failure notes --------------------------------------------------
+
+# POST /api/log: when a request of the page fails before any answer arrives
+# ("Failed to fetch"), the page notes it and sends the notes here once the
+# server answers again. The C edition writes them to its log (c/src/server.c,
+# h_log); this edition keeps no log, so it checks them the same way, with the
+# same limits and messages, and drops them.
+MAX_LOG_BODY = 16384
+MAX_LOG_EVENTS = 20
+MAX_LOG_TEXT = 500                      # bytes (UTF-8) of one field
+
+
+class _NoContent:
+    """A handler's result for a 204 answer, which has no body."""
+
+
+NO_CONTENT = _NoContent()
+
+
+def _short_field(value) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    return isinstance(value, str) and len(value.encode("utf-8", "surrogatepass")) <= MAX_LOG_TEXT
+
+
+def _api_log(ws, p, body):
+    if body.left > MAX_LOG_BODY:
+        raise ApiError(413, "log report too large")
+    events = _json_body(body).get("events")
+    if not isinstance(events, list):
+        raise ApiError(400, "events must be a list")
+    if len(events) > MAX_LOG_EVENTS:
+        raise ApiError(400, f"too many events (at most {MAX_LOG_EVENTS})")
+    for event in events:
+        if not isinstance(event, dict):
+            raise ApiError(400, "each event must be an object")
+        if not all(_short_field(value) for value in event.values()):
+            raise ApiError(400, "event fields must be short texts or numbers")
+    return NO_CONTENT
+
+
 GET_ROUTES: Dict[str, Callable] = {
     "info": _api_info, "layout": _api_layout, "sections": _api_sections,
     "segments": _api_segments, "imports": _api_imports, "exports": _api_exports,
@@ -553,7 +596,7 @@ POST_ROUTES: Dict[str, Callable] = {
     "archive/replace": _api_archive_replace, "resource/replace": _api_resource_replace,
     "patch/bytes": _api_patch_bytes, "patch/nop": _api_patch_nop,
     "patch/string": _api_patch_string, "split": _api_split,
-    "decode": _api_decode, "decode/solve": _api_decode_solve,
+    "decode": _api_decode, "decode/solve": _api_decode_solve, "log": _api_log,
 }
 
 
@@ -591,8 +634,9 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, status: int, data: bytes, content_type: str,
               extra: Optional[Dict[str, str]] = None) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
+        if status != 204:                   # which has neither (RFC 9110, 8.6)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", "no-store")
@@ -646,7 +690,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(413, "upload too large")
         with self.workspace.lock:
             result = handler(self.workspace, params, body)
-        if isinstance(result, Raw):
+        if result is NO_CONTENT:
+            self._send(204, b"", "")
+        elif isinstance(result, Raw):
             extra = {"Content-Security-Policy": "sandbox; default-src 'none'"}
             if result.filename:
                 safe = re.sub(r"[^A-Za-z0-9._-]", "_", result.filename)

@@ -234,6 +234,33 @@ if (Test-Path $app) {
     Write-Host "--- window log ---"
     if (Test-Path $log) { Get-Content $log } else { Write-Host "(nothing was logged)" }
     $env:VEX_WINDOW_LOG = $null
+
+    # With no VEX_WINDOW_LOG the log is vex-log.txt next to the programs, and
+    # the run before is kept as vex-log.previous.txt. Plain commands write none.
+    Write-Host ""
+    Write-Host "=== the default log (vex-log.txt next to the programs) ==="
+    $default = Join-Path $Dir "vex-log.txt"
+    $previous = Join-Path $Dir "vex-log.previous.txt"
+    Remove-Item $default, $previous -Force -ErrorAction SilentlyContinue
+    if (Test-Path $vex) {
+        $null = & $vex info $sample
+        Check "default log: a plain command writes none" (-not (Test-Path $default))
+    }
+    foreach ($run in 1, 2) {
+        $process = Start-Process -FilePath $app -ArgumentList "`"$sample`"" -PassThru
+        $null = $process.Handle
+        $null = Wait-ForTitle $process "hello_pe64.exe*vex" 150
+        Start-Sleep -Seconds 2
+        if (-not $process.HasExited) { Close-AndCheck $process "default log (run $run)" }
+    }
+    $text = if (Test-Path $default) { Get-Content $default -Raw } else { "" }
+    Check "default log: vex-log.txt is next to the programs" (Test-Path $default)
+    Check "default log: the run before is in vex-log.previous.txt" (Test-Path $previous)
+    Check "default log: it names Windows and the WebView2 runtime" `
+        ($text -match "\] system: Windows" -and $text -match "\] WebView2")
+    Check "default log: it has the page's requests" ($text -match "\] http: GET /api/")
+    Write-Host "--- default log ---"
+    if ($text) { Write-Host $text } else { Write-Host "(nothing was logged)" }
 }
 
 Write-Host ""

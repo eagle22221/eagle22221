@@ -240,3 +240,46 @@ def test_page_shows_the_logo_in_the_sidebar_header_and_as_tab_icon(client):
 def test_page_credits_the_developer(client):
     _, body = client.get("/", token=False)
     assert "Developed by SS" in body.decode()
+
+
+# --- the page's notes of failed requests (POST /api/log) -------------------
+
+FAILED_FETCH = {"kind": "network", "method": "GET", "api": "info",
+                "error": "TypeError: Failed to fetch", "ms": 3, "count": 1,
+                "time": "2026-11-26T10:00:00.000Z"}
+
+
+def _post_log(client, body, **kw):
+    data = body if isinstance(body, bytes) else json.dumps(body).encode()
+    status, ctype, answer = client.request("POST", "/api/log", body=data, **kw)
+    return status, (json.loads(answer) if "json" in ctype else answer)
+
+
+def test_log_route_accepts_and_drops_the_notes(client):
+    # This edition keeps no log: the notes are checked, then dropped.
+    status, ctype, answer = client.request(
+        "POST", "/api/log", body=json.dumps({"events": [FAILED_FETCH]}).encode())
+    assert (status, ctype, answer) == (204, "", b"")
+    assert _post_log(client, {"events": []}) == (204, b"")
+
+
+@pytest.mark.parametrize("body, message", [
+    ({"events": "Failed to fetch"}, "events must be a list"),
+    ({}, "events must be a list"),
+    ({"events": [{}] * 21}, "too many events (at most 20)"),
+    ({"events": [["GET", "info"]]}, "each event must be an object"),
+    ({"events": [{"error": "x" * 501}]}, "event fields must be short texts or numbers"),
+    ({"events": [{"error": True}]}, "event fields must be short texts or numbers"),
+    ({"events": [{"error": {"nested": 1}}]}, "event fields must be short texts or numbers"),
+    (b"{not json", "request body must be JSON"),
+    ([FAILED_FETCH], "request body must be a JSON object"),
+])
+def test_log_route_refuses_what_is_not_a_short_note(client, body, message):
+    assert _post_log(client, body) == (400, {"error": message})
+
+
+def test_log_route_limits_the_size_and_needs_the_token(client):
+    big = {"events": [{"error": "x" * 400}] * 41}
+    assert _post_log(client, big) == (413, {"error": "log report too large"})
+    assert _post_log(client, {"events": [FAILED_FETCH]}, token=False)[0] == 403
+    assert client.get("/api/log")[0] == 404                     # POST only

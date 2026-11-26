@@ -94,6 +94,7 @@ typedef struct {
     char token[64];                 /* base64url of >=24 random bytes */
     const char *tempdir;            /* per-session scratch (uploads) */
     unsigned uploads;
+    unsigned long requests;         /* requests answered, for the log */
     Err err;
 } Server;
 
@@ -103,6 +104,9 @@ typedef struct {
 
 typedef struct Req Req;
 typedef void (*ApiHandler)(Req *req);
+
+/* How the last read from a connection ended, when it gave no data. */
+typedef enum { RECV_OK, RECV_CLOSED, RECV_TIMEOUT, RECV_STOPPING, RECV_FAILED } RecvEnd;
 
 struct Req {
     Arena *a;
@@ -134,6 +138,25 @@ struct Req {
     size_t raw_len;
     const char *raw_ctype;
     const char *raw_filename;       /* for Content-Disposition, or NULL */
+    bool no_content;                /* answer 204 with no body (POST /api/log) */
+
+    /* For the log: one line per request (log_request). Never the query
+     * string, a header's value or a body: they can hold the session token
+     * and the user's data. */
+    uint64_t started_ms;
+    const char *log_method;         /* NULL until the request line is read */
+    const char *log_path;           /* the path, without its query */
+    int log_status;                 /* of the answer; 0 while none is sent */
+    const char *log_error;          /* the message of an error answer */
+    size_t head_sent;               /* bytes of the answer's head */
+    uint64_t sent;                  /* bytes sent in all */
+    bool send_failed;               /* sending stopped: the client is gone */
+    int send_error;
+    RecvEnd recv_end;               /* why the last read gave nothing */
+    int recv_error;
+    size_t head_received;           /* bytes of the request head read */
+    bool head_too_large;
+    const char *body_problem;       /* set when the body was cut short */
 };
 
 /* Throw an API error carrying an explicit HTTP status (mirrors ApiError). */
@@ -302,25 +325,107 @@ static bool q_number_opt(Req *req, const char *name, big *out) {
     return true;
 }
 
+/* --- socket errors, for the log ---------------------------------------------- */
+
+static int sock_error(void) {
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+static bool would_block(int code) {
+#ifdef _WIN32
+    return code == WSAEWOULDBLOCK;
+#else
+    return code == EAGAIN || code == EWOULDBLOCK;
+#endif
+}
+
+static const char *sock_error_name(int code) {
+    switch (code) {
+#ifdef _WIN32
+    case WSAEINTR: return "WSAEINTR";
+    case WSAEBADF: return "WSAEBADF";
+    case WSAEACCES: return "WSAEACCES";
+    case WSAEFAULT: return "WSAEFAULT";
+    case WSAEINVAL: return "WSAEINVAL";
+    case WSAEMFILE: return "WSAEMFILE";
+    case WSAEWOULDBLOCK: return "WSAEWOULDBLOCK";
+    case WSAENOTSOCK: return "WSAENOTSOCK";
+    case WSAEADDRINUSE: return "WSAEADDRINUSE";
+    case WSAENETDOWN: return "WSAENETDOWN";
+    case WSAENETRESET: return "WSAENETRESET";
+    case WSAECONNABORTED: return "WSAECONNABORTED";
+    case WSAECONNRESET: return "WSAECONNRESET";
+    case WSAENOBUFS: return "WSAENOBUFS";
+    case WSAENOTCONN: return "WSAENOTCONN";
+    case WSAESHUTDOWN: return "WSAESHUTDOWN";
+    case WSAETIMEDOUT: return "WSAETIMEDOUT";
+    case WSAECONNREFUSED: return "WSAECONNREFUSED";
+    case WSANOTINITIALISED: return "WSANOTINITIALISED";
+#else
+    case EINTR: return "EINTR";
+    case EBADF: return "EBADF";
+    case EACCES: return "EACCES";
+    case EFAULT: return "EFAULT";
+    case EINVAL: return "EINVAL";
+    case EMFILE: return "EMFILE";
+    case ENFILE: return "ENFILE";
+    case EAGAIN: return "EAGAIN";
+    case ENOTSOCK: return "ENOTSOCK";
+    case EADDRINUSE: return "EADDRINUSE";
+    case ENETDOWN: return "ENETDOWN";
+    case ENETRESET: return "ENETRESET";
+    case ECONNABORTED: return "ECONNABORTED";
+    case ECONNRESET: return "ECONNRESET";
+    case ENOBUFS: return "ENOBUFS";
+    case ENOMEM: return "ENOMEM";
+    case ENOTCONN: return "ENOTCONN";
+    case ETIMEDOUT: return "ETIMEDOUT";
+    case ECONNREFUSED: return "ECONNREFUSED";
+    case EPIPE: return "EPIPE";
+#endif
+    default: return NULL;
+    }
+}
+
+/* "error 10054 (WSAECONNRESET)" */
+static const char *describe_sock_error(char *out, size_t cap, int code) {
+    const char *name = sock_error_name(code);
+    if (name != NULL)
+        snprintf(out, cap, "error %d (%s)", code, name);
+    else
+        snprintf(out, cap, "error %d", code);
+    return out;
+}
+
 /* --- sending responses ------------------------------------------------------- */
 
-static void send_all(socket_t fd, const uint8_t *data, size_t len) {
+/* Once a send fails the client is gone: nothing more is sent to it. */
+static void send_all(Req *req, const uint8_t *data, size_t len) {
     size_t sent = 0;
-    while (sent < len) {
+    while (sent < len && !req->send_failed) {
 #ifdef _WIN32
-        int n = send(fd, (const char *)data + sent, (int)(len - sent > 1 << 20 ? 1 << 20 : len - sent), 0);
+        int n = send(req->fd, (const char *)data + sent, (int)(len - sent > 1 << 20 ? 1 << 20 : len - sent), 0);
 #else
-        ssize_t n = send(fd, data + sent, len - sent, 0);
+        ssize_t n = send(req->fd, data + sent, len - sent, 0);
 #endif
-        if (n <= 0)
-            return;                 /* client went away: nothing more we can do */
+        if (n <= 0) {
+            req->send_failed = true;
+            req->send_error = n < 0 ? sock_error() : 0;
+            return;
+        }
         sent += (size_t)n;
+        req->sent += (uint64_t)n;
     }
 }
 
 static const char *reason_phrase(int status) {
     switch (status) {
     case 200: return "OK";
+    case 204: return "No Content";
     case 400: return "Bad Request";
     case 403: return "Forbidden";
     case 404: return "Not Found";
@@ -335,8 +440,10 @@ static void send_head(Req *req, int status, const char *ctype, size_t len, const
     buf_init(&h, req->a);
     buf_printf(&h, "HTTP/1.1 %d %s\r\n", status, reason_phrase(status));
     buf_addc(&h, "Server: vex\r\n");
-    buf_printf(&h, "Content-Type: %s\r\n", ctype);
-    buf_printf(&h, "Content-Length: %zu\r\n", len);
+    if (status != 204) {            /* which has neither (RFC 9110, 8.6) */
+        buf_printf(&h, "Content-Type: %s\r\n", ctype);
+        buf_printf(&h, "Content-Length: %zu\r\n", len);
+    }
     buf_addc(&h, "X-Content-Type-Options: nosniff\r\n");
     buf_addc(&h, "Referrer-Policy: no-referrer\r\n");
     buf_addc(&h, "Cache-Control: no-store\r\n");
@@ -345,14 +452,16 @@ static void send_head(Req *req, int status, const char *ctype, size_t len, const
         buf_printf(&h, "Content-Disposition: %s\r\n", disposition);
     buf_addc(&h, "Connection: close\r\n\r\n");
     Str hs = buf_str(&h);
-    send_all(req->fd, (const uint8_t *)hs.p, hs.n);
+    req->log_status = status;
+    req->head_sent = hs.n;
+    send_all(req, (const uint8_t *)hs.p, hs.n);
 }
 
 static void send_response(Req *req, int status, const char *ctype, const uint8_t *body,
                           size_t len, const char *csp, const char *disposition) {
     send_head(req, status, ctype, len, csp, disposition);
     if (len && body != NULL)
-        send_all(req->fd, body, len);
+        send_all(req, body, len);
 }
 
 /* --- JSON serialisation (compact; decodes identically to json.dumps) ---------
@@ -361,7 +470,7 @@ static void send_response(Req *req, int status, const char *ctype, const uint8_t
  * written to the socket piece by piece. */
 
 typedef struct {
-    socket_t fd;
+    Req *req;
     bool measuring;                 /* count the bytes, send nothing */
     size_t total;
     size_t used;
@@ -380,7 +489,7 @@ static void out_add(JsonOut *o, const char *p, size_t n) {
         p += take;
         n -= take;
         if (o->used == sizeof o->piece) {
-            send_all(o->fd, o->piece, o->used);
+            send_all(o->req, o->piece, o->used);
             o->used = 0;
         }
     }
@@ -477,7 +586,7 @@ static void json_write(JsonOut *o, const JVal *v) {
 
 static void send_json(Req *req, int status, const JVal *value) {
     JsonOut *out = arena_alloc(req->a, sizeof *out);
-    out->fd = req->fd;
+    out->req = req;
     out->measuring = true;
     json_write(out, value);
     send_head(req, status, "application/json", out->total, CSP, NULL);
@@ -485,10 +594,11 @@ static void send_json(Req *req, int status, const JVal *value) {
     out->total = 0;
     json_write(out, value);
     if (out->used)
-        send_all(req->fd, out->piece, out->used);
+        send_all(req, out->piece, out->used);
 }
 
 static void send_json_error(Req *req, int status, const char *message) {
+    req->log_error = str_printf(req->a, "%s", message).p;
     JVal *d = j_dict(req->a);
     j_set(req->a, d, "error", j_cstr(req->a, message));
     send_json(req, status, d);
@@ -497,6 +607,7 @@ static void send_json_error(Req *req, int status, const char *message) {
 /* --- reading the request ----------------------------------------------------- */
 
 static bool gui_stopping(void);
+static const char *stop_reason(void);
 
 /* Wait up to `ms` for `fd` to have something to read (data, a connection to
  * accept, or its end): 1 when it has, 0 when the time ran out, -1 on error. */
@@ -521,21 +632,68 @@ static int wait_readable(socket_t fd, int ms) {
  * short slices so that a client which keeps a connection open without sending
  * anything (a browser's spare connection) cannot hold up stopping: once the
  * program is stopping it gives up, as on a timeout. */
-static ssize_t sock_recv(socket_t fd, void *buf, size_t n) {
+static ssize_t sock_recv(Req *req, void *buf, size_t n) {
     for (int waited = 0;; waited += WAIT_SLICE_MS) {
-        if (gui_stopping() || waited >= RECV_TIMEOUT_SECS * 1000)
+        if (gui_stopping()) {
+            req->recv_end = RECV_STOPPING;
             return -1;
-        int ready = wait_readable(fd, WAIT_SLICE_MS);
+        }
+        if (waited >= RECV_TIMEOUT_SECS * 1000) {
+            req->recv_end = RECV_TIMEOUT;
+            req->recv_error = 0;
+            return -1;
+        }
+        int ready = wait_readable(req->fd, WAIT_SLICE_MS);
         if (ready > 0)
             break;
-        if (ready < 0)
+        if (ready < 0) {
+            req->recv_end = RECV_FAILED;
+            req->recv_error = sock_error();
             return -1;
+        }
     }
 #ifdef _WIN32
-    return recv(fd, (char *)buf, (int)(n > (1 << 20) ? (1 << 20) : n), 0);
+    ssize_t got = recv(req->fd, (char *)buf, (int)(n > (1 << 20) ? (1 << 20) : n), 0);
 #else
-    return recv(fd, buf, n, 0);
+    ssize_t got = recv(req->fd, buf, n, 0);
 #endif
+    if (got == 0) {
+        req->recv_end = RECV_CLOSED;
+    } else if (got < 0) {
+        int code = sock_error();
+#ifdef _WIN32
+        bool timed_out = code == WSAETIMEDOUT || would_block(code);     /* SO_RCVTIMEO */
+#else
+        bool timed_out = would_block(code);
+#endif
+        req->recv_end = timed_out ? RECV_TIMEOUT : RECV_FAILED;
+        req->recv_error = code;
+    }
+    return got;
+}
+
+/* Why reading from the connection stopped, for the log. */
+static const char *recv_problem(const Req *req, char *out, size_t cap) {
+    char code[64];
+    switch (req->recv_end) {
+    case RECV_CLOSED:
+        return "the client closed the connection";
+    case RECV_TIMEOUT:
+        if (req->recv_error != 0)
+            snprintf(out, cap, "nothing more arrived in %d s (%s)", RECV_TIMEOUT_SECS,
+                     describe_sock_error(code, sizeof code, req->recv_error));
+        else
+            snprintf(out, cap, "nothing more arrived in %d s", RECV_TIMEOUT_SECS);
+        return out;
+    case RECV_STOPPING:
+        return "vex is stopping";
+    case RECV_FAILED:
+        snprintf(out, cap, "receiving failed: %s",
+                 describe_sock_error(code, sizeof code, req->recv_error));
+        return out;
+    default:
+        return "the connection ended";
+    }
 }
 
 /* Read up to the end of the request headers ("\r\n\r\n"). Returns the header
@@ -546,18 +704,21 @@ static char *read_head(Req *req, size_t *head_len) {
     uint8_t *buf = arena_alloc(req->a, cap);
     for (;;) {
         if (used == cap) {
-            if (cap >= MAX_HEADER_BYTES)
+            if (cap >= MAX_HEADER_BYTES) {
+                req->head_too_large = true;
                 return NULL;        /* request head too large */
+            }
             size_t ncap = cap * 2;
             uint8_t *grown = arena_alloc(req->a, ncap);
             memcpy(grown, buf, used);
             buf = grown;
             cap = ncap;
         }
-        ssize_t n = sock_recv(req->fd, buf + used, cap - used);
+        ssize_t n = sock_recv(req, buf + used, cap - used);
         if (n <= 0)
             return NULL;            /* EOF or timeout before the head completed */
         used += (size_t)n;
+        req->head_received = used;
         /* find CRLFCRLF */
         for (size_t i = 3; i < used; i++) {
             if (buf[i] == '\n' && buf[i - 1] == '\r' && buf[i - 2] == '\n' && buf[i - 3] == '\r') {
@@ -568,8 +729,10 @@ static char *read_head(Req *req, size_t *head_len) {
                 return (char *)buf;
             }
         }
-        if (used > MAX_HEADER_BYTES)
+        if (used > MAX_HEADER_BYTES) {
+            req->head_too_large = true;
             return NULL;
+        }
     }
 }
 
@@ -586,6 +749,7 @@ static void req_body(Req *req, const uint8_t **out, size_t *out_len) {
         if (buf == NULL) {
             req->body = NULL;
             req->body_len = 0;
+            req->body_problem = "out of memory";
             return;
         }
         size_t have = 0;
@@ -598,8 +762,10 @@ static void req_body(Req *req, const uint8_t **out, size_t *out_len) {
             if (have == cap) {
                 size_t ncap = cap < (1u << 20) ? cap * 2 : cap + (1u << 20);
                 uint8_t *grown = realloc(buf, ncap);
-                if (grown == NULL)
+                if (grown == NULL) {
+                    req->body_problem = "out of memory";
                     break;
+                }
                 buf = grown;
                 cap = ncap;
             }
@@ -607,9 +773,14 @@ static void req_body(Req *req, const uint8_t **out, size_t *out_len) {
             big left = want - (big)have;
             if ((big)room > left)
                 room = (size_t)left;
-            ssize_t n = sock_recv(req->fd, buf + have, room);
-            if (n <= 0)
-                break;              /* EOF or timeout: truncated body */
+            ssize_t n = sock_recv(req, buf + have, room);
+            if (n <= 0) {           /* EOF or timeout: truncated body */
+                char why[128], got[44], wanted[44];
+                req->body_problem = str_printf(req->a, "%s of %s bytes arrived: %s",
+                                               dec_big(got, (big)have), dec_big(wanted, want),
+                                               recv_problem(req, why, sizeof why)).p;
+                break;
+            }
             have += (size_t)n;
         }
         arena_adopt(req->a, buf);
@@ -880,6 +1051,7 @@ static void h_techniques(Req *req) {
 
 static void h_open(Req *req) {
     const char *ap = abspath_param(req, "path");
+    window_trace("gui: the page opens %s", ap);
     JVal *d = j_dict(req->a);
     if (platform_exists(ap) && !platform_is_file(ap)) {
         j_set(req->a, d, "kind", j_cstr(req->a, "folder"));
@@ -1790,6 +1962,89 @@ static void h_patch_string(Req *req) {
     req->result = d;
 }
 
+/* --- POST /api/log: what the page could not report itself --------------------
+ * When a request of the page fails before any answer arrives ("Failed to
+ * fetch"), the page notes it and sends the notes here once the server answers
+ * again: {"events": [{"kind": ..., "method": ..., "api": ..., "error": ...,
+ * "ms": ..., "count": ..., "time": ...}, ...]}. Each event becomes one
+ * "page: ..." line of the log; the body is never echoed. server.py accepts
+ * and discards the same documents, with the same checks. */
+
+#define MAX_LOG_BODY 16384
+#define MAX_LOG_EVENTS 20
+#define MAX_LOG_TEXT 500            /* bytes of one field */
+
+/* A field of an event as text: a string's bytes (control characters and NUL
+ * bytes made spaces) or a number as it was written. "" when absent. */
+static const char *log_field(Req *req, const JVal *event, const char *name) {
+    const JVal *value = j_get(event, name);
+    if (value == NULL || (value->kind != J_STR && value->kind != J_RAW))
+        return "";
+    char *text = arena_alloc(req->a, value->u.text.n + 1);
+    for (size_t i = 0; i < value->u.text.n; i++) {
+        unsigned char c = (unsigned char)value->u.text.p[i];
+        text[i] = c < 0x20 || c == 0x7F ? ' ' : (char)c;
+    }
+    text[value->u.text.n] = '\0';
+    return text;
+}
+
+static void h_log(Req *req) {
+    if (req->content_length > MAX_LOG_BODY)
+        api_error(req, 413, "log report too large");
+    const JVal *body = json_body(req);
+    const JVal *events = j_get(body, "events");
+    if (events == NULL || events->kind != J_LIST)
+        api_error(req, 400, "events must be a list");
+    if (j_len(events) > MAX_LOG_EVENTS)
+        api_error(req, 400, "too many events (at most %d)", MAX_LOG_EVENTS);
+    for (size_t i = 0; i < j_len(events); i++) {
+        const JVal *event = j_at(events, i);
+        if (event->kind != J_DICT)
+            api_error(req, 400, "each event must be an object");
+        for (size_t k = 0; k < event->u.dict.n; k++) {
+            const JVal *value = event->u.dict.v[k].value;
+            bool number = value->kind == J_RAW;
+            bool text = value->kind == J_STR && value->u.text.n <= MAX_LOG_TEXT;
+            if (!number && !text)
+                api_error(req, 400, "event fields must be short texts or numbers");
+        }
+    }
+    for (size_t i = 0; i < j_len(events); i++) {
+        const JVal *event = j_at(events, i);
+        const char *kind = log_field(req, event, "kind"), *method = log_field(req, event, "method");
+        const char *api = log_field(req, event, "api"), *error = log_field(req, event, "error");
+        const char *ms = log_field(req, event, "ms"), *count = log_field(req, event, "count");
+        const char *time = log_field(req, event, "time");
+        Buf line;
+        buf_init(&line, req->a);
+        buf_printf(&line, "page: %s", kind[0] ? kind : "event");
+        if (method[0])
+            buf_printf(&line, " %s", method);
+        if (api[0])
+            buf_printf(&line, " %s", api);
+        if (error[0])
+            buf_printf(&line, ": %s", error);
+        const char *next = " (";
+        if (ms[0]) {
+            buf_printf(&line, "%safter %s ms", next, ms);
+            next = ", ";
+        }
+        if (count[0]) {
+            buf_printf(&line, "%s%s times", next, count);
+            next = ", ";
+        }
+        if (time[0]) {
+            buf_printf(&line, "%sat %s", next, time);
+            next = ", ";
+        }
+        if (next[0] == ',')
+            buf_addc(&line, ")");
+        window_trace("%s", buf_str(&line).p);
+    }
+    req->no_content = true;
+}
+
 /* --- route table and dispatch ------------------------------------------------ */
 
 typedef struct {
@@ -1815,7 +2070,7 @@ static const Route ROUTES[] = {
     {"POST", "archive/replace", h_archive_replace},
     {"POST", "resource/replace", h_resource_unavailable},
     {"POST", "patch/bytes", h_patch_bytes}, {"POST", "patch/nop", h_patch_nop},
-    {"POST", "patch/string", h_patch_string},
+    {"POST", "patch/string", h_patch_string}, {"POST", "log", h_log},
 };
 
 static void run_handler(void *arg) {
@@ -1847,9 +2102,12 @@ static void api_dispatch(Req *req, const char *name) {
     req->handler = handler;
     req->have_status = false;
     req->is_raw = false;
+    req->no_content = false;
     req->result = NULL;
     if (err_protect(req->err, run_handler, req)) {
-        if (req->is_raw) {
+        if (req->no_content) {
+            send_response(req, 204, "", NULL, 0, CSP, NULL);
+        } else if (req->is_raw) {
             const char *disposition = NULL;
             if (req->raw_filename != NULL) {
                 char safe[256];
@@ -1945,6 +2203,13 @@ static void handle_request(Req *req, char *head) {
     if (sp2 != NULL)
         *sp2 = '\0';
     req->method = method;
+    req->log_method = method;
+
+    /* For the log, until the path is decoded: the target without its query. */
+    char *query_mark = strchr(target, '?');
+    req->log_path = query_mark != NULL ? str_printf(req->a, "%.*s", (int)(query_mark - target),
+                                                    target).p
+                                       : target;
 
     /* Parse headers we care about. */
     req->host = NULL;
@@ -1995,6 +2260,7 @@ static void handle_request(Req *req, char *head) {
         query_len = strlen(query);
     }
     const char *route = percent_decode(req->a, target, strlen(target), false);
+    req->log_path = route;
     parse_query(req, query, query_len);
 
     if (strncmp(route, "/api/", 5) == 0)
@@ -2005,6 +2271,48 @@ static void handle_request(Req *req, char *head) {
         send_json_error(req, 404, "not found");
 }
 
+static uint64_t clock_ms(void);
+
+/* The request's line in the log:
+ *   http: GET /api/info 200 1532 B 12 ms
+ *   http: GET /api/nope 404 61 B 0 ms: unknown API endpoint: nope
+ * with what went wrong on the connection after it, if anything did. */
+static void log_request(const Req *req) {
+    char status[16], bytes[44], ms[44], code[64];
+    if (req->log_status != 0)
+        snprintf(status, sizeof status, "%d", req->log_status);
+    else
+        snprintf(status, sizeof status, "(no answer)");
+    dec_big(bytes, (big)(req->sent > req->head_sent ? req->sent - req->head_sent : 0));
+    dec_big(ms, (big)(clock_ms() - req->started_ms));
+    bool error = req->log_status >= 400 && req->log_error != NULL;
+    char sending[128] = "";
+    if (req->send_failed)
+        snprintf(sending, sizeof sending, "; sending the answer failed: %s",
+                 req->send_error != 0 ? describe_sock_error(code, sizeof code, req->send_error)
+                                      : "the connection is gone");
+    window_trace("http: %s %s %s %s B %s ms%s%s%s%s%s", req->log_method != NULL ? req->log_method : "?",
+                 req->log_path != NULL ? req->log_path : "?", status, bytes, ms,
+                 error ? ": " : "", error ? req->log_error : "",
+                 sending, req->body_problem != NULL ? "; the request body was cut short: " : "",
+                 req->body_problem != NULL ? req->body_problem : "");
+}
+
+/* A connection that ended before a whole request head arrived. */
+static void log_no_request(const Req *req) {
+    char why[128];
+    if (req->head_too_large)
+        window_trace("http: refused a request head of more than %d bytes", MAX_HEADER_BYTES);
+    else if (req->head_received > 0)
+        window_trace("http: a request was cut short after %lu bytes of its head: %s",
+                     (unsigned long)req->head_received, recv_problem(req, why, sizeof why));
+    else if (req->recv_end == RECV_CLOSED)
+        window_trace("http: a connection closed with no request");   /* a browser's spare */
+    else if (req->recv_end != RECV_STOPPING)
+        window_trace("http: no request arrived on a connection: %s",
+                     recv_problem(req, why, sizeof why));
+}
+
 static void handle_connection(Server *srv, socket_t fd) {
     Arena ra = {0};
     Req req;
@@ -2013,10 +2321,16 @@ static void handle_connection(Server *srv, socket_t fd) {
     req.err = &srv->err;
     req.srv = srv;
     req.fd = fd;
+    req.started_ms = clock_ms();
     size_t head_len;
     char *head = read_head(&req, &head_len);
-    if (head != NULL)
+    if (head != NULL) {
         handle_request(&req, head);
+        srv->requests++;
+        log_request(&req);
+    } else {
+        log_no_request(&req);
+    }
     arena_release(&ra);
 }
 
@@ -2318,33 +2632,58 @@ static void serve_connection(Server *srv, socket_t conn) {
 /* Serve until the program is stopping. The listening socket does not block (a
  * connection that is gone again by the time it is accepted must not hold the
  * loop up); a connection is served, blocking, once its request has begun. */
+/* A failure that could repeat on every turn of the loop is logged the first
+ * few times only. */
+#define MAX_REPEATED_FAILURES 20
+
+static void log_repeated(unsigned *seen, const char *what, int code) {
+    char text[64];
+    if (++*seen <= MAX_REPEATED_FAILURES)
+        window_trace("http: %s failed: %s%s", what, describe_sock_error(text, sizeof text, code),
+                     *seen == MAX_REPEATED_FAILURES ? " (from now on not logged)" : "");
+}
+
 static void serve_until_stopped(Server *srv) {
     Waiting waiting[MAX_WAITING];
     bool ready[MAX_WAITING];
     int count = 0;
+    unsigned wait_failures = 0, accept_failures = 0;
+    window_trace("http: the server thread is serving on port %u", srv->port);
     while (!gui_stopping()) {
         bool listen_ready = false;
         int n = wait_for_any(srv->listen_fd, waiting, count, WAIT_SLICE_MS, &listen_ready, ready);
         if (n < 0) {
+            log_repeated(&wait_failures, "waiting for connections", sock_error());
             nap_ms(WAIT_SLICE_MS);  /* a transient error: do not spin */
             continue;
         }
         uint64_t now = clock_ms();
         int kept = 0;
         for (int i = 0; i < count; i++) {
-            if (ready[i] && !gui_stopping())
+            if (ready[i] && !gui_stopping()) {
                 serve_connection(srv, waiting[i].fd);
-            else if (gui_stopping() || now - waiting[i].since_ms >= RECV_TIMEOUT_SECS * 1000u)
+            } else if (gui_stopping()) {
                 closesock(waiting[i].fd);
-            else
+            } else if (now - waiting[i].since_ms >= RECV_TIMEOUT_SECS * 1000u) {
+                window_trace("http: closed a connection that sent nothing for %d s",
+                             RECV_TIMEOUT_SECS);
+                closesock(waiting[i].fd);
+            } else {
                 waiting[kept++] = waiting[i];
+            }
         }
         count = kept;
         for (int taken = 0; listen_ready && taken < MAX_WAITING && !gui_stopping(); taken++) {
             socket_t conn = accept(srv->listen_fd, NULL, NULL);
-            if (conn == BAD_SOCKET)
+            if (conn == BAD_SOCKET) {
+                int code = sock_error();
+                if (!would_block(code))
+                    log_repeated(&accept_failures, "accepting a connection", code);
                 break;              /* none left to take (the socket does not block) */
+            }
             if (count == MAX_WAITING) {
+                window_trace("http: %d connections are waiting with no request: closed the "
+                             "oldest", MAX_WAITING);
                 closesock(waiting[0].fd);
                 memmove(waiting, waiting + 1, (size_t)(MAX_WAITING - 1) * sizeof *waiting);
                 count--;
@@ -2356,6 +2695,8 @@ static void serve_until_stopped(Server *srv) {
     }
     for (int i = 0; i < count; i++)
         closesock(waiting[i].fd);
+    window_trace("http: the server thread ends (%s) after %lu requests", stop_reason(),
+                 srv->requests);
 }
 
 #ifdef _WIN32
@@ -2504,6 +2845,8 @@ static void show_page(const char *url, bool open_anything, bool own_window) {
 /* --- the gui command --------------------------------------------------------- */
 
 void cmd_gui(Session *s) {
+    /* The interface is starting: from here on the run is logged (window.h). */
+    window_log_start();
     big port = 0;
     cli_int_option(s, "port", "--port", false, &port);
     if (port < 0 || port > 65535)
@@ -2554,6 +2897,7 @@ void cmd_gui(Session *s) {
         closesock(fd);
         err_throw(s->err, ERR_OTHER, "could not generate a session token from the system RNG");
     }
+    window_log_secret(srv.token);   /* the key to the session: never in the log */
     srv.tempdir = make_tempdir(s->a);
     if (srv.tempdir == NULL) {
         closesock(fd);
@@ -2565,6 +2909,7 @@ void cmd_gui(Session *s) {
     buf_init(&url, s->a);
     buf_printf(&url, "http://127.0.0.1:%u/#token=%s", srv.port, srv.token);
     if (path != NULL) {
+        window_trace("gui: the file to open: %s", platform_abspath(s->a, path));
         Str enc = url_quote(s->a, platform_abspath(s->a, path));
         buf_printf(&url, "&open=%.*s", (int)enc.n, enc.p);
     }

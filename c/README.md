@@ -99,11 +99,23 @@ box saying "vex is running in your web browser. Click OK to stop vex." is how
 it is stopped. Double-clicking `vex.exe` (without a file) also opens the
 interface, with its console window beside it.
 
-Set `VEX_WINDOW_LOG` to a file name to get a record of every step: which
-front end was tried, what happened to it (why the native window was
-unavailable, which browser was started, how and when it ended), whether the
-profile was deleted, and why vex stopped. That is the way to diagnose
-`vex-app.exe`, which has nowhere to print.
+Every run that shows the interface (`vex-app.exe`, `vex gui`, a
+double-clicked `vex.exe`) keeps a log, so that a user who sees a problem can
+send one file: on Windows `vex-log.txt` next to the program, or
+`%LOCALAPPDATA%\vex\vex-log.txt` where that folder cannot be written to
+(Program Files). It starts with the date, the vex version, the program's
+path, the Windows version and the WebView2 runtime's; then every step: which
+front end was tried and what happened to it, one line per HTTP request
+(method, path without its query, status, bytes, milliseconds, and the error
+message of a failed one), socket failures (accept, receive, send, a request
+cut short), the page's own notes of requests that got no answer at all
+("Failed to fetch", sent later to `POST /api/log`), and why vex stopped.
+It never holds the session token, a query string, a request body or file
+contents. Each run moves the log of the run before to `vex-log.previous.txt`;
+a log ends after about 2 MB. Plain commands (`vex info FILE`) never write
+one. `VEX_WINDOW_LOG` set to a file name logs there instead (the only way on
+other systems, where nothing is written by default), and set to `off` or `0`
+turns the log off. `c/tests/log_check.c` checks the log's code on POSIX.
 
 ## Differences from the Python version
 
@@ -208,7 +220,7 @@ sanitizer build. `VEX_TEST_SANITIZED=1` runs everything with it.
     src/cli.[ch] main.c      command line
     src/server.[ch]          vex gui: the HTTP server (on its own thread) and the
                              choice of front end
-    src/window.[ch]          the app window, message boxes, VEX_WINDOW_LOG
+    src/window.[ch]          the app window, message boxes, the run's log
     src/appwin.c             vex's own window (Windows, WebView2)
     src/app_main.c           vex-app.exe
     res/vex.rc               icon and version details of both Windows programs

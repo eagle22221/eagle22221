@@ -6,8 +6,9 @@
  * shows the interface in vex's own window (window.h) and ends when that is
  * closed. With no console to print to, errors are shown in a message box
  * (cli.c), and when the page can only be shown in a browser tab a box with an
- * OK button is the way to stop it (server.c). %VEX_WINDOW_LOG% names a file
- * that receives a record of each step, for diagnosing a start-up problem.
+ * OK button is the way to stop it (server.c). Each run writes a record of
+ * each step to vex-log.txt in the program's folder (window.h), for diagnosing
+ * a problem from the file alone.
  * main.c is the entry point of vex.exe, the command-line program. */
 #include "cli.h"
 #include "platform.h"
@@ -32,6 +33,7 @@ static void quiet_stream(DWORD which, FILE *stream) {
 #endif
 
 int main(int argc, char **argv) {
+    window_log_start();             /* first: everything after it is recorded */
 #ifdef _WIN32
     quiet_stream(STD_OUTPUT_HANDLE, stdout);
     quiet_stream(STD_ERROR_HANDLE, stderr);

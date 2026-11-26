@@ -91,17 +91,84 @@ for (const key of FILE_KEYS) {
 
 // --- server calls -----------------------------------------------------------
 
+// A request that fails before any answer arrives ("Failed to fetch") never
+// reaches the server, so the server's log cannot show it. The page keeps a
+// short note of each one and sends the notes to POST /api/log once the server
+// answers again (or on a retry a few seconds later), so that vex-log.txt has
+// both sides. Only the request's method and API name go in a note: never its
+// query (file paths) or its body.
+const PAGE_LOG = { notes: [], sending: false, timer: null, tries: 0 };
+const PAGE_LOG_MAX_NOTES = 20;          // POST /api/log takes at most 20 events
+const PAGE_LOG_RETRY_MS = 5000;
+const PAGE_LOG_MAX_TRIES = 12;          // a minute of retries, then wait for an answer
+
+function noteFailedRequest(kind, method, name, error, startedAt) {
+  const text = String((error && (error.name ? `${error.name}: ${error.message}` : error.message)) || error).slice(0, 200);
+  const ms = Math.round(performance.now() - startedAt);
+  const last = PAGE_LOG.notes[PAGE_LOG.notes.length - 1];
+  if (last && last.kind === kind && last.method === method && last.api === name && last.error === text) {
+    last.count += 1;                    // the same failure again: one note, counted
+    last.ms = ms;
+    last.time = new Date().toISOString();
+  } else if (PAGE_LOG.notes.length < PAGE_LOG_MAX_NOTES) {
+    PAGE_LOG.notes.push({ kind, method, api: String(name).slice(0, 100), error: text, ms, count: 1,
+      time: new Date().toISOString() });
+  }
+  schedulePageLog();
+}
+
+function schedulePageLog() {
+  if (PAGE_LOG.timer || PAGE_LOG.sending || PAGE_LOG.tries >= PAGE_LOG_MAX_TRIES) return;
+  PAGE_LOG.timer = setTimeout(() => { PAGE_LOG.timer = null; sendPageLog(); }, PAGE_LOG_RETRY_MS);
+}
+
+async function sendPageLog() {
+  if (PAGE_LOG.sending || !PAGE_LOG.notes.length || !state.token) return;
+  clearTimeout(PAGE_LOG.timer);
+  PAGE_LOG.timer = null;
+  PAGE_LOG.sending = true;
+  const events = PAGE_LOG.notes.splice(0, PAGE_LOG_MAX_NOTES);
+  try {
+    // Whatever the answer, the server has the notes (or refused them): done.
+    await fetch('/api/log', {
+      method: 'POST',
+      headers: { 'X-Vex-Token': state.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events }),
+    });
+    PAGE_LOG.tries = 0;
+  } catch (e) {
+    // Still no answer: keep the notes (oldest first) and try again later.
+    PAGE_LOG.notes = events.concat(PAGE_LOG.notes).slice(0, PAGE_LOG_MAX_NOTES);
+    PAGE_LOG.tries += 1;
+  } finally {
+    PAGE_LOG.sending = false;
+  }
+  if (PAGE_LOG.notes.length) schedulePageLog();
+}
+
 async function api(name, params, options) {
   const opts = options || {};
+  const method = opts.method || 'GET';
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params || {})) {
     if (v !== undefined && v !== null && v !== '') qs.set(k, v);
   }
-  const res = await fetch(`/api/${name}?${qs}`, {
-    method: opts.method || 'GET',
-    headers: { 'X-Vex-Token': state.token },
-    body: opts.body,
-  });
+  const startedAt = performance.now();
+  let res;
+  try {
+    res = await fetch(`/api/${name}?${qs}`, {
+      method,
+      headers: { 'X-Vex-Token': state.token },
+      body: opts.body,
+    });
+  } catch (error) {
+    noteFailedRequest('network', method, name, error, startedAt);
+    throw error;
+  }
+  if (PAGE_LOG.notes.length) {          // the server answers again: tell it what it missed
+    PAGE_LOG.tries = 0;
+    sendPageLog();
+  }
   if (!res.ok) {
     let message = res.statusText;
     try { message = (await res.json()).error || message; } catch (e) { /* not JSON */ }
@@ -109,7 +176,13 @@ async function api(name, params, options) {
     error.status = res.status;
     throw error;
   }
-  return opts.raw ? res.blob() : res.json();
+  try {
+    return await (opts.raw ? res.blob() : res.json());
+  } catch (error) {
+    // The answer began but did not arrive whole (or was not JSON).
+    noteFailedRequest('answer', method, name, error, startedAt);
+    throw error;
+  }
 }
 
 function toast(message, isError) {

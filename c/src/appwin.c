@@ -63,9 +63,9 @@ static struct {
     bool failed;        /* gave up before that */
 } g;
 
-/* A step-by-step record of how the window came up, appended to the file named
- * by %VEX_WINDOW_LOG% when that is set (window.c). A windowed program has
- * nowhere to print, so this is how a start-up problem gets diagnosed. */
+/* A step-by-step record of how the window came up, in the run's log
+ * (window.h). A windowed program has nowhere to print, so this is how a
+ * start-up problem gets diagnosed. */
 #define trace window_trace
 
 /* The window, for native_window_request_close() on other threads: set once it
@@ -400,17 +400,22 @@ static void place_window(HWND hwnd) {
 
 /* --- finding the loader and a place for the engine's data -------------------- */
 
-/* WebView2Loader.dll from the folder the program is in, and nowhere else. */
-static CreateEnvironmentFn load_loader(void) {
+/* WebView2Loader.dll from the folder the program is in, and nowhere else.
+ * NULL (with the error in GetLastError) when it cannot be loaded. */
+static HMODULE open_loader(void) {
     wchar_t path[MAX_PATH + 32];
     DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH)
+    wchar_t *slash = n == 0 || n >= MAX_PATH ? NULL : wcsrchr(path, L'\\');
+    if (slash == NULL) {
+        SetLastError(ERROR_FILE_NOT_FOUND);
         return NULL;
-    wchar_t *slash = wcsrchr(path, L'\\');
-    if (slash == NULL)
-        return NULL;
+    }
     wcscpy(slash + 1, LOADER_NAME);
-    HMODULE loader = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+    return LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+}
+
+static CreateEnvironmentFn load_loader(void) {
+    HMODULE loader = open_loader();
     if (loader == NULL) {
         /* 126: not there. 193: not a 64-bit DLL. */
         trace("native window: could not load the loader (error %lu)",
@@ -435,6 +440,34 @@ static bool data_folder(wchar_t *out, size_t cap) {
         return false;
     wcscat(out, L"\\WebView2");
     return true;
+}
+
+/* For the first lines of the log: which WebView2 runtime is installed. The
+ * loader stays loaded; the window loads it again (cheaply) if it is used. */
+void native_window_trace_runtime(void) {
+    HMODULE loader = open_loader();
+    if (loader == NULL) {
+        trace("WebView2: WebView2Loader.dll could not be loaded from the program's folder "
+              "(error %lu)", (unsigned long)GetLastError());
+        return;
+    }
+    typedef HRESULT(STDAPICALLTYPE * VersionFn)(PCWSTR browser_folder, LPWSTR *version);
+    VersionFn get_version = (VersionFn)(void (*)(void))GetProcAddress(
+        loader, "GetAvailableCoreWebView2BrowserVersionString");
+    if (get_version == NULL) {
+        trace("WebView2: the loader cannot tell the runtime's version");
+        return;
+    }
+    LPWSTR version = NULL;
+    HRESULT result = get_version(NULL, &version);
+    char text[128];
+    if (SUCCEEDED(result) && version != NULL &&
+        WideCharToMultiByte(CP_UTF8, 0, version, -1, text, (int)sizeof text, NULL, NULL) > 0)
+        trace("WebView2 runtime: %s", text);
+    else
+        trace("WebView2 runtime: none found (result 0x%08lx): the window will not be vex's own",
+              (unsigned long)result);
+    CoTaskMemFree(version);             /* NULL is fine */
 }
 
 /* --- the entry point --------------------------------------------------------- */
@@ -537,6 +570,10 @@ NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
 /* Built without the WebView2 SDK (see fetch_webview2.sh): no native window. */
 
 #include "window.h"
+
+void native_window_trace_runtime(void) {
+    window_trace("WebView2: this build has no native window (made without the WebView2 SDK)");
+}
 
 NativeResult native_window_run(const char *url, void (*on_shown)(void)) {
     (void)url;

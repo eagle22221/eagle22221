@@ -154,6 +154,13 @@ Good to know
   no tabs or address bar). If neither browser is there, vex opens in your
   normal web browser, and a small "vex is running" box lets you stop it.
   Whichever way it opens, everything stays on your own computer.
+- If vex misbehaves (an error, a blank window, "Failed to fetch"), please
+  send the file vex-log.txt from the vex folder, and vex-log.previous.txt
+  too if it is there (if the folder cannot be written to, they are in
+  %LOCALAPPDATA%\vex instead). vex writes them each time it opens its
+  window: a list of what it did and the file paths you opened, never the
+  contents of any file. Each start keeps only that run and the one
+  before. You can delete them any time.
 - The practice folder has more to try: sample.dll and libsample.so (a Linux
   library) for "exports"; evasion_pe64.exe, a harmless sample that trips
   every check, for "techniques"; and demo_game\ (a pretend game) for

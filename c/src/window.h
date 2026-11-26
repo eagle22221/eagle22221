@@ -63,17 +63,50 @@ void window_message(const char *text);
  * Does nothing where there is a console. */
 void window_stop_box(const char *text, void (*on_dismiss)(void));
 
-/* --- diagnosis ----------------------------------------------------------------- */
+/* --- diagnosis: the log ------------------------------------------------------- */
 
-/* One line, "[  1234 ms] text", appended to the file named by %VEX_WINDOW_LOG%
- * ($VEX_WINDOW_LOG) when that is set, and nothing otherwise. The front ends
- * and `vex gui` record each step there, so a start-up problem in a program
- * with nowhere to print can be diagnosed from the file alone. Times count
- * from the first line of the run. Only plain printf conversions (%s, %d, %u,
- * %lu, %x, %lx) are used with it: it runs on any C runtime. */
+/* Each run that shows the interface (vex-app.exe, `vex gui`, a double-clicked
+ * vex.exe) keeps a log, so that a user who sees a problem can send one file.
+ * Where it goes:
+ *
+ *   %VEX_WINDOW_LOG% (POSIX: $VEX_WINDOW_LOG) set to a file name: that file;
+ *                    set to "off" or "0": no log at all;
+ *   otherwise, on Windows: vex-log.txt in the program's own folder, or, where
+ *                    that folder cannot be written to (Program Files),
+ *                    %LOCALAPPDATA%\vex\vex-log.txt;
+ *   otherwise, elsewhere: no log (nothing is written next to the program).
+ *
+ * The first line of a run moves the log of the run before to NAME.previous.EXT
+ * (vex-log.previous.txt) and starts a fresh file, which ends after about 2 MB
+ * with a last "log full" line. Each line is written out as soon as it is
+ * traced, from any thread. File contents, request bodies and the session
+ * token are never written (see window_log_secret). */
+
+/* Start this run's log: open (and rotate) it and write the first lines (date,
+ * vex version, the program, the system). Called by every program that shows
+ * the interface, before anything else is traced; later calls do nothing.
+ * Nothing is ever written in a run that has not called it, so plain commands
+ * (`vex info FILE`) never create or touch a log. */
+void window_log_start(void);
+
+/* Never write `secret` (the session token) to the log: every occurrence of it
+ * in a line is replaced by "[hidden]". At most one secret; NULL forgets it. */
+void window_log_secret(const char *secret);
+
+/* One line, "[  1234 ms] text", in the log when it has been started, and
+ * nothing otherwise. The front ends, the server and `vex gui` record each step
+ * there, so a problem in a program with nowhere to print can be diagnosed
+ * from the file alone. Times count from the first line of the run. Control
+ * characters become spaces (one call, one line). Only plain printf
+ * conversions (%s, %d, %u, %lu, %x, %lx) are used with it. */
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((format(printf, 1, 2)))
 #endif
 void window_trace(const char *format, ...);
+
+/* Windows: one line naming the installed WebView2 runtime (asked of
+ * WebView2Loader.dll next to the program), or saying why there is none.
+ * Part of window_log_start(); defined in appwin.c. */
+void native_window_trace_runtime(void);
 
 #endif
