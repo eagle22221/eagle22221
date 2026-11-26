@@ -3,6 +3,7 @@ the animated background. These read the files the server sends, which are the
 ones the C edition embeds, so they hold for both editions."""
 import http.client
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -213,9 +214,6 @@ def test_entropy_route_has_the_shape_the_page_reads(client):
 
 # --- the animated background --------------------------------------------------
 
-STEP = 0.25  # seconds: the one clock every background animation steps on
-
-
 def keyframes(css):
     found = {}
     for name, body in re.findall(r"@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}", without_comments(css)):
@@ -224,7 +222,8 @@ def keyframes(css):
     return found
 
 
-BACKDROP_ANIMATIONS = {"drift-a", "drift-b", "drift-c", "ribbon-a", "ribbon-b", "sparkles-a", "sparkles-b", "twinkle"}
+BACKDROP_ANIMATIONS = {"breathe", "ribbon-a", "ribbon-b", "speck", "twinkle"}
+BACKDROP_CLASS = r"\.(backdrop|glow|ribbons?|sparkles?|specks?|motes?)\b"
 
 
 def test_animations_only_move_and_fade_never_blur(css):
@@ -234,7 +233,11 @@ def test_animations_only_move_and_fade_never_blur(css):
         assert props <= {"transform", "opacity"}, name
     code = without_comments(css)
     assert not re.search(r"transition:[^;]*\bfilter\b", code)
+    assert not re.search(r"will-change:[^;]*\bfilter\b", code)
     assert "blur(" not in code.replace("backdrop-filter: blur(3px)", "")  # only the open dialog's scrim
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", code):
+        if re.search(BACKDROP_CLASS, selector.split(",")[-1]):
+            assert not re.search(r"(^|[\s;])(filter|transition)\s*:", body), selector.strip()
 
 
 def backdrop(page):
@@ -244,22 +247,25 @@ def backdrop(page):
 def test_background_is_glows_ribbons_sparkles_and_motes(page, css):
     layers = backdrop(page)
     assert layers.count('class="glow ') == 3 and layers.count('class="mote"') >= 12
+    assert layers.count('class="speck"') >= 12
     ribbons = re.findall(r'<div class="ribbons ribbons-(\w)"><div class="ribbon ribbon-\1"></div></div>', layers)
     assert len(ribbons) >= 2
-    sparkles = re.findall(r'<div class="sparkles sparkles-(\w)"></div>', layers)
-    assert len(sparkles) >= 2
     code = without_comments(css)
     for cls in (".glow-a", ".glow-b", ".glow-c"):
         assert "radial-gradient" in rule(code, cls)
-    # each layer has its own tile in each theme, and the tilt that makes the
-    # ribbons rise is a fixed skew on the (unanimated) parent
-    for kind, names in (("ribbon", ribbons), ("sparkles", sparkles)):
-        for n in names:
-            for theme in ("dark", "light"):
-                assert f'url("/static/{kind.rstrip("s")}s-{theme}-{n}.svg")' in code, (kind, n, theme)
+    # each ribbon layer has its own tile in each theme, and the tilt that makes
+    # the ribbons rise is a fixed skew on the (unanimated) parent
+    for n in ribbons:
+        for theme in ("dark", "light"):
+            assert f'url("/static/ribbons-{theme}-{n}.svg")' in code, (n, theme)
     wrapper = rule(code, ".ribbons")
     assert "skewY(" in wrapper and "atan2(" in wrapper
     assert "animation" not in wrapper
+    # the sparkle fields are painted into the sky itself, in both themes
+    for selector, theme in ((".backdrop", "dark"), (':root[data-theme="light"] .backdrop', "light")):
+        sky = rule(code, selector)
+        for n in ("a", "b"):
+            assert f'url("/static/sparkles-{theme}-{n}.svg")' in sky, (theme, n)
 
 
 def test_light_theme_is_a_blue_sky_with_white_text_on_it(css):
@@ -277,34 +283,84 @@ def test_light_theme_is_a_blue_sky_with_white_text_on_it(css):
     assert "--ink: #1B1938" in cards and "text-shadow: none" in cards
 
 
-def test_background_steps_on_one_slow_clock_and_stops_when_asked(css):
+def motion_block(css):
     code = without_comments(css)
     first = code.index(':root:not([data-motion="off"]) .glow-a')
     motion = code[code.rindex("@media (prefers-reduced-motion: no-preference) {", 0, first):]
-    motion = motion[:motion.index("\n}\n")]
-    frames = keyframes(css)
-    rules = re.findall(r"^\s+(:root:not\(\[data-motion=\"off\"\]\) [^{]+)\{([^}]*)\}", motion, re.M)
-    assert len(rules) >= 8
-    current = {}
+    return motion[:motion.index("\n}\n")]
+
+
+def backdrop_animations(css):
+    """{selector: {name, duration, timing, delay}} for every rule of the
+    backdrop's motion block, later rules filling in from the base rule."""
+    rules = re.findall(r"^\s+(:root:not\(\[data-motion=\"off\"\]\) [^{]+)\{([^}]*)\}", motion_block(css), re.M)
+    found, base = {}, {}
     for selector, body in rules:
         decl = dict(re.findall(r"(animation(?:-[\w-]+)?):\s*([^;]+);", body))
         if "animation" in decl:
-            name, duration, steps = re.match(r"([\w-]+) ([\d.]+)s steps\((\d+)\)", decl["animation"]).groups()
-            current = {"name": name, "duration": float(duration), "steps": int(steps)}
-            entry = dict(current)
+            parts = decl["animation"].split()
+            times = [float(p.rstrip("s")) for p in parts if re.fullmatch(r"-?[\d.]+s", p)]
+            base[selector.split(":")[-1].split()[-1].split(":")[0]] = entry = {
+                "name": parts[0], "duration": times[0], "delay": times[1] if len(times) > 1 else 0.0,
+                "timing": next(p for p in parts if p in ("linear", "ease-in-out", "ease", "ease-in", "ease-out")
+                               or p.startswith(("steps(", "cubic-bezier("))),
+                "text": decl["animation"]}
         else:
-            entry = dict(current)
+            cls = re.search(r"\.([\w-]+):nth-child", selector).group(1)
+            entry = dict(base["." + cls])
+            entry["text"] = body
             if "animation-duration" in decl:
                 entry["duration"] = float(decl["animation-duration"].rstrip("s"))
+            if "animation-delay" in decl:
+                entry["delay"] = float(decl["animation-delay"].rstrip("s"))
             if "animation-timing-function" in decl:
-                entry["steps"] = int(re.match(r"steps\((\d+)\)", decl["animation-timing-function"]).group(1))
-        if "animation-delay" in decl:
-            delay = abs(float(decl["animation-delay"].rstrip("s")))
-            assert (delay / STEP).is_integer(), selector
-        segments = len(frames[entry["name"]][0]) - 1 or 1
-        step = entry["duration"] / segments / entry["steps"]
-        assert abs(step - STEP) < 1e-9, (selector, step)
+                entry["timing"] = decl["animation-timing-function"].strip()
+        found[selector.strip()] = entry
+    return found
+
+
+def test_background_moves_smoothly_at_a_calm_but_visible_pace(css):
+    """Continuous motion at the display's frame rate (no steps(), which looked
+    choppy): steady for what flows, eased for what breathes and twinkles."""
+    anims = backdrop_animations(css)
+    assert len(anims) >= 8
+    assert "steps(" not in motion_block(css)
+    by_name = {}
+    for selector, a in anims.items():
+        assert not a["timing"].startswith("steps("), selector
+        by_name.setdefault(a["name"], []).append(a)
+        assert "infinite" in a["text"] or "animation-" in a["text"], selector
+    assert {a["timing"] for n in ("ribbon-a", "ribbon-b", "speck") for a in by_name[n]} == {"linear"}
+    assert {a["timing"] for n in ("breathe", "twinkle") for a in by_name[n]} == {"ease-in-out"}
+    # the near ribbons 30-60 px a second (one tile per cycle), the far ones about half that
+    near = 1800 / by_name["ribbon-a"][0]["duration"]
+    far = 2100 / by_name["ribbon-b"][0]["duration"]
+    assert 30 <= near <= 60 and 0.35 <= far / near <= 0.65, (near, far)
+    # the specks drift noticeably slower than the near ribbons
+    stops = dict(keyframes(css)["speck"][0])
+    dx, dy = map(int, re.search(r"translate3d\((-?\d+)px, (-?\d+)px, 0\)", stops["100%"]).groups())
+    for a in by_name["speck"]:
+        assert 5 <= math.hypot(dx, dy) / a["duration"] <= near / 2, a
+    # a breath in and out every 10-20 s; a twinkle every few seconds
+    for a in by_name["breathe"]:
+        assert "alternate" in a["text"] and 10 <= 2 * a["duration"] <= 20, a
+    for a in by_name["twinkle"]:
+        assert 2 <= a["duration"] <= 6, a
+
+
+def test_background_stops_when_motion_is_off_or_reduced(css):
+    """Every backdrop animation is in the one block that runs only when the
+    Settings switch is on and reduced motion was not asked for."""
+    code = without_comments(css)
+    block = motion_block(css)
     assert re.search(r"@media \(prefers-reduced-motion: reduce\) \{\s*\* \{[^}]*animation: none !important", code)
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", block):
+        if "animation" in body:
+            assert selector.strip().startswith(':root:not([data-motion="off"]) '), selector.strip()
+    outside = code.replace(block, "")
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", outside):
+        if re.search(BACKDROP_CLASS, selector.split(",")[-1]):
+            assert not re.search(r"(^|[\s;])animation(-name)?\s*:", body), selector.strip()
 
 
 def test_motion_setting_is_wired_and_respects_reduced_motion(script):
@@ -313,49 +369,28 @@ def test_motion_setting_is_wired_and_respects_reduced_motion(script):
     assert "matchMedia('(prefers-reduced-motion: reduce)')" in script
 
 
-def test_theme_change_keeps_the_background_on_one_clock(css):
-    """An animation restarts when its element stops being rendered, and would
-    then step out of phase with the rest (twice the redraws). So a theme may
-    hide a backdrop layer, but never take it out with display: none."""
+def test_moving_layers_are_promoted(css):
+    """Whatever is animated sits on a compositor layer of its own, so a frame
+    is composited, never repainted."""
+    code = without_comments(css)
+    for name in ("glow", "ribbon", "speck", "mote"):
+        body = rule(code, f".{name}")
+        promoted = re.search(r"will-change:\s*([^;]+);", body)
+        assert promoted, name
+        assert set(re.split(r",\s*", promoted.group(1).strip())) <= {"transform", "opacity"}, name
+    moved = {n for n, (_, props) in keyframes(css).items() if n in BACKDROP_ANIMATIONS and "transform" in props}
+    assert moved == {"ribbon-a", "ribbon-b", "speck", "twinkle"}
+    for name in ("ribbon", "speck", "mote"):
+        assert "transform" in re.search(r"will-change:\s*([^;]+);", rule(code, f".{name}")).group(1), name
+
+
+def test_theme_change_never_takes_a_backdrop_layer_out(css):
+    """An animation restarts when its element stops being rendered; a theme
+    may hide a backdrop layer, but never take it out with display: none."""
     code = without_comments(css)
     for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", code):
-        if re.search(r"\.(glow|ribbons?|sparkles|motes?)\b", selector.split(",")[-1]):
+        if re.search(BACKDROP_CLASS, selector.split(",")[-1]):
             assert "display: none" not in body, selector.strip()
-
-
-def per_step(css):
-    """{animation name: [(dx, dy) pixels per step for each keyframe segment]},
-    for the backdrop animations that only translate."""
-    code = without_comments(css)
-    frames = keyframes(css)
-    steps = {}
-    for name, count in re.findall(r"animation: ([\w-]+) [\d.]+s steps\((\d+)\)", code):
-        steps.setdefault(name, int(count))
-    found = {}
-    for name in BACKDROP_ANIMATIONS:
-        points = []
-        for _, body in frames[name][0]:
-            move = re.search(r"transform:\s*([^;]+)", body)
-            if move is None:
-                continue
-            if not re.fullmatch(r"translate3d\((-?\d+)(?:px)?, (-?\d+)(?:px)?, 0\)", move.group(1).strip()):
-                break
-            points.append(tuple(int(v) for v in re.findall(r"-?\d+", move.group(1))[:2]))
-        else:
-            if len(points) == 1:
-                points.insert(0, (0, 0))
-            found[name] = [((b[0] - a[0]) / steps[name], (b[1] - a[1]) / steps[name]) for a, b in zip(points, points[1:])]
-    return found
-
-
-def test_layers_that_only_move_move_whole_pixels(css):
-    """A layer moved by a whole number of pixels is copied, not resampled: a
-    large part of the cost where the compositor has no GPU."""
-    moves = per_step(css)
-    assert {"drift-a", "drift-b", "drift-c", "ribbon-a", "ribbon-b", "sparkles-a", "sparkles-b"} <= set(moves)
-    for name, segments in moves.items():
-        for dx, dy in segments:
-            assert dx.is_integer() and dy.is_integer() and abs(dx) <= 3 and abs(dy) <= 3, (name, dx, dy)
 
 
 def tile(client, name):
@@ -373,7 +408,8 @@ def test_ribbon_tiles_are_seamless_and_flow_one_tile_per_cycle(client, css):
     for n in ("a", "b"):
         layer = rule(code, f".ribbon-{n}")
         size = re.search(r"background-size: (\d+)px (\d+)px", layer).groups()
-        shift = re.search(rf"@keyframes ribbon-{n} \{{ from {{ transform: translate3d\(-(\d+)px", code).group(1)
+        shift = re.search(rf"@keyframes ribbon-{n} \{{ from {{ transform: translate3d\(-(\d+)px, 0, 0\); }} "
+                          rf"to {{ transform: translate3d\(0, 0, 0\); }} \}}", code).group(1)
         for theme in ("dark", "light"):
             svg, width, height = tile(client, f"ribbons-{theme}-{n}.svg")
             assert size == (str(width), str(height)) and shift == str(width)
@@ -393,15 +429,13 @@ def test_ribbon_tiles_are_seamless_and_flow_one_tile_per_cycle(client, css):
                         assert abs(y - y2) < 0.11  # each edge carries on where the next tile starts
 
 
-def test_sparkle_tiles_wrap_and_drift_one_tile_per_cycle(client, css):
+def test_sparkle_tiles_wrap_seamlessly(client, css):
     code = without_comments(css)
-    for n in ("a", "b"):
-        size = tuple(map(int, re.search(r"background-size: (\d+)px (\d+)px", rule(code, f".sparkles-{n}")).groups()))
-        moves = re.search(rf"@keyframes sparkles-{n} \{{([^@]*)\}}", code).group(1)
-        coords = [tuple(map(int, xy)) for xy in re.findall(r"translate3d\((-?\d+)(?:px)?, (-?\d+)(?:px)?, 0\)", moves)]
-        travel = (abs(coords[1][0] - coords[0][0]), abs(coords[1][1] - coords[0][1]))
-        assert all(t in (0, s) for t, s in zip(travel, size)) and any(travel)
-        for theme in ("dark", "light"):
+    for selector, theme in ((".backdrop", "dark"), (':root[data-theme="light"] .backdrop', "light")):
+        sky = rule(code, selector)
+        for n in ("a", "b"):
+            size = tuple(map(int, re.search(rf'url\("/static/sparkles-{theme}-{n}\.svg"\) 0 0 / (\d+)px (\d+)px repeat',
+                                            sky).groups()))
             svg, width, height = tile(client, f"sparkles-{theme}-{n}.svg")
             assert (width, height) == size
             dots = [(float(x), float(y), float(r)) for x, y, r in

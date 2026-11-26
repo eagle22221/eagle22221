@@ -1,20 +1,25 @@
 /* vex Pro — rounded glassy cards with thin borders and icon-led headings on
    one continuous sky: the sidebar has no panel of its own (except on phones),
    so it and the main area share the background. Two skies: dark (the default)
-   is deep navy with drifting violet glows and violet ribbons of light; light
+   is deep navy with breathing violet glows and violet ribbons of light; light
    is a deep-to-bright blue with a warm glow at the left, a cyan glow at the
    bottom left and white ribbons. In both, translucent ribbons with bright thin
-   edges rise from the lower left towards the right and flow slowly along
-   themselves, and sparkles drift and twinkle. All of it is transform/opacity
-   animation on composited layers, stepped on one slow clock, so the GPU does
-   the work; it stops under prefers-reduced-motion or when turned off in
-   Settings. In the light theme, text that sits on the sky is white and text
-   on cards, menus and dialogs is dark. White text keeps WCAG AA contrast with
-   what is really behind it (a text shadow does not count): the sky stays deep
-   where such text sits, the ribbons rise below the menu and the headings,
-   sparkles are too small to wash out a letter, and where a ribbon can still
-   pass (the credit, a note low on the page, everything on a phone) the text
-   has a backing of its own. */
+   edges rise from the lower left towards the right and flow steadily along
+   themselves over a field of fine sparkles, specks of light drift up and
+   motes twinkle. The motion is smooth, at the display's frame rate (linear
+   for what flows, eased for what breathes and twinkles), and calm: the near
+   ribbons cross a 1440 px window in about half a minute. It is all transform
+   and opacity animation of compositor layers, never a filter, so nothing is
+   repainted; and to keep each frame cheap where there is no GPU, whatever
+   does not move is painted into the sky itself and the moving layers are
+   few and as small as they can be. It stops under prefers-reduced-motion or
+   when turned off in Settings. In the light theme, text that sits on the sky
+   is white and text on cards, menus and dialogs is dark. White text keeps
+   WCAG AA contrast with what is really behind it (a text shadow does not
+   count): the sky stays deep where such text sits, the ribbons rise below
+   the menu and the headings, sparkles are too small to wash out a letter,
+   and where a ribbon can still pass (the credit, a note low on the page,
+   everything on a phone) the text has a backing of its own. */
 
 @font-face { font-family: "Inter"; font-weight: 400; font-display: swap;
   src: url("/static/fonts/inter-latin-400-normal.woff2") format("woff2"); }
@@ -203,49 +208,54 @@ a { color: var(--link); }
 * { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 
 /* --- animated backdrop -------------------------------------------------- */
-/* One sky behind the sidebar and the main area. From the back: three large,
-   very soft radial-gradient glows (dark theme; no blur filter) drifting and
-   breathing; a far layer of soft sparkles; two layers of ribbons; a near
-   layer of fine sparkles; and a few motes that twinkle.
+/* One sky behind the sidebar and the main area. From the back: the sky
+   itself, painted once and never repainted: its gradient, two fields of fine
+   sparkles (SVG tiles that repeat across and down) and, in the dark theme,
+   three large, very soft radial-gradient glows; then a brighter core for each
+   glow that breathes in and out; two layers of ribbons; specks of light that
+   drift slowly up through the sky; and motes that twinkle.
    Each ribbon layer is an SVG tile that repeats seamlessly across (its glow
    is drawn into the tile), repeated across an element one tile wider than
-   the window; flowing moves it by exactly one tile per cycle, so
-   the loop never shows. The ribbons in a tile run level: a fixed skew on the
-   layer's parent tilts them so they rise from below the sidebar menu at the
-   lower left towards the right (each layer at its own angle, so they fan
-   out), and the flow carries the light along them. The sparkle layers are
-   tiles that repeat across and down, drifting by exactly one tile per cycle.
-   Only transform and opacity are animated, each element on its own
-   compositor layer, so nothing is repainted.
-   The motion is so slow (a few pixels a second) that it is stepped rather
-   than run at the display's frame rate: everything moves four times a
-   second, on one shared 250 ms clock (every step, duration and delay is a
-   multiple of it), so the screen is redrawn at most four times a second.
-   A step is a pixel or two, too little to see at this speed, and it is a
-   small fraction of the work — which matters where the compositor has no
-   GPU (software rendering, remote desktops, virtual machines). For the same
-   reason every layer that only moves moves a whole number of pixels a step
-   (the compositor then copies it rather than resampling it), and a theme
-   hides a layer rather than removing it, since a removed layer's animation
-   would restart out of step with the rest. */
+   the window; flowing moves it by exactly one tile per cycle, so the loop
+   never shows. The ribbons in a tile run level: a fixed skew on the layer's
+   parent tilts them so they rise from below the sidebar menu at the lower
+   left towards the right (each layer at its own angle, so they fan out), and
+   the flow carries the light along them.
+   Only transform and opacity are animated, each moving element on its own
+   compositor layer, so nothing is repainted. The cost of a frame is then the
+   area of the layers the compositor blends, which matters where it has no
+   GPU (software rendering, remote desktops, virtual machines); so what does
+   not need to move is part of the sky rather than a layer of its own, the
+   breathing cores are smaller than the glows they light, and the specks and
+   motes are a few small elements instead of screen-sized tiles. A theme
+   hides a layer rather than removing it (display: none would drop it from
+   the page and restart its animation). */
 .backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; contain: strict;
-  background: radial-gradient(120% 80% at 50% -10%, var(--paper-2), var(--paper) 60%); }
+  background:
+    url("/static/sparkles-dark-a.svg") 0 0 / 480px 480px repeat,
+    url("/static/sparkles-dark-b.svg") 0 0 / 840px 630px repeat,
+    radial-gradient(40vmax 30vmax at calc(16vw + 40vmax) -7vmax, color-mix(in srgb, var(--glow-a) 70%, transparent), transparent),
+    radial-gradient(35vmax 35vmax at 5vmax calc(32vh + 35vmax), color-mix(in srgb, var(--glow-b) 70%, transparent), transparent),
+    radial-gradient(32vmax 28vmax at calc(100vw - 6vmax) calc(18vh + 28vmax), color-mix(in srgb, var(--glow-c) 70%, transparent), transparent),
+    radial-gradient(120% 80% at 50% -10%, var(--paper-2), var(--paper) 60%); }
 :root[data-theme="light"] body { background: #1D4ED4; }
 :root[data-theme="light"] .backdrop {
   background:
+    url("/static/sparkles-light-a.svg") 0 0 / 480px 480px repeat,
+    url("/static/sparkles-light-b.svg") 0 0 / 840px 630px repeat,
     radial-gradient(140px 130px at -40px max(80%, 720px), rgba(255, 196, 170, .7), transparent 80%),
     radial-gradient(52% 48% at 14% 108%, rgba(118, 228, 242, .85), transparent 70%),
     linear-gradient(150deg, #1636B8 0%, #1A45CE 30%, #1F5AE0 54%, #2F86EA 78%, #49B7EA 100%);
 }
-.glow { position: absolute; border-radius: 50%; will-change: transform, opacity; }
-.glow-a { width: 80vmax; height: 60vmax; left: 16vw; top: -37vmax;
+/* the breathing cores: the same gradient as their glow, 60% of its size and
+   on the same centre, fading in to .45 and out again */
+.glow { position: absolute; border-radius: 50%; opacity: .45; will-change: opacity; }
+.glow-a { width: 48vmax; height: 36vmax; left: calc(16vw + 16vmax); top: -25vmax;
   background: radial-gradient(closest-side, var(--glow-a), transparent); }
-.glow-b { width: 70vmax; height: 70vmax; left: -30vmax; top: 32vh;
+.glow-b { width: 42vmax; height: 42vmax; left: -16vmax; top: calc(32vh + 14vmax);
   background: radial-gradient(closest-side, var(--glow-b), transparent); }
-.glow-c { width: 64vmax; height: 56vmax; right: -26vmax; top: 18vh;
+.glow-c { width: 38.4vmax; height: 33.6vmax; right: -13.2vmax; top: calc(18vh + 11.2vmax);
   background: radial-gradient(closest-side, var(--glow-c), transparent); }
-/* hidden rather than removed in the light theme, so their animations keep
-   to the shared clock when the theme changes back */
 :root[data-theme="light"] .glow { visibility: hidden; }
 
 /* ribbons: --rise-x is where a layer's centre line meets the bottom of the
@@ -264,16 +274,31 @@ a { color: var(--link); }
 :root[data-theme="light"] .ribbon-a { background-image: url("/static/ribbons-light-a.svg"); }
 :root[data-theme="light"] .ribbon-b { background-image: url("/static/ribbons-light-b.svg"); }
 
-/* sparkles */
-.sparkles { position: absolute; left: 0; top: 0; will-change: transform; background-repeat: repeat; background-position: 0 0; }
-.sparkles-a { width: calc(100% + 480px); height: calc(100% + 480px); background-size: 480px 480px; background-image: url("/static/sparkles-dark-a.svg"); }
-.sparkles-b { width: 100%; height: calc(100% + 630px); background-size: 840px 630px; background-image: url("/static/sparkles-dark-b.svg"); }
-:root[data-theme="light"] .sparkles-a { background-image: url("/static/sparkles-light-a.svg"); }
-:root[data-theme="light"] .sparkles-b { background-image: url("/static/sparkles-light-b.svg"); }
+/* specks: points of light that fade in, drift up and to the right and fade
+   out, each on its own rhythm */
+.specks, .motes { position: absolute; inset: 0; }
+.speck {
+  position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; opacity: .6;
+  background: radial-gradient(circle, var(--spark) 0 .9px, var(--spark-halo) 1.4px, transparent 4px);
+  will-change: transform, opacity;
+}
+.speck:nth-child(4n+1) { width: 12px; height: 12px; margin: -6px 0 0 -6px;
+  background: radial-gradient(circle, var(--spark) 0 1.2px, var(--spark-halo) 2px, transparent 6px); }
+.speck:nth-child(1) { left: 6%; top: 96%; } .speck:nth-child(2) { left: 17%; top: 62%; }
+.speck:nth-child(3) { left: 27%; top: 88%; } .speck:nth-child(4) { left: 36%; top: 47%; }
+.speck:nth-child(5) { left: 44%; top: 99%; } .speck:nth-child(6) { left: 51%; top: 70%; }
+.speck:nth-child(7) { left: 59%; top: 38%; } .speck:nth-child(8) { left: 66%; top: 93%; }
+.speck:nth-child(9) { left: 74%; top: 60%; } .speck:nth-child(10) { left: 82%; top: 84%; }
+.speck:nth-child(11) { left: 89%; top: 34%; } .speck:nth-child(12) { left: 3%; top: 55%; }
+.speck:nth-child(13) { left: 12%; top: 30%; } .speck:nth-child(14) { left: 23%; top: 18%; }
+.speck:nth-child(15) { left: 40%; top: 76%; } .speck:nth-child(16) { left: 47%; top: 26%; }
+.speck:nth-child(17) { left: 63%; top: 15%; } .speck:nth-child(18) { left: 70%; top: 52%; }
+.speck:nth-child(19) { left: 78%; top: 28%; } .speck:nth-child(20) { left: 93%; top: 72%; }
+.speck:nth-child(21) { left: 31%; top: 68%; } .speck:nth-child(22) { left: 55%; top: 57%; }
+.speck:nth-child(23) { left: 86%; top: 101%; } .speck:nth-child(24) { left: 9%; top: 79%; }
 
 /* motes: points of light that swell, drift up a little and fade; placed
    clear of where headings and the menu's text sit */
-.motes { position: absolute; inset: 0; }
 .mote {
   position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; opacity: .6;
   background: radial-gradient(circle, var(--spark) 0 1.1px, var(--spark-halo) 1.7px, transparent 5px);
@@ -296,46 +321,44 @@ a { color: var(--link); }
 .mote:nth-child(15) { left: 89%; top: 66%; } .mote:nth-child(16) { left: 4%; top: 88%; }
 .mote:nth-child(17) { left: 53%; top: 44%; } .mote:nth-child(18) { left: 81%; top: 51%; }
 
+/* With motion off (the Settings switch, or reduced motion asked for) none of
+   this runs and the sky is a still picture: glows at their brightest, specks
+   and motes where they start. */
 @media (prefers-reduced-motion: no-preference) {
-  /* glows: steps per keyframe segment (= duration / 2) x 250 ms; each step
-     moves them a whole number of pixels, which the compositor draws faster */
-  :root:not([data-motion="off"]) .glow-a { animation: drift-a 38s steps(76) infinite alternate; }
-  :root:not([data-motion="off"]) .glow-b { animation: drift-b 46s steps(92) infinite alternate; }
-  :root:not([data-motion="off"]) .glow-c { animation: drift-c 54s steps(108) infinite alternate; }
-  /* ribbons: one tile per cycle, a single segment, whole pixels a step (2 for
-     the near layer, 1 for the far one) */
-  :root:not([data-motion="off"]) .ribbon-a { animation: ribbon-a 225s steps(900) infinite; }
-  :root:not([data-motion="off"]) .ribbon-b { animation: ribbon-b 525s steps(2100) infinite; }
-  /* sparkles: one tile per cycle, a single segment, a whole pixel a step */
-  :root:not([data-motion="off"]) .sparkles-a { animation: sparkles-a 120s steps(480) infinite; }
-  :root:not([data-motion="off"]) .sparkles-b { animation: sparkles-b 157.5s steps(630) infinite; }
-  /* motes: two keyframe segments */
-  :root:not([data-motion="off"]) .mote { animation: twinkle 6s steps(12) infinite; }
-  :root:not([data-motion="off"]) .mote:nth-child(2n) { animation-duration: 7.5s; animation-timing-function: steps(15); animation-delay: -2.5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(3n) { animation-duration: 9s; animation-timing-function: steps(18); animation-delay: -4.75s; }
-  :root:not([data-motion="off"]) .mote:nth-child(5n) { animation-duration: 5s; animation-timing-function: steps(10); animation-delay: -1.5s; }
-  :root:not([data-motion="off"]) .mote:nth-child(7n) { animation-delay: -3.25s; }
+  /* glows: one breath in and out every 14 to 20 s */
+  :root:not([data-motion="off"]) .glow-a { animation: breathe 7s ease-in-out infinite alternate; }
+  :root:not([data-motion="off"]) .glow-b { animation: breathe 8.5s ease-in-out -3s infinite alternate; }
+  :root:not([data-motion="off"]) .glow-c { animation: breathe 10s ease-in-out -6.5s infinite alternate; }
+  /* ribbons: one tile per cycle at a steady pace (at 1440 px wide, the near
+     layer 45 px a second, the far one 23) */
+  :root:not([data-motion="off"]) .ribbon-a { animation: ribbon-a 40s linear infinite; }
+  :root:not([data-motion="off"]) .ribbon-b { animation: ribbon-b 90s linear infinite; }
+  /* specks: 290 px in 19 to 29 s, 10 to 15 px a second */
+  :root:not([data-motion="off"]) .speck { animation: speck 23s linear infinite; }
+  :root:not([data-motion="off"]) .speck:nth-child(2n) { animation-duration: 19s; }
+  :root:not([data-motion="off"]) .speck:nth-child(3n) { animation-duration: 29s; }
+  :root:not([data-motion="off"]) .speck:nth-child(5n) { animation-duration: 26s; }
+  :root:not([data-motion="off"]) .speck:nth-child(6n+1) { animation-delay: -4s; }
+  :root:not([data-motion="off"]) .speck:nth-child(6n+2) { animation-delay: -15s; }
+  :root:not([data-motion="off"]) .speck:nth-child(6n+3) { animation-delay: -8s; }
+  :root:not([data-motion="off"]) .speck:nth-child(6n+4) { animation-delay: -19s; }
+  :root:not([data-motion="off"]) .speck:nth-child(6n+5) { animation-delay: -11s; }
+  /* motes: a twinkle every 3 to 5 s */
+  :root:not([data-motion="off"]) .mote { animation: twinkle 3.6s ease-in-out infinite; }
+  :root:not([data-motion="off"]) .mote:nth-child(2n) { animation-duration: 4.4s; animation-delay: -1.5s; }
+  :root:not([data-motion="off"]) .mote:nth-child(3n) { animation-duration: 5s; animation-delay: -2.8s; }
+  :root:not([data-motion="off"]) .mote:nth-child(5n) { animation-duration: 3s; animation-delay: -.9s; }
+  :root:not([data-motion="off"]) .mote:nth-child(7n) { animation-delay: -2.1s; }
 }
-/* every leg is a whole number of pixels per step (76, 92 and 108 steps) */
-@keyframes drift-a {
-  0% { transform: translate3d(0, 0, 0); opacity: .8; }
-  50% { transform: translate3d(-152px, 76px, 0); opacity: 1; }
-  100% { transform: translate3d(76px, 0, 0); opacity: .74; }
-}
-@keyframes drift-b {
-  0% { transform: translate3d(0, 0, 0); opacity: .7; }
-  50% { transform: translate3d(184px, -184px, 0); opacity: 1; }
-  100% { transform: translate3d(92px, 92px, 0); opacity: .8; }
-}
-@keyframes drift-c {
-  0% { transform: translate3d(0, 0, 0); opacity: .65; }
-  50% { transform: translate3d(-216px, 108px, 0); opacity: 1; }
-  100% { transform: translate3d(-108px, -108px, 0); opacity: .7; }
-}
+@keyframes breathe { from { opacity: 0; } to { opacity: .45; } }
 @keyframes ribbon-a { from { transform: translate3d(-1800px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
 @keyframes ribbon-b { from { transform: translate3d(-2100px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
-@keyframes sparkles-a { from { transform: translate3d(-480px, 0, 0); } to { transform: translate3d(0, -480px, 0); } }
-@keyframes sparkles-b { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(0, -630px, 0); } }
+@keyframes speck {
+  0% { transform: translate3d(0, 0, 0); opacity: 0; }
+  15% { opacity: .9; }
+  80% { opacity: .9; }
+  100% { transform: translate3d(110px, -270px, 0); opacity: 0; }
+}
 @keyframes twinkle {
   0% { transform: translate3d(0, 0, 0) scale(.4); opacity: 0; }
   50% { transform: translate3d(3px, -9px, 0) scale(1); opacity: 1; }
